@@ -38,51 +38,50 @@ class TilingEngine: ObservableObject {
     /// Run tiling on the given screen
     func tile(on screen: NSScreen) {
         let allWindows = accessibilityManager.getAllWindows()
-        
-        // Filter to windows on this screen
-        // Needs conversion between the Accessibility API's coordinate system (origin top-left) and NSScreen's (origin bottom-left)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        
-        let windowsOnScreen = allWindows.filter { window in
-            // Windows that are managed and not floating
-            guard window.shouldBeManaged() && !window.shouldFloat() else {
-                return false
-            }
-            
-            // Convert the window's position to the NSScreen coordinate system
-            let windowY = mainScreenHeight - window.frame.origin.y - window.frame.height
-            let windowCenter = CGPoint(
-                x: window.frame.midX,
-                y: windowY + window.frame.height / 2
-            )
-            
-            return screen.frame.contains(windowCenter)
+
+        // Filter to managed windows (regardless of position)
+        let managedWindows = allWindows.filter { window in
+            window.shouldBeManaged() && !window.shouldFloat()
         }
-        
-        // Add the new window while preserving the existing column structure
+
+        // The set of all window IDs
+        let allWindowIDs = Set(managedWindows.map { $0.id })
+
+        // A dictionary of all windows (ID -> WindowInfo)
+        let windowDict = Dictionary(uniqueKeysWithValues: managedWindows.map { ($0.id, $0) })
+
+        // Get the existing column structure
         var columns = tiledWindows[screen] ?? []
 
-        // Collect the window IDs contained in the current column
+        // Collect the window IDs already present in the column structure
         let existingWindowIDs = Set(columns.flatMap { $0.map { $0.id } })
 
-        // Add new windows (ones not already in a column)
-        for window in windowsOnScreen {
-            if !existingWindowIDs.contains(window.id) {
-                // Add the new window as its own separate column
-                columns.append([window])
-            }
-        }
-
-        // Remove closed windows
-        let currentWindowIDs = Set(windowsOnScreen.map { $0.id })
+        // Remove closed windows from the column structure
         columns = columns.map { column in
-            column.filter { currentWindowIDs.contains($0.id) }
+            column.filter { allWindowIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
 
-        // Refresh the window info to the latest
-        let windowDict = Dictionary(uniqueKeysWithValues: windowsOnScreen.map { ($0.id, $0) })
+        // Refresh window info (keep the column structure intact)
         columns = columns.map { column in
             column.compactMap { windowDict[$0.id] }
+        }
+
+        // Add new windows (ones not already in a column)
+        // Determine the screen from the position
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        for window in managedWindows {
+            if !existingWindowIDs.contains(window.id) {
+                // Check whether it's on this screen
+                let windowY = mainScreenHeight - window.frame.origin.y - window.frame.height
+                let windowCenter = CGPoint(
+                    x: window.frame.midX,
+                    y: windowY + window.frame.height / 2
+                )
+                if screen.frame.contains(windowCenter) {
+                    // Add the new window as its own separate column
+                    columns.append([window])
+                }
+            }
         }
 
         // Compute and apply the tiling layout
@@ -164,10 +163,22 @@ class TilingEngine: ObservableObject {
 
         if let target = targetWindow {
             target.focus()
+            moveCursorToWindow(target)
             print("[Axis] Focused window: \(target.title)")
         } else {
             print("[Axis] No target window found")
         }
+    }
+
+    /// Move the mouse cursor to the window's center
+    private func moveCursorToWindow(_ window: WindowInfo) {
+        // Calculate the window's center coordinates (Accessibility coordinate system: origin top-left)
+        let centerX = window.frame.midX
+        let centerY = window.frame.midY
+
+        // CGWarpMouseCursorPosition uses a top-left origin, so it can be used as-is
+        CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
+        print("[Axis] Moved cursor to window center: (\(centerX), \(centerY))")
     }
 
     /// Look up a window's position (column index, row index) within the column structure
@@ -195,27 +206,13 @@ class TilingEngine: ObservableObject {
         switch direction {
         case .left:
             if columnIndex > 0 {
-                // Remove from the current column
-                columns[columnIndex].remove(at: rowIndex)
-                // Add to the column on the left
-                let targetRow = min(rowIndex, columns[columnIndex - 1].count)
-                columns[columnIndex - 1].insert(currentWindow, at: targetRow)
-                // Remove columns that have become empty
-                if columns[columnIndex].isEmpty {
-                    columns.remove(at: columnIndex)
-                }
+                // Swap the whole columns
+                columns.swapAt(columnIndex, columnIndex - 1)
             }
         case .right:
             if columnIndex < columns.count - 1 {
-                // Remove from the current column
-                columns[columnIndex].remove(at: rowIndex)
-                // Add to the column on the right
-                let targetRow = min(rowIndex, columns[columnIndex + 1].count)
-                columns[columnIndex + 1].insert(currentWindow, at: targetRow)
-                // Remove columns that have become empty
-                if columns[columnIndex].isEmpty {
-                    columns.remove(at: columnIndex)
-                }
+                // Swap the whole columns
+                columns.swapAt(columnIndex, columnIndex + 1)
             }
         case .up:
             if rowIndex > 0 {
