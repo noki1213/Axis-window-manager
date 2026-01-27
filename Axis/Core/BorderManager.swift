@@ -93,8 +93,10 @@ class BorderManager: ObservableObject {
         self.currentWindowID = focusedWindow.id
         
         if windowChanged {
-            // If the window changed: discard the old one and create a new one!
-            borderWindow?.close()
+            // If the window changed: make sure to remove the old one before creating a new one!
+            if let oldWindow = borderWindow {
+                oldWindow.close()
+            }
             borderWindow = nil
             borderView = nil
             
@@ -186,7 +188,12 @@ class BorderManager: ObservableObject {
     }
     
     func hideBorder() {
-        borderWindow?.orderOut(nil)
+        // Make sure the window is destroyed (guards against a bug where two get shown)
+        if let oldWindow = borderWindow {
+            oldWindow.close()
+        }
+        borderWindow = nil
+        borderView = nil
         currentWindow = nil
         currentWindowID = nil
     }
