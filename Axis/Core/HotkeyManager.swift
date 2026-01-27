@@ -338,45 +338,41 @@ class HotkeyManager: ObservableObject {
             windowSelectManager.mergeSelectedWindowsVertically()
             return true
         }
-        
-        // Only handle JKLI when ctrl+option is held down
-        guard hasModifier else {
-            return false
-        }
-        
+
+        // JKLI handling (works with or without ctrl+option)
         switch Int(event.keyCode) {
         case kVK_ANSI_J: // 左
-            if hasShift {
+            if hasShift || (hasModifier && hasShift) {
                 windowSelectManager.moveSelectedWindows(direction: .left)
             } else {
                 tilingEngine.moveFocus(direction: .left)
             }
             return true
-            
+
         case kVK_ANSI_L: // 右
-            if hasShift {
+            if hasShift || (hasModifier && hasShift) {
                 windowSelectManager.moveSelectedWindows(direction: .right)
             } else {
                 tilingEngine.moveFocus(direction: .right)
             }
             return true
-            
+
         case kVK_ANSI_I: // 上
-            if hasShift {
+            if hasShift || (hasModifier && hasShift) {
                 windowSelectManager.moveSelectedWindows(direction: .up)
             } else {
                 tilingEngine.moveFocus(direction: .up)
             }
             return true
-            
+
         case kVK_ANSI_K: // 下
-            if hasShift {
+            if hasShift || (hasModifier && hasShift) {
                 windowSelectManager.moveSelectedWindows(direction: .down)
             } else {
                 tilingEngine.moveFocus(direction: .down)
             }
             return true
-            
+
         default:
             return false
         }
@@ -394,11 +390,7 @@ class HotkeyManager: ObservableObject {
             return true
         }
 
-        // Only handle JKLI when ctrl+option is held down
-        guard hasModifier else {
-            return false
-        }
-
+        // JKLI handling (works with or without ctrl+option)
         switch Int(event.keyCode) {
         case kVK_ANSI_J: // 左
             if gapSelectManager.state == .resizing {

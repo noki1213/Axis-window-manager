@@ -519,9 +519,26 @@ class TilingEngine: ObservableObject {
 
         // Use the existing ratio if there is one
         if let existingRatios = columnWidthRatios[screen], existingRatios.count == columns.count {
+            // Also check the row ratios and reset them if the window count changed
+            var needsRowRatioReset = false
+            if let allRowRatios = rowHeightRatios[screen] {
+                for (colIndex, column) in columns.enumerated() {
+                    if let ratios = allRowRatios[colIndex], ratios.count != column.count {
+                        needsRowRatioReset = true
+                        break
+                    }
+                }
+            }
+            if needsRowRatioReset {
+                rowHeightRatios[screen] = nil
+            }
             applyColumnTilingWithRatios(columns: columns, ratios: existingRatios, on: screen)
             return
         }
+
+        // Reset the ratios if the number of columns changed
+        columnWidthRatios[screen] = nil
+        rowHeightRatios[screen] = nil
 
         let visibleFrame = screen.visibleFrame
         let columnCount = CGFloat(columns.count)
@@ -863,8 +880,20 @@ class TilingEngine: ObservableObject {
         guard !columns.isEmpty else { return }
         guard columns.count == ratios.count else {
             // Fall back to normal tiling if the ratios don't match
+            columnWidthRatios[screen] = nil
+            rowHeightRatios[screen] = nil
             applyColumnTiling(columns: columns, on: screen)
             return
+        }
+
+        // Check the row ratios and clear that column's ratio if the window count changed
+        if var allRowRatios = rowHeightRatios[screen] {
+            for (colIndex, column) in columns.enumerated() {
+                if let colRatios = allRowRatios[colIndex], colRatios.count != column.count {
+                    allRowRatios[colIndex] = nil
+                }
+            }
+            rowHeightRatios[screen] = allRowRatios
         }
 
         let visibleFrame = screen.visibleFrame
