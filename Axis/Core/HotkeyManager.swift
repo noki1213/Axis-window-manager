@@ -525,7 +525,8 @@ class HotkeyManager: ObservableObject {
             return true
 
         default:
-            return false
+            // Block every key while in this mode (don't pass them to the app)
+            return true
         }
     }
 
@@ -584,7 +585,8 @@ class HotkeyManager: ObservableObject {
             return true
 
         default:
-            return false
+            // Block every key while in this mode (don't pass them to the app)
+            return true
         }
     }
 }
