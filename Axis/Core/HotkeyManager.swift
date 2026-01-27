@@ -25,13 +25,19 @@ class HotkeyManager: ObservableObject {
     
     // MARK: - Modifier Keys
     
-    /// ctrl + option
+    /// ctrl + option (for CGEventFlags)
+    private let requiredFlags: CGEventFlags = [.maskControl, .maskAlternate]
+    
+    /// ctrl + option (for NSEvent.ModifierFlags)
     private let modifierMask: NSEvent.ModifierFlags = [.control, .option]
     
-    // MARK: - Event Tap (low-level event monitoring; can block events)
+    // MARK: - Event Tap (low-level event monitoring)
     
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    
+    // For periodic health checks
+    private var heartbeatTimer: Timer?
     
     private let tilingEngine = TilingEngine.shared
     private let windowSelectManager = WindowSelectManager.shared
@@ -44,52 +50,72 @@ class HotkeyManager: ObservableObject {
     /// Start hotkey monitoring
     func start() {
         setupEventTap()
+        startHeartbeat()
     }
     
     /// Stop hotkey monitoring
     func stop() {
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        if let runLoopSource = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        }
-        eventTap = nil
-        runLoopSource = nil
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+        destroyEventTap()
+    }
+    
+    /// Force a restart (for calling from the menu, etc.)
+    func restart() {
+        stop()
+        start()
     }
     
     // MARK: - Event Tap Setup
     
     private func setupEventTap() {
-        // The event tap's callback
+        // Do nothing if it already exists (or recreate it)
+        if eventTap != nil { return }
+
+            // The event tap's callback
         let callback: CGEventTapCallBack = { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
             guard let refcon = refcon else {
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             }
             
             let hotkeyManager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
             
-            // Re-enable the tap if it got disabled
+            // Try to re-enable the tap if it got disabled
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                print("[Axis] Event tap disabled by system (type: \(type.rawValue)). Re-enabling...")
+                
+                // Re-enable it immediately
                 if let tap = hotkeyManager.eventTap {
                     CGEvent.tapEnable(tap: tap, enable: true)
                 }
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             }
             
             // Only handle key-down events
             guard type == .keyDown else {
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             }
             
-            // Convert to NSEvent
+            // Filter according to the processing mode
+            // In normal mode Ctrl + Option is required, so anything else passes through immediately (for efficiency)
+            if hotkeyManager.currentMode == .normal {
+                let flags = event.flags
+                // Ignore unless both .maskControl and .maskAlternate are present
+                // Note: check with a bitwise operation: (flags & required) == required
+                if !flags.contains(hotkeyManager.requiredFlags) {
+                    return Unmanaged.passUnretained(event)
+                }
+            }
+            
+            // From here on it might be relevant, so convert to NSEvent for a detailed check
+            // Note: NSEvent conversion is expensive, so do it after the filtering above
             guard let nsEvent = NSEvent(cgEvent: event) else {
-                return Unmanaged.passRetained(event)
+                return Unmanaged.passUnretained(event)
             }
             
             // Handle the event and return nil if it should be consumed
             if hotkeyManager.handleKeyEvent(nsEvent) {
-                return nil // イベントを消費（他のアプリに送らない）
+                return nil // イベントを消費
             }
             
             return Unmanaged.passRetained(event)
@@ -120,6 +146,49 @@ class HotkeyManager: ObservableObject {
         }
     }
     
+    private func destroyEventTap() {
+        if let eventTap = eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        if let runLoopSource = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        }
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    // MARK: - Heartbeat (Self-Healing)
+    
+    /// Periodically check whether the Event Tap is alive, and revive it if it's dead
+    private func startHeartbeat() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.checkEventTapHealth()
+        }
+    }
+    
+    private func checkEventTapHealth() {
+        guard let tap = eventTap else {
+            // Recreate it if nil
+            print("[Axis] Heartbeat: Event tap is missing. Restarting...")
+            setupEventTap()
+            return
+        }
+        
+        // Check whether the tap is enabled
+        if !CGEvent.tapIsEnabled(tap: tap) {
+            print("[Axis] Heartbeat: Event tap is disabled. Re-enabling...")
+            CGEvent.tapEnable(tap: tap, enable: true)
+            
+            // Recreate it if that still doesn't work
+            if !CGEvent.tapIsEnabled(tap: tap) {
+                print("[Axis] Heartbeat: Failed to re-enable. Recreating...")
+                stop()
+                start()
+            }
+        }
+    }
+    
     // MARK: - Key Event Handling
     
     @discardableResult
@@ -127,13 +196,17 @@ class HotkeyManager: ObservableObject {
         // Return to normal mode with Escape
         if event.keyCode == kVK_Escape {
             if currentMode == .gapSelect {
-                gapSelectManager.endGapSelectMode()
-                currentMode = .normal
-                NotificationCenter.default.post(name: .modeChanged, object: currentMode)
+                DispatchQueue.main.async { [weak self] in
+                    self?.gapSelectManager.endGapSelectMode()
+                    self?.currentMode = .normal
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
                 return true
             } else if currentMode != .normal {
-                currentMode = .normal
-                NotificationCenter.default.post(name: .modeChanged, object: currentMode)
+                DispatchQueue.main.async { [weak self] in
+                    self?.currentMode = .normal
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
                 return true
             }
             return false
@@ -150,6 +223,7 @@ class HotkeyManager: ObservableObject {
         }
 
         // Check whether ctrl+option is held down
+        // (Already filtered on the EventTap side, but check again here just in case)
         guard event.modifierFlags.contains(modifierMask) else {
             return false
         }
@@ -160,76 +234,121 @@ class HotkeyManager: ObservableObject {
         switch Int(event.keyCode) {
         // MARK: Focus / Move (JKLI)
         case kVK_ANSI_J: // 左
-            if hasShift {
-                tilingEngine.moveWindow(direction: .left)
-            } else {
-                tilingEngine.moveFocus(direction: .left)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    self?.tilingEngine.moveWindow(direction: .left)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .left)
+                    // Briefly show the border at the destination even in normal mode
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                }
             }
             return true
             
         case kVK_ANSI_L: // 右
-            if hasShift {
-                tilingEngine.moveWindow(direction: .right)
-            } else {
-                tilingEngine.moveFocus(direction: .right)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    self?.tilingEngine.moveWindow(direction: .right)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .right)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                }
             }
             return true
             
         case kVK_ANSI_I: // 上
-            if hasShift {
-                tilingEngine.moveWindow(direction: .up)
-            } else {
-                tilingEngine.moveFocus(direction: .up)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    self?.tilingEngine.moveWindow(direction: .up)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .up)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                }
             }
             return true
             
         case kVK_ANSI_K: // 下
-            if hasShift {
-                tilingEngine.moveWindow(direction: .down)
-            } else {
-                tilingEngine.moveFocus(direction: .down)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    self?.tilingEngine.moveWindow(direction: .down)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .down)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                }
             }
             return true
             
         // MARK: Mode Switching
         case kVK_ANSI_S: // ウィンドウ選択モード
-            currentMode = .windowSelect
-            NotificationCenter.default.post(name: .modeChanged, object: currentMode)
+            DispatchQueue.main.async { [weak self] in
+                self?.currentMode = .windowSelect
+                NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+            }
             return true
             
         case kVK_ANSI_G: // ギャップ選択モード
-            currentMode = .gapSelect
-            gapSelectManager.startGapSelectMode()
-            NotificationCenter.default.post(name: .modeChanged, object: currentMode)
+            DispatchQueue.main.async { [weak self] in
+                self?.currentMode = .gapSelect
+                self?.gapSelectManager.startGapSelectMode()
+                NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+            }
             return true
 
         // MARK: Reset Layout
         case kVK_ANSI_R: // 全ウィンドウを縦分割に戻す
-            tilingEngine.resetToSingleWindowColumns()
+            DispatchQueue.main.async { [weak self] in
+                self?.tilingEngine.resetToSingleWindowColumns()
+            }
             return true
 
         // MARK: Virtual Desktop (UO)
         case kVK_ANSI_U: // 左の仮想デスクトップ
-            if hasShift {
-                // Send the window to the desktop on the left (to be implemented in Phase 4)
-            } else {
-                // Move to the desktop on the left
-                switchToSpace(direction: .left)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    // Send the window to the desktop on the left (to be implemented in Phase 4)
+                } else {
+                    // Move to the desktop on the left
+                    self?.switchToSpace(direction: .left)
+                }
             }
             return true
 
         case kVK_ANSI_O: // 右の仮想デスクトップ
-            if hasShift {
-                // Send the window to the desktop on the right (to be implemented in Phase 4)
-            } else {
-                // Move to the desktop on the right
-                switchToSpace(direction: .right)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    // Send the window to the desktop on the right (to be implemented in Phase 4)
+                } else {
+                    // Move to the desktop on the right
+                    self?.switchToSpace(direction: .right)
+                }
             }
             return true
             
         // MARK: Monitor Cursor (MQ)
         case kVK_ANSI_M, kVK_ANSI_Q: // Monitor間カーソル移動
-            cycleMonitorCursor()
+            DispatchQueue.main.async { [weak self] in
+                self?.cycleMonitorCursor()
+            }
             return true
             
         default:
@@ -323,53 +442,85 @@ class HotkeyManager: ObservableObject {
         
         // Enter: select/deselect the window (toggle)
         if event.keyCode == kVK_Return {
-            windowSelectManager.toggleCurrentWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSelectManager.toggleCurrentWindow()
+            }
             return true
         }
 
         // Backspace/Delete: clear selection
         if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
-            windowSelectManager.deselectCurrentWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSelectManager.deselectCurrentWindow()
+            }
             return true
         }
 
-        // V: merge the selected windows vertically
+        // V: merge the selected windows vertically (into one column)
+        // Shift+V: split the selected windows' column back into individual columns
         if event.keyCode == kVK_ANSI_V {
-            windowSelectManager.mergeSelectedWindowsVertically()
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    self?.windowSelectManager.splitSelectedWindowsToColumns()
+                } else {
+                    self?.windowSelectManager.mergeSelectedWindowsVertically()
+                }
+            }
             return true
         }
 
         // JKLI handling (works with or without ctrl+option)
         switch Int(event.keyCode) {
         case kVK_ANSI_J: // 左
-            if hasShift || (hasModifier && hasShift) {
-                windowSelectManager.moveSelectedWindows(direction: .left)
-            } else {
-                tilingEngine.moveFocus(direction: .left)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift || (hasModifier && hasShift) {
+                    self?.windowSelectManager.moveSelectedWindows(direction: .left)
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .left)
+                    // Update the overlay after focus moves (with a slight delay)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self?.windowSelectManager.updateOverlays()
+                    }
+                }
             }
             return true
 
         case kVK_ANSI_L: // 右
-            if hasShift || (hasModifier && hasShift) {
-                windowSelectManager.moveSelectedWindows(direction: .right)
-            } else {
-                tilingEngine.moveFocus(direction: .right)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift || (hasModifier && hasShift) {
+                    self?.windowSelectManager.moveSelectedWindows(direction: .right)
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .right)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self?.windowSelectManager.updateOverlays()
+                    }
+                }
             }
             return true
 
         case kVK_ANSI_I: // 上
-            if hasShift || (hasModifier && hasShift) {
-                windowSelectManager.moveSelectedWindows(direction: .up)
-            } else {
-                tilingEngine.moveFocus(direction: .up)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift || (hasModifier && hasShift) {
+                    self?.windowSelectManager.moveSelectedWindows(direction: .up)
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .up)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self?.windowSelectManager.updateOverlays()
+                    }
+                }
             }
             return true
 
         case kVK_ANSI_K: // 下
-            if hasShift || (hasModifier && hasShift) {
-                windowSelectManager.moveSelectedWindows(direction: .down)
-            } else {
-                tilingEngine.moveFocus(direction: .down)
+            DispatchQueue.main.async { [weak self] in
+                if hasShift || (hasModifier && hasShift) {
+                    self?.windowSelectManager.moveSelectedWindows(direction: .down)
+                } else {
+                    self?.tilingEngine.moveFocus(direction: .down)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self?.windowSelectManager.updateOverlays()
+                    }
+                }
             }
             return true
 
@@ -382,45 +533,53 @@ class HotkeyManager: ObservableObject {
 
     /// Key handling in gap-selection mode
     private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
-        let hasModifier = event.modifierFlags.contains(modifierMask)
-
         // Enter: select the gap / confirm the resize
         if event.keyCode == kVK_Return {
-            gapSelectManager.selectCurrentGap()
+            DispatchQueue.main.async { [weak self] in
+                self?.gapSelectManager.selectCurrentGap()
+            }
             return true
         }
 
         // JKLI handling (works with or without ctrl+option)
         switch Int(event.keyCode) {
         case kVK_ANSI_J: // 左
-            if gapSelectManager.state == .resizing {
-                gapSelectManager.moveGap(direction: .left)
-            } else {
-                gapSelectManager.moveToNextGap(direction: .left)
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.state == .resizing {
+                    self?.gapSelectManager.moveGap(direction: .left)
+                } else {
+                    self?.gapSelectManager.moveToNextGap(direction: .left)
+                }
             }
             return true
 
         case kVK_ANSI_L: // 右
-            if gapSelectManager.state == .resizing {
-                gapSelectManager.moveGap(direction: .right)
-            } else {
-                gapSelectManager.moveToNextGap(direction: .right)
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.state == .resizing {
+                    self?.gapSelectManager.moveGap(direction: .right)
+                } else {
+                    self?.gapSelectManager.moveToNextGap(direction: .right)
+                }
             }
             return true
 
         case kVK_ANSI_I: // 上
-            if gapSelectManager.state == .resizing {
-                gapSelectManager.moveGap(direction: .up)
-            } else {
-                gapSelectManager.moveToNextGap(direction: .up)
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.state == .resizing {
+                    self?.gapSelectManager.moveGap(direction: .up)
+                } else {
+                    self?.gapSelectManager.moveToNextGap(direction: .up)
+                }
             }
             return true
 
         case kVK_ANSI_K: // 下
-            if gapSelectManager.state == .resizing {
-                gapSelectManager.moveGap(direction: .down)
-            } else {
-                gapSelectManager.moveToNextGap(direction: .down)
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.state == .resizing {
+                    self?.gapSelectManager.moveGap(direction: .down)
+                } else {
+                    self?.gapSelectManager.moveToNextGap(direction: .down)
+                }
             }
             return true
 
