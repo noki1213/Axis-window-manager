@@ -100,11 +100,21 @@ class TilingEngine: ObservableObject {
     
     /// Move window focus in the given direction
     func moveFocus(direction: Direction) {
-        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
-              let screen = getScreen(for: focusedWindow) else {
+        print("[Axis] moveFocus: direction=\(direction)")
+
+        guard let focusedWindow = accessibilityManager.getFocusedWindow() else {
             print("[Axis] No focused window found")
             return
         }
+
+        print("[Axis] moveFocus: focusedWindow=\(focusedWindow.title), frame=\(focusedWindow.frame)")
+
+        guard let screen = getScreen(for: focusedWindow) else {
+            print("[Axis] moveFocus: Could not determine screen for window")
+            return
+        }
+
+        print("[Axis] moveFocus: screen frame=\(screen.frame)")
 
         let columns = tiledWindows[screen] ?? []
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
@@ -214,30 +224,110 @@ class TilingEngine: ObservableObject {
             if columnIndex > 0 {
                 // Swap the whole columns
                 columns.swapAt(columnIndex, columnIndex - 1)
+                tiledWindows[screen] = columns
+                applyColumnTiling(columns: columns, on: screen)
+            } else {
+                // If at the left edge, move to the monitor on the left
+                if let leftScreen = getAdjacentScreen(from: screen, direction: .left) {
+                    moveWindowToScreen(currentWindow, from: screen, to: leftScreen, position: .right)
+                }
             }
         case .right:
             if columnIndex < columns.count - 1 {
                 // Swap the whole columns
                 columns.swapAt(columnIndex, columnIndex + 1)
+                tiledWindows[screen] = columns
+                applyColumnTiling(columns: columns, on: screen)
+            } else {
+                // If at the right edge, move to the monitor on the right
+                if let rightScreen = getAdjacentScreen(from: screen, direction: .right) {
+                    moveWindowToScreen(currentWindow, from: screen, to: rightScreen, position: .left)
+                }
             }
         case .up:
+            print("[Axis] moveWindow UP: rowIndex=\(rowIndex), columnCount=\(columns[columnIndex].count)")
             if rowIndex > 0 {
                 // Move up within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex - 1)
+                tiledWindows[screen] = columns
+                applyColumnTiling(columns: columns, on: screen)
+            } else {
+                // If at the top of the column, move to the monitor above (added at the far left)
+                print("[Axis] moveWindow UP: At top of column, looking for adjacent screen")
+                if let upScreen = getAdjacentScreen(from: screen, direction: .up) {
+                    print("[Axis] moveWindow UP: Found up screen, moving window")
+                    moveWindowToScreen(currentWindow, from: screen, to: upScreen, position: .left)
+                } else {
+                    print("[Axis] moveWindow UP: No adjacent screen found")
+                }
             }
         case .down:
+            print("[Axis] moveWindow DOWN: rowIndex=\(rowIndex), columnCount=\(columns[columnIndex].count)")
             if rowIndex < columns[columnIndex].count - 1 {
                 // Move down within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex + 1)
+                tiledWindows[screen] = columns
+                applyColumnTiling(columns: columns, on: screen)
+            } else {
+                // If at the bottom of the column, move to the monitor below (added at the far left)
+                print("[Axis] moveWindow DOWN: At bottom of column, looking for adjacent screen")
+                if let downScreen = getAdjacentScreen(from: screen, direction: .down) {
+                    print("[Axis] moveWindow DOWN: Found down screen, moving window")
+                    moveWindowToScreen(currentWindow, from: screen, to: downScreen, position: .left)
+                } else {
+                    print("[Axis] moveWindow DOWN: No adjacent screen found")
+                }
             }
         }
-
-        tiledWindows[screen] = columns
-        applyColumnTiling(columns: columns, on: screen)
 
         // Keep focus as is, and move the cursor too
         currentWindow.focus()
         moveCursorToWindow(currentWindow)
+    }
+
+    /// Move the window to another screen
+    private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
+        print("[Axis] Moving window to \(position == .left ? "left" : "right") of target screen")
+
+        // Remove the window from its original screen
+        var sourceColumns = tiledWindows[sourceScreen] ?? []
+        for colIdx in 0..<sourceColumns.count {
+            if let rowIdx = sourceColumns[colIdx].firstIndex(of: window) {
+                sourceColumns[colIdx].remove(at: rowIdx)
+                break
+            }
+        }
+        // Remove empty columns
+        sourceColumns = sourceColumns.filter { !$0.isEmpty }
+        tiledWindows[sourceScreen] = sourceColumns
+        applyColumnTiling(columns: sourceColumns, on: sourceScreen)
+
+        // Add the window to the target screen
+        var targetColumns = tiledWindows[targetScreen] ?? []
+        switch position {
+        case .left:
+            // Append to the far left
+            targetColumns.insert([window], at: 0)
+        case .right:
+            // Append to the far right
+            targetColumns.append([window])
+        }
+        tiledWindows[targetScreen] = targetColumns
+        applyColumnTiling(columns: targetColumns, on: targetScreen)
+
+        // Reapply tiling after a short delay (to fit the monitor size)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            if let columns = self.tiledWindows[targetScreen] {
+                self.applyColumnTiling(columns: columns, on: targetScreen)
+            }
+        }
+    }
+
+    /// Horizontal position
+    private enum HorizontalPosition {
+        case left
+        case right
     }
 
     /// Move multiple windows in the given direction (for window-selection mode)
@@ -541,9 +631,24 @@ class TilingEngine: ObservableObject {
     
     /// Get the screen the window belongs to
     private func getScreen(for window: WindowInfo) -> NSScreen? {
-        let windowCenter = CGPoint(x: window.frame.midX, y: window.frame.midY)
+        // Convert from the Accessibility API's coordinate system (top-left origin) to NSScreen's (bottom-left origin)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+
+        // Convert the window's center point to NSScreen coordinates
+        let windowCenterX = window.frame.midX
+        let windowCenterY = mainScreenHeight - window.frame.midY
+
+        let windowCenterInNSScreen = CGPoint(x: windowCenterX, y: windowCenterY)
+
+        print("[Axis] getScreen: window frame (AX)=\(window.frame)")
+        print("[Axis] getScreen: windowCenter (NSScreen)=\(windowCenterInNSScreen)")
+
+        for screen in NSScreen.screens {
+            print("[Axis] getScreen: checking screen frame=\(screen.frame), contains=\(screen.frame.contains(windowCenterInNSScreen))")
+        }
+
         return NSScreen.screens.first { screen in
-            screen.frame.contains(windowCenter)
+            screen.frame.contains(windowCenterInNSScreen)
         }
     }
     
@@ -577,11 +682,19 @@ class TilingEngine: ObservableObject {
     /// Get the neighboring screen
     private func getAdjacentScreen(from screen: NSScreen, direction: Direction) -> NSScreen? {
         let currentFrame = screen.frame
-        
+
+        print("[Axis] getAdjacentScreen: direction=\(direction), currentFrame=\(currentFrame)")
+
+        for otherScreen in NSScreen.screens {
+            guard otherScreen != screen else { continue }
+            let otherFrame = otherScreen.frame
+            print("[Axis] Checking screen: otherFrame=\(otherFrame)")
+        }
+
         return NSScreen.screens.first { otherScreen in
             guard otherScreen != screen else { return false }
             let otherFrame = otherScreen.frame
-            
+
             switch direction {
             case .left:
                 // Whether it's to the left of the current screen
@@ -594,15 +707,17 @@ class TilingEngine: ObservableObject {
                        otherFrame.minY < currentFrame.maxY &&
                        otherFrame.maxY > currentFrame.minY
             case .up:
-                // Whether it's on the current screen
-                return otherFrame.minY >= currentFrame.maxY - 1 &&
-                       otherFrame.minX < currentFrame.maxX &&
-                       otherFrame.maxX > currentFrame.minX
+                // Whether it's above the current screen (NSScreen's origin is bottom-left, Y increases upward)
+                let isAbove = otherFrame.minY >= currentFrame.maxY - 1
+                let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
+                print("[Axis] UP check: isAbove=\(isAbove), hasXOverlap=\(hasXOverlap)")
+                return isAbove && hasXOverlap
             case .down:
                 // Whether it's below the current screen
-                return otherFrame.maxY <= currentFrame.minY + 1 &&
-                       otherFrame.minX < currentFrame.maxX &&
-                       otherFrame.maxX > currentFrame.minX
+                let isBelow = otherFrame.maxY <= currentFrame.minY + 1
+                let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
+                print("[Axis] DOWN check: isBelow=\(isBelow), hasXOverlap=\(hasXOverlap)")
+                return isBelow && hasXOverlap
             }
         }
     }
