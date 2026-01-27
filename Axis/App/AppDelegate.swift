@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let accessibilityManager = AccessibilityManager.shared
     private let hotkeyManager = HotkeyManager.shared
     private let tilingEngine = TilingEngine.shared
+    private let borderManager = BorderManager.shared
     
     // For detecting window changes
     private var windowCheckTimer: Timer?
@@ -165,6 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Run the initial tiling
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.tilingEngine.tileAllScreens()
+            self?.borderManager.updateBorder()
         }
         
         // Watch for window changes (to be implemented later)

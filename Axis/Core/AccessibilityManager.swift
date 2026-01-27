@@ -26,7 +26,7 @@ class AccessibilityManager: ObservableObject {
     /// Check the Accessibility permission
     func checkAccessibility() -> Bool {
         let trusted = AXIsProcessTrusted()
-        DispatchQueue.main.async {
+    DispatchQueue.main.async {
             self.isAccessibilityEnabled = trusted
         }
         return trusted

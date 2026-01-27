@@ -40,15 +40,19 @@ enum GapSelectState {
 	case resizing
 }
 
-/// Management of gap-selection mode
+	/// Management of gap-selection mode
 class GapSelectManager: ObservableObject {
 	static let shared = GapSelectManager()
 
 	// MARK: - Published Properties
 
+	/// Whether gap-selection mode is active
+	var isActive: Bool {
+		return !availableGaps.isEmpty
+	}
+
 	/// Current state
 	@Published var state: GapSelectState = .selecting
-
 	/// All available gaps
 	@Published var availableGaps: [GapInfo] = []
 
@@ -96,6 +100,9 @@ class GapSelectManager: ObservableObject {
 
 		// Show the overlay
 		showOverlay(on: screen)
+		
+		// Update the focus border (hide it)
+		BorderManager.shared.updateBorder()
 	}
 
 	/// End gap-selection mode
@@ -109,6 +116,9 @@ class GapSelectManager: ObservableObject {
 		availableGaps = []
 		selectedGapIndex = 0
 		state = .selecting
+		
+		// Update the focus border (show it again)
+		BorderManager.shared.updateBorder()
 	}
 
 	/// Move to the next gap
@@ -276,7 +286,6 @@ class GapSelectManager: ObservableObject {
 
 			for rowIndex in 0..<(column.count - 1) {
 				let upperWindow = column[rowIndex]
-				let lowerWindow = column[rowIndex + 1]
 
 				// Compute the gap position (between the bottom edge of the upper window and the top edge of the lower one)
 				let gapX = upperWindow.frame.minX
@@ -317,7 +326,7 @@ class GapSelectManager: ObservableObject {
 
 	/// Update the overlay
 	private func updateOverlay() {
-		guard let screen = getCurrentScreen() else { return }
+		guard getCurrentScreen() != nil else { return }
 		overlayWindow?.update(gaps: availableGaps, selectedIndex: selectedGapIndex, state: state)
 	}
 

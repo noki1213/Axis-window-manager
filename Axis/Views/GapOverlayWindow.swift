@@ -96,8 +96,8 @@ class GapOverlayView: NSView {
 					// Green while resizing
 					color = NSColor.systemGreen.withAlphaComponent(0.8)
 				} else {
-					// Blue while selected
-					color = NSColor.systemBlue.withAlphaComponent(0.8)
+					// Teal while selected
+					color = NSColor.systemTeal.withAlphaComponent(0.8)
 				}
 			} else {
 				// Light gray when not selected
@@ -156,7 +156,7 @@ class GapOverlayView: NSView {
 		if state == .resizing {
 			handleColor = NSColor.systemGreen
 		} else {
-			handleColor = NSColor.systemBlue
+			handleColor = NSColor.systemTeal
 		}
 
 		context.setFillColor(handleColor.cgColor)
