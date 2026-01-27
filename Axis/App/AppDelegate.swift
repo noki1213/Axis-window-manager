@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // For detecting window changes
     private var windowCheckTimer: Timer?
     private var lastWindowCount: Int = 0
+    private var lastWindowIDs: Set<CGWindowID> = []
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
@@ -208,11 +209,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkForWindowChanges() {
         let currentWindows = accessibilityManager.getAllWindows()
         let currentCount = currentWindows.count
-        
+        let currentWindowIDs = Set(currentWindows.map { $0.id })
+
         if currentCount != lastWindowCount {
             print("[Axis] Window count changed: \(lastWindowCount) -> \(currentCount)")
+
+            // If a window was closed, move focus to a neighboring window
+            if currentCount < lastWindowCount {
+                let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
+                print("[Axis] Windows closed: \(closedWindowIDs)")
+                focusAdjacentWindowAfterClose()
+            }
+
             lastWindowCount = currentCount
+            lastWindowIDs = currentWindowIDs
             tilingEngine.tileAllScreens()
+        }
+    }
+
+    /// After a window is closed, move focus to a neighboring window
+    private func focusAdjacentWindowAfterClose() {
+        // Move focus after a short delay (waiting for tiling to finish)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self = self else { return }
+
+            // If no window is currently focused, focus the first window
+            if self.accessibilityManager.getFocusedWindow() == nil {
+                // Focus the first of the tiled windows
+                for screen in NSScreen.screens {
+                    if let columns = self.tilingEngine.tiledWindows[screen],
+                       let firstColumn = columns.first,
+                       let firstWindow = firstColumn.first {
+                        firstWindow.focus()
+                        print("[Axis] Focused first available window: \(firstWindow.title)")
+                        return
+                    }
+                }
+            }
         }
     }
     
