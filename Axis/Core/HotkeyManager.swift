@@ -190,7 +190,12 @@ class HotkeyManager: ObservableObject {
             currentMode = .gapSelect
             NotificationCenter.default.post(name: .modeChanged, object: currentMode)
             return true
-            
+
+        // MARK: Reset Layout
+        case kVK_ANSI_R: // 全ウィンドウを縦分割に戻す
+            tilingEngine.resetToSingleWindowColumns()
+            return true
+
         // MARK: Virtual Desktop (UO)
         case kVK_ANSI_U: // 左の仮想デスクトップ
             if hasShift {
@@ -259,10 +264,16 @@ class HotkeyManager: ObservableObject {
             windowSelectManager.toggleCurrentWindow()
             return true
         }
-        
+
         // Backspace/Delete: clear selection
         if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
             windowSelectManager.deselectCurrentWindow()
+            return true
+        }
+
+        // V: merge the selected windows vertically
+        if event.keyCode == kVK_ANSI_V {
+            windowSelectManager.mergeSelectedWindowsVertically()
             return true
         }
         

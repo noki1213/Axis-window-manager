@@ -89,19 +89,39 @@ class WindowSelectManager: ObservableObject {
     /// Move the selected windows in the given direction
     func moveSelectedWindows(direction: Direction) {
         print("[Axis] moveSelectedWindows called, direction: \(direction), selected: \(selectedWindowIDs.count)")
-        
+
         guard !selectedWindowIDs.isEmpty else {
             // Fall back to normal movement if nothing is selected
             print("[Axis] No selection, using normal move")
             tilingEngine.moveWindow(direction: direction)
             return
         }
-        
+
         // Move the selected windows
         tilingEngine.moveWindows(windowIDs: selectedWindowIDs, direction: direction)
         print("[Axis] moveSelectedWindows: completed")
-        
+
         // Update the overlay after a short delay (waiting for the window move to finish)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.updateOverlays()
+        }
+    }
+
+    /// Merge the selected windows into a single column (stack them vertically)
+    func mergeSelectedWindowsVertically() {
+        print("[Axis] mergeSelectedWindowsVertically called, selected: \(selectedWindowIDs.count)")
+
+        guard selectedWindowIDs.count >= 2 else {
+            // Do nothing unless at least two items are selected
+            print("[Axis] Need at least 2 windows to merge")
+            return
+        }
+
+        // Merge the selected windows
+        tilingEngine.mergeWindowsIntoColumn(windowIDs: selectedWindowIDs)
+        print("[Axis] mergeSelectedWindowsVertically: completed")
+
+        // Update the overlay after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.updateOverlays()
         }
