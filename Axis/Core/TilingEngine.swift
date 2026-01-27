@@ -513,8 +513,15 @@ class TilingEngine: ObservableObject {
 
     /// Apply tiling using the column structure
     /// Windows within a column are arranged top to bottom
+    /// Use the existing ratio if there is one; otherwise split evenly
     private func applyColumnTiling(columns: [[WindowInfo]], on screen: NSScreen) {
         guard !columns.isEmpty else { return }
+
+        // Use the existing ratio if there is one
+        if let existingRatios = columnWidthRatios[screen], existingRatios.count == columns.count {
+            applyColumnTilingWithRatios(columns: columns, ratios: existingRatios, on: screen)
+            return
+        }
 
         let visibleFrame = screen.visibleFrame
         let columnCount = CGFloat(columns.count)
@@ -530,17 +537,27 @@ class TilingEngine: ObservableObject {
 
         var currentX = visibleFrame.minX + screenPadding
 
-        for column in columns {
+        for (colIndex, column) in columns.enumerated() {
             guard !column.isEmpty else { continue }
+
+            // Get the row height ratio
+            let rowRatios = rowHeightRatios[screen]?[colIndex]
 
             let rowCount = CGFloat(column.count)
             let totalRowGaps = windowGap * (rowCount - 1)
             let availableHeight = visibleFrame.height - (screenPadding * 2) - totalRowGaps
-            let rowHeight = availableHeight / rowCount
 
             var currentY = screenTopInAX + screenPadding
 
-            for window in column {
+            for (rowIndex, window) in column.enumerated() {
+                // Row height (use the ratio if one exists, otherwise split evenly)
+                let rowHeight: CGFloat
+                if let ratios = rowRatios, rowIndex < ratios.count, ratios.count == column.count {
+                    rowHeight = availableHeight * ratios[rowIndex]
+                } else {
+                    rowHeight = availableHeight / rowCount
+                }
+
                 var newFrame = CGRect(
                     x: currentX,
                     y: currentY,
@@ -720,6 +737,196 @@ class TilingEngine: ObservableObject {
                 return isBelow && hasXOverlap
             }
         }
+    }
+
+    // MARK: - Gap Resizing
+
+    /// Column width ratios (per screen)
+    /// Key: screen, value: array of each column's width ratio (sums to 1.0)
+    private var columnWidthRatios: [NSScreen: [CGFloat]] = [:]
+
+    /// Row height ratios (per screen, per column)
+    /// Key: screen, value: [column index: array of each row's height ratio]
+    private var rowHeightRatios: [NSScreen: [Int: [CGFloat]]] = [:]
+
+    /// Resize the gap between columns
+    /// - Parameters:
+    ///   - columnIndex: the index of the column on the left
+    ///   - delta: the amount to move (positive: rightward, negative: leftward)
+    ///   - screen: the target screen
+    func resizeColumnGap(at columnIndex: Int, delta: CGFloat, on screen: NSScreen) {
+        let columns = tiledWindows[screen] ?? []
+        guard columns.count > 1 else { return }
+        guard columnIndex >= 0 && columnIndex < columns.count - 1 else { return }
+
+        print("[Axis] resizeColumnGap: columnIndex=\(columnIndex), delta=\(delta)")
+
+        // Get or initialize the current ratio
+        var ratios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+
+        // Reinitialize if the number of ratios doesn't match the number of columns
+        if ratios.count != columns.count {
+            ratios = Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        }
+
+        // Compute the available width
+        let visibleFrame = screen.visibleFrame
+        let totalColumnGaps = windowGap * CGFloat(columns.count - 1)
+        let availableWidth = visibleFrame.width - (screenPadding * 2) - totalColumnGaps
+
+        // Convert delta to a ratio
+        let deltaRatio = delta / availableWidth
+
+        // Minimum ratio (the minimum width each column must have)
+        let minRatio: CGFloat = 0.1
+
+        // Adjust the ratios of the left and right columns
+        let newLeftRatio = ratios[columnIndex] + deltaRatio
+        let newRightRatio = ratios[columnIndex + 1] - deltaRatio
+
+        // Check that it doesn't fall below the minimum ratio
+        guard newLeftRatio >= minRatio && newRightRatio >= minRatio else {
+            print("[Axis] resizeColumnGap: ratio limit reached")
+            return
+        }
+
+        ratios[columnIndex] = newLeftRatio
+        ratios[columnIndex + 1] = newRightRatio
+
+        // Save the ratios
+        columnWidthRatios[screen] = ratios
+
+        // Reapply tiling
+        applyColumnTilingWithRatios(columns: columns, ratios: ratios, on: screen)
+    }
+
+    /// Resize the gap between rows
+    /// - Parameters:
+    ///   - columnIndex: the column's index
+    ///   - rowIndex: the row index of the window above
+    ///   - delta: the amount to move (positive: downward, negative: upward)
+    ///   - screen: the target screen
+    func resizeRowGap(columnIndex: Int, rowIndex: Int, delta: CGFloat, on screen: NSScreen) {
+        let columns = tiledWindows[screen] ?? []
+        guard columnIndex >= 0 && columnIndex < columns.count else { return }
+
+        let column = columns[columnIndex]
+        guard column.count > 1 else { return }
+        guard rowIndex >= 0 && rowIndex < column.count - 1 else { return }
+
+        print("[Axis] resizeRowGap: columnIndex=\(columnIndex), rowIndex=\(rowIndex), delta=\(delta)")
+
+        // Get or initialize the current row height ratio
+        var allRowRatios = rowHeightRatios[screen] ?? [:]
+        var ratios = allRowRatios[columnIndex] ?? Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
+
+        // Reinitialize if the number of ratios doesn't match the number of rows
+        if ratios.count != column.count {
+            ratios = Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
+        }
+
+        // Compute the available height
+        let visibleFrame = screen.visibleFrame
+        let totalRowGaps = windowGap * CGFloat(column.count - 1)
+        let availableHeight = visibleFrame.height - (screenPadding * 2) - totalRowGaps
+
+        // Convert delta to a ratio
+        let deltaRatio = delta / availableHeight
+
+        // Minimum ratio
+        let minRatio: CGFloat = 0.1
+
+        // Adjust the ratios of the row above and the row below
+        let newUpperRatio = ratios[rowIndex] + deltaRatio
+        let newLowerRatio = ratios[rowIndex + 1] - deltaRatio
+
+        // Check that it doesn't fall below the minimum ratio
+        guard newUpperRatio >= minRatio && newLowerRatio >= minRatio else {
+            print("[Axis] resizeRowGap: ratio limit reached")
+            return
+        }
+
+        ratios[rowIndex] = newUpperRatio
+        ratios[rowIndex + 1] = newLowerRatio
+
+        // Save the ratios
+        allRowRatios[columnIndex] = ratios
+        rowHeightRatios[screen] = allRowRatios
+
+        // Reapply tiling
+        let columnRatios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        applyColumnTilingWithRatios(columns: columns, ratios: columnRatios, on: screen)
+    }
+
+    /// Apply tiling with the given ratios
+    private func applyColumnTilingWithRatios(columns: [[WindowInfo]], ratios: [CGFloat], on screen: NSScreen) {
+        guard !columns.isEmpty else { return }
+        guard columns.count == ratios.count else {
+            // Fall back to normal tiling if the ratios don't match
+            applyColumnTiling(columns: columns, on: screen)
+            return
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let columnCount = CGFloat(columns.count)
+
+        // Available width
+        let totalColumnGaps = windowGap * (columnCount - 1)
+        let availableWidth = visibleFrame.width - (screenPadding * 2) - totalColumnGaps
+
+        // The Accessibility API's coordinate system has a top-left origin (relative to the main screen)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
+
+        var currentX = visibleFrame.minX + screenPadding
+
+        for (colIndex, column) in columns.enumerated() {
+            guard !column.isEmpty else { continue }
+
+            // Compute this column's width from its ratio
+            let columnWidth = availableWidth * ratios[colIndex]
+
+            // Get the row height ratio
+            let rowRatios = rowHeightRatios[screen]?[colIndex] ?? Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
+
+            let rowCount = CGFloat(column.count)
+            let totalRowGaps = windowGap * (rowCount - 1)
+            let availableHeight = visibleFrame.height - (screenPadding * 2) - totalRowGaps
+
+            var currentY = screenTopInAX + screenPadding
+
+            for (rowIndex, window) in column.enumerated() {
+                // Compute this row's height from its ratio
+                let rowHeight: CGFloat
+                if rowIndex < rowRatios.count {
+                    rowHeight = availableHeight * rowRatios[rowIndex]
+                } else {
+                    rowHeight = availableHeight / rowCount
+                }
+
+                var newFrame = CGRect(
+                    x: currentX,
+                    y: currentY,
+                    width: columnWidth,
+                    height: rowHeight
+                )
+
+                // Adjust the position if it would overflow the screen
+                newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
+
+                window.setFrame(newFrame)
+
+                currentY += rowHeight + windowGap
+            }
+
+            currentX += columnWidth + windowGap
+        }
+    }
+
+    /// Reset the ratios (call this when windows are added or removed)
+    func resetRatios(for screen: NSScreen) {
+        columnWidthRatios[screen] = nil
+        rowHeightRatios[screen] = nil
     }
 }
 

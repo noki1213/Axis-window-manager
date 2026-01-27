@@ -35,7 +35,8 @@ class HotkeyManager: ObservableObject {
     
     private let tilingEngine = TilingEngine.shared
     private let windowSelectManager = WindowSelectManager.shared
-    
+    private let gapSelectManager = GapSelectManager.shared
+
     private init() {}
     
     // MARK: - Public Methods
@@ -125,7 +126,12 @@ class HotkeyManager: ObservableObject {
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         // Return to normal mode with Escape
         if event.keyCode == kVK_Escape {
-            if currentMode != .normal {
+            if currentMode == .gapSelect {
+                gapSelectManager.endGapSelectMode()
+                currentMode = .normal
+                NotificationCenter.default.post(name: .modeChanged, object: currentMode)
+                return true
+            } else if currentMode != .normal {
                 currentMode = .normal
                 NotificationCenter.default.post(name: .modeChanged, object: currentMode)
                 return true
@@ -137,7 +143,12 @@ class HotkeyManager: ObservableObject {
         if currentMode == .windowSelect {
             return handleWindowSelectModeKeyEvent(event)
         }
-        
+
+        // Special key handling while in gap selection mode
+        if currentMode == .gapSelect {
+            return handleGapSelectModeKeyEvent(event)
+        }
+
         // Check whether ctrl+option is held down
         guard event.modifierFlags.contains(modifierMask) else {
             return false
@@ -188,6 +199,7 @@ class HotkeyManager: ObservableObject {
             
         case kVK_ANSI_G: // ギャップ選択モード
             currentMode = .gapSelect
+            gapSelectManager.startGapSelectMode()
             NotificationCenter.default.post(name: .modeChanged, object: currentMode)
             return true
 
@@ -201,15 +213,17 @@ class HotkeyManager: ObservableObject {
             if hasShift {
                 // Send the window to the desktop on the left (to be implemented in Phase 4)
             } else {
-                // Move to the desktop on the left (to be implemented in Phase 4)
+                // Move to the desktop on the left
+                switchToSpace(direction: .left)
             }
             return true
-            
+
         case kVK_ANSI_O: // 右の仮想デスクトップ
             if hasShift {
                 // Send the window to the desktop on the right (to be implemented in Phase 4)
             } else {
-                // Move to the desktop on the right (to be implemented in Phase 4)
+                // Move to the desktop on the right
+                switchToSpace(direction: .right)
             }
             return true
             
@@ -224,32 +238,80 @@ class HotkeyManager: ObservableObject {
     }
     
     // MARK: - Monitor Cursor
-    
+
     /// Move the cursor to the next monitor
     private func cycleMonitorCursor() {
         let screens = NSScreen.screens
         guard screens.count > 1 else { return }
-        
+
         let currentLocation = NSEvent.mouseLocation
-        
+
         // Identify the current screen
         guard let currentScreenIndex = screens.firstIndex(where: { $0.frame.contains(currentLocation) }) else {
             return
         }
-        
+
         // Next screen (cycles)
         let nextIndex = (currentScreenIndex + 1) % screens.count
         let nextScreen = screens[nextIndex]
-        
+
         // Move the cursor to the center of the next screen
         let centerX = nextScreen.frame.midX
         let centerY = nextScreen.frame.midY
-        
+
         // Convert since CGWarpMouseCursorPosition uses a top-left origin
         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         let warpY = mainScreenHeight - centerY
-        
+
         CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
+    }
+
+    // MARK: - Virtual Desktop (Space) Switching
+
+    enum SpaceDirection {
+        case left
+        case right
+    }
+
+    /// Switch the virtual desktop (Space)
+    /// Send ctrl+arrow key using CGEvent
+    private func switchToSpace(direction: SpaceDirection) {
+        print("[Axis] switchToSpace: direction=\(direction)")
+
+        // Arrow key key codes
+        let arrowKeyCode: CGKeyCode
+        switch direction {
+        case .left:
+            arrowKeyCode = CGKeyCode(kVK_LeftArrow)
+        case .right:
+            arrowKeyCode = CGKeyCode(kVK_RightArrow)
+        }
+
+        // Create the event source
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            print("[Axis] switchToSpace: Failed to create event source")
+            return
+        }
+
+        // Create a key-down event for ctrl+arrow key
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: true) else {
+            print("[Axis] switchToSpace: Failed to create keyDown event")
+            return
+        }
+        keyDown.flags = .maskControl
+
+        // Create the key-up event
+        guard let keyUp = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: false) else {
+            print("[Axis] switchToSpace: Failed to create keyUp event")
+            return
+        }
+        keyUp.flags = .maskControl
+
+        // Post the event (using cgAnnotatedSessionEventTap)
+        keyDown.post(tap: .cgAnnotatedSessionEventTap)
+        keyUp.post(tap: .cgAnnotatedSessionEventTap)
+
+        print("[Axis] switchToSpace: completed")
     }
     
     // MARK: - Window Select Mode Key Handling
@@ -315,6 +377,61 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Gap Select Mode Key Handling
+
+    /// Key handling in gap-selection mode
+    private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
+        let hasModifier = event.modifierFlags.contains(modifierMask)
+
+        // Enter: select the gap / confirm the resize
+        if event.keyCode == kVK_Return {
+            gapSelectManager.selectCurrentGap()
+            return true
+        }
+
+        // Only handle JKLI when ctrl+option is held down
+        guard hasModifier else {
+            return false
+        }
+
+        switch Int(event.keyCode) {
+        case kVK_ANSI_J: // 左
+            if gapSelectManager.state == .resizing {
+                gapSelectManager.moveGap(direction: .left)
+            } else {
+                gapSelectManager.moveToNextGap(direction: .left)
+            }
+            return true
+
+        case kVK_ANSI_L: // 右
+            if gapSelectManager.state == .resizing {
+                gapSelectManager.moveGap(direction: .right)
+            } else {
+                gapSelectManager.moveToNextGap(direction: .right)
+            }
+            return true
+
+        case kVK_ANSI_I: // 上
+            if gapSelectManager.state == .resizing {
+                gapSelectManager.moveGap(direction: .up)
+            } else {
+                gapSelectManager.moveToNextGap(direction: .up)
+            }
+            return true
+
+        case kVK_ANSI_K: // 下
+            if gapSelectManager.state == .resizing {
+                gapSelectManager.moveGap(direction: .down)
+            } else {
+                gapSelectManager.moveToNextGap(direction: .down)
+            }
+            return true
+
         default:
             return false
         }
