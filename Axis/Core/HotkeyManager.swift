@@ -28,11 +28,13 @@ class HotkeyManager: ObservableObject {
     /// ctrl + option
     private let modifierMask: NSEvent.ModifierFlags = [.control, .option]
     
-    // MARK: - Event Monitor
+    // MARK: - Event Tap (low-level event monitoring; can block events)
     
-    private var eventMonitor: Any?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
     
     private let tilingEngine = TilingEngine.shared
+    private let windowSelectManager = WindowSelectManager.shared
     
     private init() {}
     
@@ -40,25 +42,80 @@ class HotkeyManager: ObservableObject {
     
     /// Start hotkey monitoring
     func start() {
-        // Monitor global key events
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyEvent(event)
-        }
-        
-        // Also monitor local (in-app) key events
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if self?.handleKeyEvent(event) == true {
-                return nil // イベントを消費
-            }
-            return event
-        }
+        setupEventTap()
     }
     
     /// Stop hotkey monitoring
     func stop() {
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
+        if let eventTap = eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        if let runLoopSource = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        }
+        eventTap = nil
+        runLoopSource = nil
+    }
+    
+    // MARK: - Event Tap Setup
+    
+    private func setupEventTap() {
+        // The event tap's callback
+        let callback: CGEventTapCallBack = { (proxy, type, event, refcon) -> Unmanaged<CGEvent>? in
+            guard let refcon = refcon else {
+                return Unmanaged.passRetained(event)
+            }
+            
+            let hotkeyManager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
+            
+            // Re-enable the tap if it got disabled
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let tap = hotkeyManager.eventTap {
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                }
+                return Unmanaged.passRetained(event)
+            }
+            
+            // Only handle key-down events
+            guard type == .keyDown else {
+                return Unmanaged.passRetained(event)
+            }
+            
+            // Convert to NSEvent
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passRetained(event)
+            }
+            
+            // Handle the event and return nil if it should be consumed
+            if hotkeyManager.handleKeyEvent(nsEvent) {
+                return nil // イベントを消費（他のアプリに送らない）
+            }
+            
+            return Unmanaged.passRetained(event)
+        }
+        
+        // Create the event tap
+        let eventMask = (1 << CGEventType.keyDown.rawValue)
+        
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(eventMask),
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            print("[Axis] Failed to create event tap. Make sure Accessibility permission is granted.")
+            return
+        }
+        
+        eventTap = tap
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        
+        if let source = runLoopSource {
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            print("[Axis] Event tap started successfully")
         }
     }
     
@@ -70,9 +127,15 @@ class HotkeyManager: ObservableObject {
         if event.keyCode == kVK_Escape {
             if currentMode != .normal {
                 currentMode = .normal
+                NotificationCenter.default.post(name: .modeChanged, object: currentMode)
                 return true
             }
             return false
+        }
+        
+        // Special key handling in window-selection mode
+        if currentMode == .windowSelect {
+            return handleWindowSelectModeKeyEvent(event)
         }
         
         // Check whether ctrl+option is held down
@@ -182,6 +245,68 @@ class HotkeyManager: ObservableObject {
         let warpY = mainScreenHeight - centerY
         
         CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
+    }
+    
+    // MARK: - Window Select Mode Key Handling
+    
+    /// Key handling in window-selection mode
+    private func handleWindowSelectModeKeyEvent(_ event: NSEvent) -> Bool {
+        let hasModifier = event.modifierFlags.contains(modifierMask)
+        let hasShift = event.modifierFlags.contains(.shift)
+        
+        // Enter: select/deselect the window (toggle)
+        if event.keyCode == kVK_Return {
+            windowSelectManager.toggleCurrentWindow()
+            return true
+        }
+        
+        // Backspace/Delete: clear selection
+        if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
+            windowSelectManager.deselectCurrentWindow()
+            return true
+        }
+        
+        // Only handle JKLI when ctrl+option is held down
+        guard hasModifier else {
+            return false
+        }
+        
+        switch Int(event.keyCode) {
+        case kVK_ANSI_J: // 左
+            if hasShift {
+                windowSelectManager.moveSelectedWindows(direction: .left)
+            } else {
+                tilingEngine.moveFocus(direction: .left)
+            }
+            return true
+            
+        case kVK_ANSI_L: // 右
+            if hasShift {
+                windowSelectManager.moveSelectedWindows(direction: .right)
+            } else {
+                tilingEngine.moveFocus(direction: .right)
+            }
+            return true
+            
+        case kVK_ANSI_I: // 上
+            if hasShift {
+                windowSelectManager.moveSelectedWindows(direction: .up)
+            } else {
+                tilingEngine.moveFocus(direction: .up)
+            }
+            return true
+            
+        case kVK_ANSI_K: // 下
+            if hasShift {
+                windowSelectManager.moveSelectedWindows(direction: .down)
+            } else {
+                tilingEngine.moveFocus(direction: .down)
+            }
+            return true
+            
+        default:
+            return false
+        }
     }
 }
 
