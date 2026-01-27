@@ -91,20 +91,27 @@ class AccessibilityManager: ObservableObject {
     
     /// Get the focused window
     func getFocusedWindow() -> WindowInfo? {
-        guard isAccessibilityEnabled else { return nil }
-        
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+        guard isAccessibilityEnabled else {
+            print("[Axis] getFocusedWindow: Accessibility not enabled")
             return nil
         }
-        
+
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            print("[Axis] getFocusedWindow: No frontmost application")
+            return nil
+        }
+
+        print("[Axis] getFocusedWindow: frontApp = \(frontApp.localizedName ?? "unknown")")
+
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         var focusedWindowRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
-        
+
         guard result == .success, let axWindow = focusedWindowRef else {
+            print("[Axis] getFocusedWindow: Failed to get focused window, result = \(result.rawValue)")
             return nil
         }
-        
+
         // Treat it as an AXUIElement
         let windowElement = axWindow as! AXUIElement
         return WindowInfo(axElement: windowElement, app: frontApp)
