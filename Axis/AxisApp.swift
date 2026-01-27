@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct AxisApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        // Since it's a menu bar app, the WindowGroup is for the settings screen
+        Settings {
+            SettingsView()
         }
     }
 }
