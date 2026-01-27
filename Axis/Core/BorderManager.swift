@@ -18,6 +18,9 @@ class BorderManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
     
+    private var isUpdating = false // 競合状態防止フラグ
+    private var pendingUpdate = false // 更新中に新しいリクエストが来たかどうか
+    
     // Settings
     private let padding: CGFloat = 10.0 // WindowSelectManagerと同じパディング
     
@@ -27,21 +30,45 @@ class BorderManager: ObservableObject {
     }
     
     private func setupNotifications() {
-        // ... (notifications remain same) ...
+        // Receive all notifications on the main thread to serialize them
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .sink { [weak self] _ in self?.updateBorder() }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.scheduleUpdateBorder() }
             .store(in: &cancellables)
             
         NotificationCenter.default.publisher(for: Notification.Name("WindowMoved"))
-            .sink { [weak self] _ in self?.updateBorder() }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.scheduleUpdateBorder() }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: .modeChanged)
-            .sink { [weak self] _ in self?.updateBorder() }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.scheduleUpdateBorder() }
             .store(in: &cancellables)
             
         updateTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.checkWindowFrame()
+        }
+    }
+    
+    /// Schedule an update (to prevent races)
+    private func scheduleUpdateBorder() {
+        if isUpdating {
+            pendingUpdate = true
+            return
+        }
+        performUpdateBorder()
+    }
+    
+    private func performUpdateBorder() {
+        isUpdating = true
+        updateBorder()
+        isUpdating = false
+        
+        // If a new request comes in during an update, update again
+        if pendingUpdate {
+            pendingUpdate = false
+            performUpdateBorder()
         }
     }
     
@@ -104,10 +131,8 @@ class BorderManager: ObservableObject {
             self.borderWindow = newWindow
             self.borderView = newView
             
-            // Show it with a slight delay (matching WindowSelectManager's behavior)
-            DispatchQueue.main.async {
-                newWindow.orderFront(nil)
-            }
+            // Show it synchronously (doing it async causes a race condition where two get shown)
+            newWindow.orderFront(nil)
         } else {
             // If it's the same window: update position only (don't recreate it, to avoid flicker)
             borderWindow?.setFrame(targetRect, display: true)
