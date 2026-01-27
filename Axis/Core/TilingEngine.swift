@@ -508,6 +508,72 @@ class TilingEngine: ObservableObject {
         focusedWindow.focus()
         print("[Axis] mergeWindowsIntoColumn: completed")
     }
+
+    /// Split the selected windows into individual columns (undo the vertical split)
+    func splitWindowsToColumns(windowIDs: Set<CGWindowID>) {
+        print("[Axis] splitWindowsToColumns called, windowIDs: \(windowIDs)")
+
+        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
+              let screen = getScreen(for: focusedWindow) else {
+            print("[Axis] splitWindowsToColumns: No focused window or screen")
+            return
+        }
+
+        var columns = tiledWindows[screen] ?? []
+
+        // Collect the selected windows (preserving their original order)
+        var selectedWindows: [WindowInfo] = []
+        var firstColumnIndex: Int? = nil
+
+        for (colIdx, column) in columns.enumerated() {
+            for window in column {
+                if windowIDs.contains(window.id) {
+                    selectedWindows.append(window)
+                    // Record the column of the first selected window we find
+                    if firstColumnIndex == nil {
+                        firstColumnIndex = colIdx
+                    }
+                }
+            }
+        }
+
+        guard !selectedWindows.isEmpty, let insertIndex = firstColumnIndex else {
+            print("[Axis] splitWindowsToColumns: No selected windows found")
+            return
+        }
+
+        print("[Axis] splitWindowsToColumns: splitting \(selectedWindows.count) windows starting at column \(insertIndex)")
+
+        // Remove the selected windows from all columns
+        for colIdx in 0..<columns.count {
+            columns[colIdx] = columns[colIdx].filter { !windowIDs.contains($0.id) }
+        }
+
+        // Remove empty columns (the insertion index needs adjusting too)
+        var adjustedInsertIndex = insertIndex
+        var newColumns: [[WindowInfo]] = []
+        for (idx, column) in columns.enumerated() {
+            if !column.isEmpty {
+                newColumns.append(column)
+            } else if idx < insertIndex {
+                adjustedInsertIndex -= 1
+            }
+        }
+        columns = newColumns
+
+        // Insert each selected window as its own column
+        for (offset, window) in selectedWindows.enumerated() {
+            let newInsertIndex = min(adjustedInsertIndex + offset, columns.count)
+            columns.insert([window], at: newInsertIndex)
+        }
+
+        tiledWindows[screen] = columns
+        applyColumnTiling(columns: columns, on: screen)
+
+        // Keep focus as is
+        focusedWindow.focus()
+        print("[Axis] splitWindowsToColumns: completed")
+    }
     
     // MARK: - Private Methods
 
