@@ -172,13 +172,19 @@ class TilingEngine: ObservableObject {
 
     /// Move the mouse cursor to the window's center
     private func moveCursorToWindow(_ window: WindowInfo) {
-        // Calculate the window's center coordinates (Accessibility coordinate system: origin top-left)
-        let centerX = window.frame.midX
-        let centerY = window.frame.midY
+        // Move after a short delay (waiting for the window's position change to take effect)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            // Get the window's current position
+            var windowCopy = window
+            windowCopy.refreshFrame()
 
-        // CGWarpMouseCursorPosition uses a top-left origin, so it can be used as-is
-        CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
-        print("[Axis] Moved cursor to window center: (\(centerX), \(centerY))")
+            let centerX = windowCopy.frame.midX
+            let centerY = windowCopy.frame.midY
+
+            // CGWarpMouseCursorPosition uses a top-left origin, so it can be used as-is
+            CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
+            print("[Axis] Moved cursor to window center: (\(centerX), \(centerY))")
+        }
     }
 
     /// Look up a window's position (column index, row index) within the column structure
@@ -229,10 +235,11 @@ class TilingEngine: ObservableObject {
         tiledWindows[screen] = columns
         applyColumnTiling(columns: columns, on: screen)
 
-        // Keep focus as is
+        // Keep focus as is, and move the cursor too
         currentWindow.focus()
+        moveCursorToWindow(currentWindow)
     }
-    
+
     /// Move multiple windows in the given direction (for window-selection mode)
     func moveWindows(windowIDs: Set<CGWindowID>, direction: Direction) {
         print("[Axis] moveWindows called, direction: \(direction), windowIDs: \(windowIDs)")
