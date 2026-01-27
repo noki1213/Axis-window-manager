@@ -147,11 +147,13 @@ class GapSelectManager: ObservableObject {
 				isValidDirection = gap.frame.midX > (currentGap?.frame.midX ?? 0)
 				distance = gap.frame.midX - (currentGap?.frame.midX ?? 0)
 			case .up:
-				isValidDirection = gap.frame.midY < (currentGap?.frame.midY ?? 0)
-				distance = (currentGap?.frame.midY ?? 0) - gap.frame.midY
-			case .down:
+				// NSScreen's coordinate system has its origin at the bottom-left, so a larger Y is higher
 				isValidDirection = gap.frame.midY > (currentGap?.frame.midY ?? 0)
 				distance = gap.frame.midY - (currentGap?.frame.midY ?? 0)
+			case .down:
+				// NSScreen's coordinate system has its origin at the bottom-left, so a smaller Y is lower
+				isValidDirection = gap.frame.midY < (currentGap?.frame.midY ?? 0)
+				distance = (currentGap?.frame.midY ?? 0) - gap.frame.midY
 			}
 
 			if isValidDirection && distance < bestDistance {

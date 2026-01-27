@@ -318,6 +318,10 @@ class HotkeyManager: ObservableObject {
         case kVK_ANSI_R: // 全ウィンドウを縦分割に戻す
             DispatchQueue.main.async { [weak self] in
                 self?.tilingEngine.resetToSingleWindowColumns()
+                // Update the border after reset (move it to the newly focused window)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    BorderManager.shared.updateBorder()
+                }
             }
             return true
 
