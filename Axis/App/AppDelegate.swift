@@ -222,10 +222,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[Axis] Windows closed: \(closedWindowIDs)")
                 focusAdjacentWindowAfterClose()
             }
+            
+            // If a window was added, move focus to the new window
+            if currentCount > lastWindowCount {
+                let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
+                print("[Axis] New windows: \(newWindowIDs)")
+                focusNewWindow(newWindowIDs: newWindowIDs, allWindows: currentWindows)
+            }
 
             lastWindowCount = currentCount
             lastWindowIDs = currentWindowIDs
             tilingEngine.tileAllScreens()
+            
+            // Update the border after tiling
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.borderManager.updateBorder()
+            }
+        }
+    }
+    
+    /// Move focus to the newly added window
+    private func focusNewWindow(newWindowIDs: Set<CGWindowID>, allWindows: [WindowInfo]) {
+        // Find and focus the new window
+        for window in allWindows {
+            if newWindowIDs.contains(window.id) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    window.focus()
+                    print("[Axis] Focused new window: \(window.title)")
+                }
+                return
+            }
         }
     }
 
