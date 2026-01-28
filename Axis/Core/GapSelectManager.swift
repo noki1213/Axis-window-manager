@@ -257,12 +257,18 @@ class GapSelectManager: ObservableObject {
 			let leftColumn = columns[colIndex]
 			let rightColumn = columns[colIndex + 1]
 
-			guard let leftWindow = leftColumn.first, let rightWindow = rightColumn.first else { continue }
+			guard !leftColumn.isEmpty && !rightColumn.isEmpty else { continue }
+
+			// Compute the top and bottom of the whole column (considering every window)
+			let leftMinY = leftColumn.map { $0.frame.minY }.min() ?? 0
+			let leftMaxY = leftColumn.map { $0.frame.maxY }.max() ?? 0
+			let rightMinY = rightColumn.map { $0.frame.minY }.min() ?? 0
+			let rightMaxY = rightColumn.map { $0.frame.maxY }.max() ?? 0
 
 			// Compute the gap position (between the right edge of the left column and the left edge of the right column)
-			let gapX = leftWindow.frame.maxX
-			let gapY = min(leftWindow.frame.minY, rightWindow.frame.minY)
-			let gapHeight = max(leftWindow.frame.maxY, rightWindow.frame.maxY) - gapY
+			let gapX = leftColumn.first!.frame.maxX
+			let gapY = min(leftMinY, rightMinY)
+			let gapHeight = max(leftMaxY, rightMaxY) - gapY
 
 			// Convert to NSScreen coordinates (bottom-left origin)
 			let gapYInNSScreen = mainScreenHeight - gapY - gapHeight
