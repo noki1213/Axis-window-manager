@@ -1023,6 +1023,103 @@ class TilingEngine: ObservableObject {
         columnWidthRatios[screen] = nil
         rowHeightRatios[screen] = nil
     }
+    
+    // MARK: - Center-Fixed Resize (Normal Mode)
+    
+    /// Grow/shrink the focused window while keeping it centered
+    /// - Parameter increase: true to grow, false to shrink
+    func resizeCurrentWindow(increase: Bool) {
+        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
+              let screen = getScreen(for: focusedWindow) else {
+            print("[Axis] resizeCurrentWindow: No focused window or screen")
+            return
+        }
+        
+        let columns = tiledWindows[screen] ?? []
+        guard let (columnIndex, _) = findWindowPosition(window: focusedWindow, in: columns) else {
+            print("[Axis] resizeCurrentWindow: Window not in tiled windows")
+            return
+        }
+        
+        // Can't resize when there's only one column
+        guard columns.count > 1 else {
+            print("[Axis] resizeCurrentWindow: Only one column, cannot resize")
+            return
+        }
+        
+        // The resize amount (ratio change)
+        let resizeStep: CGFloat = 0.05
+        let delta = increase ? resizeStep : -resizeStep
+        
+        // Get or initialize the current ratio
+        var ratios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        if ratios.count != columns.count {
+            ratios = Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        }
+        
+        // Minimum ratio
+        let minRatio: CGFloat = 0.1
+        
+        // Center-anchored resize: adjust evenly from the left and right neighboring columns
+        let hasLeft = columnIndex > 0
+        let hasRight = columnIndex < columns.count - 1
+        
+        if hasLeft && hasRight {
+            // When there are neighboring columns on both sides: adjust evenly from left and right
+            let halfDelta = delta / 2.0
+            
+            let newLeft = ratios[columnIndex - 1] - halfDelta
+            let newRight = ratios[columnIndex + 1] - halfDelta
+            let newCurrent = ratios[columnIndex] + delta
+            
+            // Minimum ratio check
+            guard newLeft >= minRatio && newRight >= minRatio && newCurrent >= minRatio else {
+                print("[Axis] resizeCurrentWindow: ratio limit reached")
+                return
+            }
+            
+            ratios[columnIndex - 1] = newLeft
+            ratios[columnIndex + 1] = newRight
+            ratios[columnIndex] = newCurrent
+            
+        } else if hasLeft {
+            // If not at the left edge: adjust from the left
+            let newLeft = ratios[columnIndex - 1] - delta
+            let newCurrent = ratios[columnIndex] + delta
+            
+            guard newLeft >= minRatio && newCurrent >= minRatio else {
+                print("[Axis] resizeCurrentWindow: ratio limit reached (left edge)")
+                return
+            }
+            
+            ratios[columnIndex - 1] = newLeft
+            ratios[columnIndex] = newCurrent
+            
+        } else if hasRight {
+            // If not at the right edge: adjust from the right
+            let newRight = ratios[columnIndex + 1] - delta
+            let newCurrent = ratios[columnIndex] + delta
+            
+            guard newRight >= minRatio && newCurrent >= minRatio else {
+                print("[Axis] resizeCurrentWindow: ratio limit reached (right edge)")
+                return
+            }
+            
+            ratios[columnIndex + 1] = newRight
+            ratios[columnIndex] = newCurrent
+        }
+        
+        // Save the ratios
+        columnWidthRatios[screen] = ratios
+        
+        print("[Axis] resizeCurrentWindow: new ratios = \(ratios)")
+        
+        // Reapply tiling
+        applyColumnTilingWithRatios(columns: columns, ratios: ratios, on: screen)
+        
+        // Update the border
+        BorderManager.shared.updateBorder()
+    }
 }
 
 // MARK: - Direction
