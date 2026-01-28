@@ -45,7 +45,3 @@ Carthage/Build
 
 # Mac
 .DS_Store
-
-# Personal notes (optional - remove if you want to share)
-blog_draft.md
-docs/
