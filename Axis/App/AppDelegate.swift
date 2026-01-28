@@ -25,6 +25,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
     
+    // For detecting Space switches
+    private var isSpaceSwitching = false
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
         NSApp.setActivationPolicy(.accessory)
@@ -201,15 +204,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         
+        // Watch for Space switches
+        workspace.notificationCenter.addObserver(
+            self,
+            selector: #selector(onActiveSpaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
+        
         // Periodically check for window-count changes (detects new and closed windows)
-        lastWindowCount = accessibilityManager.getAllWindows().count
+        // Target only on-screen windows
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allWindows = accessibilityManager.getAllWindows()
+        let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+        lastWindowCount = onScreenWindows.count
+        lastWindowIDs = Set(onScreenWindows.map { $0.id })
         windowCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.checkForWindowChanges()
         }
     }
     
     private func checkForWindowChanges() {
-        let currentWindows = accessibilityManager.getAllWindows()
+        // Skip processing while a Space switch is in progress
+        guard !isSpaceSwitching else {
+            print("[Axis] Skipping window check during space switching")
+            return
+        }
+        
+        // Target only on-screen windows (i.e. windows in the current Space)
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allWindows = accessibilityManager.getAllWindows()
+        let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) }
         let currentCount = currentWindows.count
         let currentWindowIDs = Set(currentWindows.map { $0.id })
 
@@ -293,6 +318,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func onActiveAppChanged(_ notification: Notification) {
         // Handling for when the active app changes (as needed)
+    }
+    
+    @objc private func onActiveSpaceChanged(_ notification: Notification) {
+        print("[Axis] Active space changed")
+        
+        // Set the Space-switching flag
+        isSpaceSwitching = true
+        
+        // Update the current Space's window info after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else { return }
+            
+            // Update lastWindowIDs with the current Space's on-screen windows
+            let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
+            let allWindows = self.accessibilityManager.getAllWindows()
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+            self.lastWindowCount = onScreenWindows.count
+            self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
+            
+            // Register the new Space's windows in tiledWindows
+            // (Existing layout info is preserved inside tile(on:))
+            self.tilingEngine.tileAllScreens()
+            
+            // Update the border
+            self.borderManager.updateBorder()
+            
+            // Clear the flag
+            self.isSpaceSwitching = false
+            print("[Axis] Space switch completed, tracking \(self.lastWindowCount) windows")
+        }
     }
     
     @objc private func onModeChanged(_ notification: Notification) {
