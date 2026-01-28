@@ -355,6 +355,19 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        // MARK: Window Resize (- / =)
+        case kVK_ANSI_Minus: // Shrink the window
+            DispatchQueue.main.async { [weak self] in
+                self?.tilingEngine.resizeCurrentWindow(increase: false)
+            }
+            return true
+            
+        case kVK_ANSI_Equal: // Enlarge the window (the = key becomes + with Shift)
+            DispatchQueue.main.async { [weak self] in
+                self?.tilingEngine.resizeCurrentWindow(increase: true)
+            }
+            return true
+            
         default:
             return false
         }
