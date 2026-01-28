@@ -360,32 +360,56 @@ class TilingEngine: ObservableObject {
             return
         }
 
+        // Get the indices of the columns containing the selected windows (deduplicated, sorted)
+        let selectedColumnIndices = Array(Set(selectedPositions.map { $0.columnIndex })).sorted()
+
         switch direction {
         case .left:
-            // Move left: process starting from the leftmost column
-            selectedPositions.sort { $0.columnIndex < $1.columnIndex }
-            for pos in selectedPositions {
-                if pos.columnIndex > 0 {
-                    // Remove from the current column
-                    if let rowIdx = columns[pos.columnIndex].firstIndex(of: pos.window) {
-                        columns[pos.columnIndex].remove(at: rowIdx)
-                        // Add to the column on the left
-                        columns[pos.columnIndex - 1].append(pos.window)
-                    }
-                }
+            // Move left: swap the selected column with the unselected column to its left
+            guard let firstSelectedIdx = selectedColumnIndices.first, firstSelectedIdx > 0 else {
+                print("[Axis] moveWindows: Already at leftmost position")
+                return
             }
+
+            // Find the unselected column to the left
+            var swapTargetIdx = firstSelectedIdx - 1
+            while swapTargetIdx >= 0 && selectedColumnIndices.contains(swapTargetIdx) {
+                swapTargetIdx -= 1
+            }
+
+            if swapTargetIdx >= 0 {
+                // Move the selected column to the left (swap column order)
+                // Example: with [1,2,3,4], selecting 3,4 (index 2,3) → swapTargetIdx=1
+                // Result: [1,3,4,2]
+                let targetColumn = columns[swapTargetIdx]
+                columns.remove(at: swapTargetIdx)
+                // Insert at the last position of the selected column
+                let insertIdx = selectedColumnIndices.last!
+                columns.insert(targetColumn, at: insertIdx)
+            }
+
         case .right:
-            // Move right: process starting from the rightmost column
-            selectedPositions.sort { $0.columnIndex > $1.columnIndex }
-            for pos in selectedPositions {
-                if pos.columnIndex < columns.count - 1 {
-                    // Remove from the current column
-                    if let rowIdx = columns[pos.columnIndex].firstIndex(of: pos.window) {
-                        columns[pos.columnIndex].remove(at: rowIdx)
-                        // Add to the column on the right
-                        columns[pos.columnIndex + 1].append(pos.window)
-                    }
-                }
+            // Move right: swap the selected column with the unselected column to its right
+            guard let lastSelectedIdx = selectedColumnIndices.last, lastSelectedIdx < columns.count - 1 else {
+                print("[Axis] moveWindows: Already at rightmost position")
+                return
+            }
+
+            // Find the unselected column to the right
+            var swapTargetIdx = lastSelectedIdx + 1
+            while swapTargetIdx < columns.count && selectedColumnIndices.contains(swapTargetIdx) {
+                swapTargetIdx += 1
+            }
+
+            if swapTargetIdx < columns.count {
+                // Move the selected column to the right (swap column order)
+                // Example: with [1,2,3,4], selecting 1,2 (index 0,1) → swapTargetIdx=2
+                // Result: [3,1,2,4]
+                let targetColumn = columns[swapTargetIdx]
+                columns.remove(at: swapTargetIdx)
+                // Insert at the first position of the selected column
+                let insertIdx = selectedColumnIndices.first!
+                columns.insert(targetColumn, at: insertIdx)
             }
         case .up:
             // Move up: up within the same column
