@@ -2,6 +2,8 @@
 
 A keyboard-driven tiling window manager for macOS.
 
+https://note.com/elegant_hue/n/nc77a5d09e9a1
+
 ## Features
 
 - **Tiling Layout**: Automatically arranges windows in a tiling layout
