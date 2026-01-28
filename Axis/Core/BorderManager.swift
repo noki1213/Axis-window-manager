@@ -10,22 +10,24 @@ import Combine
 
 class BorderManager: ObservableObject {
     static let shared = BorderManager()
-    
+
     private var borderWindow: NSWindow?
     private var borderView: SelectionBorderView?
     private var currentWindow: WindowInfo?
     private var currentWindowID: CGWindowID?
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
-    
+
     private var isUpdating = false // 競合状態防止フラグ
     private var pendingUpdate = false // 更新中に新しいリクエストが来たかどうか
-    
+    private var isInMissionControl = false // ミッションコントロール表示中フラグ
+
     // Settings
     private let padding: CGFloat = 10.0 // WindowSelectManagerと同じパディング
-    
+
     private init() {
         setupNotifications()
+        setupMissionControlObserver()
         setupBorderWindow()
     }
     
@@ -102,12 +104,50 @@ class BorderManager: ObservableObject {
         // Do nothing, or remove it
     }
 
+    /// Watch for Mission Control (Exposé) starting and ending
+    private func setupMissionControlObserver() {
+        // Because notification-based detection doesn't work on newer macOS versions,
+        // Detect Mission Control inside checkWindowFrame()
+    }
+
+    /// Check whether Mission Control is currently showing
+    private func checkMissionControlActive() -> Bool {
+        // Check the Dock process's windows
+        let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+
+        for window in windowList {
+            guard let ownerName = window[kCGWindowOwnerName as String] as? String,
+                  ownerName == "Dock" else { continue }
+
+            // Check Mission Control's window name
+            if let windowName = window[kCGWindowName as String] as? String {
+                if windowName.contains("Mission Control") ||
+                   windowName.contains("Exposé") ||
+                   windowName.contains("Expose") {
+                    return true
+                }
+            }
+
+            // A Dock layer of 18 or higher means Mission Control is showing
+            // Normally the Dock's only window is at layer=-2147483624 (the wallpaper layer)
+            if let layer = window[kCGWindowLayer as String] as? Int, layer >= 18 {
+                return true
+            }
+        }
+        return false
+    }
+
     func updateBorder() {
+        // Don't show the border while Mission Control is active
+        if isInMissionControl {
+            return
+        }
+
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
             hideBorder()
             return
         }
-        
+
         if WindowSelectManager.shared.isActive || GapSelectManager.shared.isActive {
             hideBorder()
             return
@@ -143,6 +183,24 @@ class BorderManager: ObservableObject {
     // (triggerFlashAnimation method is no longer called and can be removed or ignored)
     
     private func checkWindowFrame() {
+        // Check Mission Control's state
+        let missionControlActive = checkMissionControlActive()
+
+        if missionControlActive != isInMissionControl {
+            isInMissionControl = missionControlActive
+            if isInMissionControl {
+                // Mission Control starts → hide the border
+                borderWindow?.orderOut(nil)
+                return
+            } else {
+                // Mission Control ends → show the border again
+                borderWindow?.orderFront(nil)
+            }
+        }
+
+        // Don't update while Mission Control is active
+        if isInMissionControl { return }
+
         guard let currentWindow = currentWindow,
               let borderWindow = borderWindow,
               borderWindow.isVisible else { return }
