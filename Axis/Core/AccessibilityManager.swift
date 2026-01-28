@@ -89,6 +89,23 @@ class AccessibilityManager: ObservableObject {
         }
     }
     
+    /// Get the set of window IDs currently showing in the current Space (on screen)
+    /// Using kCGWindowListOptionOnScreenOnly excludes windows on other Spaces
+    func getOnScreenWindowIDs() -> Set<CGWindowID> {
+        let options = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
+        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        
+        var windowIDs = Set<CGWindowID>()
+        for windowInfo in windowList {
+            if let windowNumber = windowInfo[kCGWindowNumber as String] as? CGWindowID {
+                windowIDs.insert(windowNumber)
+            }
+        }
+        return windowIDs
+    }
+    
     /// Get the focused window
     func getFocusedWindow() -> WindowInfo? {
         guard isAccessibilityEnabled else {
