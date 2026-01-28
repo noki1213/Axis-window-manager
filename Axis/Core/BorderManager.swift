@@ -146,28 +146,35 @@ class BorderManager: ObservableObject {
         guard let currentWindow = currentWindow,
               let borderWindow = borderWindow,
               borderWindow.isVisible else { return }
-        
-        var position: CFTypeRef?
-        var size: CFTypeRef?
-        
+
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+
         let axElement = currentWindow.axElement
-        
-        AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &position)
-        AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &size)
-        
-        if let pos = position as? CGPoint, let sz = size as? CGSize {
-            let newFrame = CGRect(origin: pos, size: sz)
-            let expectedBorderRect = calculateBorderRect(for: newFrame)
-            
-            // Correct any positional drift (applied immediately)
-            if abs(borderWindow.frame.origin.x - expectedBorderRect.origin.x) > 1 ||
-               abs(borderWindow.frame.origin.y - expectedBorderRect.origin.y) > 1 ||
-               abs(borderWindow.frame.width - expectedBorderRect.width) > 1 ||
-               abs(borderWindow.frame.height - expectedBorderRect.height) > 1 {
-                
-                borderWindow.setFrame(expectedBorderRect, display: true)
-                borderView?.frame = NSRect(origin: .zero, size: expectedBorderRect.size)
-            }
+
+        AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
+        AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
+
+        // Extract the value from AXValue (can't cast directly)
+        guard let posValue = positionRef, let szValue = sizeRef else { return }
+
+        var position = CGPoint.zero
+        var size = CGSize.zero
+
+        AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+        AXValueGetValue(szValue as! AXValue, .cgSize, &size)
+
+        let newFrame = CGRect(origin: position, size: size)
+        let expectedBorderRect = calculateBorderRect(for: newFrame)
+
+        // Correct any positional drift (applied immediately)
+        if abs(borderWindow.frame.origin.x - expectedBorderRect.origin.x) > 1 ||
+           abs(borderWindow.frame.origin.y - expectedBorderRect.origin.y) > 1 ||
+           abs(borderWindow.frame.width - expectedBorderRect.width) > 1 ||
+           abs(borderWindow.frame.height - expectedBorderRect.height) > 1 {
+
+            borderWindow.setFrame(expectedBorderRect, display: true)
+            borderView?.frame = NSRect(origin: .zero, size: expectedBorderRect.size)
         }
     }
     
