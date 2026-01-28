@@ -355,6 +355,19 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        // MARK: Window Resize (- / =)
+        case kVK_ANSI_Minus: // ウィンドウを縮小
+            DispatchQueue.main.async { [weak self] in
+                self?.tilingEngine.resizeCurrentWindow(increase: false)
+            }
+            return true
+            
+        case kVK_ANSI_Equal: // ウィンドウを拡大（=キーはShift押すと+になる）
+            DispatchQueue.main.async { [weak self] in
+                self?.tilingEngine.resizeCurrentWindow(increase: true)
+            }
+            return true
+            
         default:
             return false
         }
