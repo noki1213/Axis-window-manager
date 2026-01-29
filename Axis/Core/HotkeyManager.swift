@@ -325,28 +325,24 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Virtual Desktop (UO)
-        case kVK_ANSI_U: // 左の仮想デスクトップ
-            DispatchQueue.main.async { [weak self] in
-                if hasShift {
-                    // Send the window to the desktop on the left (to be implemented in Phase 4)
-                } else {
-                    // Move to the desktop on the left
-                    self?.switchToSpace(direction: .left)
+        // MARK: Move Window to Virtual Desktop (HZ)
+        case kVK_ANSI_H: // ウィンドウを左の仮想デスクトップに送る
+            if hasShift {
+                DispatchQueue.main.async { [weak self] in
+                    self?.moveWindowToSpace(direction: .left)
                 }
+                return true
             }
-            return true
+            return false
 
-        case kVK_ANSI_O: // 右の仮想デスクトップ
-            DispatchQueue.main.async { [weak self] in
-                if hasShift {
-                    // Send the window to the desktop on the right (to be implemented in Phase 4)
-                } else {
-                    // Move to the desktop on the right
-                    self?.switchToSpace(direction: .right)
+        case kVK_ANSI_Z: // ウィンドウを右の仮想デスクトップに送る
+            if hasShift {
+                DispatchQueue.main.async { [weak self] in
+                    self?.moveWindowToSpace(direction: .right)
                 }
+                return true
             }
-            return true
+            return false
             
         // MARK: Monitor Cursor (MQ)
         case kVK_ANSI_M, kVK_ANSI_Q: // Monitor間カーソル移動
@@ -402,52 +398,116 @@ class HotkeyManager: ObservableObject {
         CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
     }
 
-    // MARK: - Virtual Desktop (Space) Switching
+    // MARK: - Virtual Desktop (Space) Window Movement
 
     enum SpaceDirection {
         case left
         case right
     }
-
-    /// Switch the virtual desktop (Space)
-    /// Send ctrl+arrow key using CGEvent
-    private func switchToSpace(direction: SpaceDirection) {
-        print("[Axis] switchToSpace: direction=\(direction)")
-
-        // Arrow key key codes
-        let arrowKeyCode: CGKeyCode
+    
+    /// Send the window to another Space
+    /// Simulate a Space switch by dragging the title bar
+    private func moveWindowToSpace(direction: SpaceDirection) {
+        print("[Axis] moveWindowToSpace: direction=\(direction)")
+        
+        // Get the currently focused window
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+              let axApp = AXUIElementCreateApplication(frontmostApp.processIdentifier) as AXUIElement? else {
+            print("[Axis] moveWindowToSpace: Failed to get frontmost app")
+            return
+        }
+        
+        // Get the focused window
+        var focusedWindow: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindow)
+        guard result == .success, let windowElement = focusedWindow else {
+            print("[Axis] moveWindowToSpace: Failed to get focused window")
+            return
+        }
+        
+        // Get the window's position
+        var positionValue: CFTypeRef?
+        AXUIElementCopyAttributeValue(windowElement as! AXUIElement, kAXPositionAttribute as CFString, &positionValue)
+        var position = CGPoint.zero
+        if let posValue = positionValue {
+            AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+        }
+        
+        // Get the window's size
+        var sizeValue: CFTypeRef?
+        AXUIElementCopyAttributeValue(windowElement as! AXUIElement, kAXSizeAttribute as CFString, &sizeValue)
+        var size = CGSize.zero
+        if let szValue = sizeValue {
+            AXValueGetValue(szValue as! AXValue, .cgSize, &size)
+        }
+        
+        // Calculate the center of the title bar (around 20px from the top of the window)
+        let titleBarCenter = CGPoint(
+            x: position.x + size.width / 2,
+            y: position.y + 20
+        )
+        
+        // Send the window to a Space using mouse events + key events
+        performMoveWindowToSpace(at: titleBarCenter, direction: direction)
+    }
+    
+    /// Move the window with a mouse drag plus keystrokes
+    private func performMoveWindowToSpace(at point: CGPoint, direction: SpaceDirection) {
+        let keyCode: Int
         switch direction {
         case .left:
-            arrowKeyCode = CGKeyCode(kVK_LeftArrow)
+            keyCode = 123 // 左矢印キー
         case .right:
-            arrowKeyCode = CGKeyCode(kVK_RightArrow)
+            keyCode = 124 // 右矢印キー
         }
-
-        // Create the event source
+        
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            print("[Axis] switchToSpace: Failed to create event source")
+            print("[Axis] performMoveWindowToSpace: Failed to create event source")
             return
         }
-
-        // Create a key-down event for ctrl+arrow key
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: true) else {
-            print("[Axis] switchToSpace: Failed to create keyDown event")
+        
+        // Mouse-down event (clicking the title bar)
+        guard let mouseDown = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left) else {
+            print("[Axis] performMoveWindowToSpace: Failed to create mouseDown event")
             return
         }
-        keyDown.flags = .maskControl
-
-        // Create the key-up event
-        guard let keyUp = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: false) else {
-            print("[Axis] switchToSpace: Failed to create keyUp event")
+        
+        // Mouse-up event
+        guard let mouseUp = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+            print("[Axis] performMoveWindowToSpace: Failed to create mouseUp event")
             return
         }
-        keyUp.flags = .maskControl
-
-        // Post the event (using cgAnnotatedSessionEventTap)
-        keyDown.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp.post(tap: .cgAnnotatedSessionEventTap)
-
-        print("[Axis] switchToSpace: completed")
+        
+        // Send mouse-down
+        mouseDown.post(tap: .cghidEventTap)
+        
+        // Wait briefly, then send the keystroke
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            // Send ctrl+arrow key via AppleScript
+            let script = """
+            tell application "System Events"
+                key code \(keyCode) using control down
+            end tell
+            """
+            self.executeAppleScript(script)
+            
+            // Send mouse-up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                mouseUp.post(tap: .cghidEventTap)
+                print("[Axis] performMoveWindowToSpace: completed")
+            }
+        }
+    }
+    
+    /// Run the AppleScript
+    private func executeAppleScript(_ script: String) {
+        var error: NSDictionary?
+        if let appleScript = NSAppleScript(source: script) {
+            appleScript.executeAndReturnError(&error)
+            if let error = error {
+                print("[Axis] AppleScript error: \(error)")
+            }
+        }
     }
     
     // MARK: - Window Select Mode Key Handling
