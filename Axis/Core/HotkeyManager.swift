@@ -325,28 +325,6 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Virtual Desktop (UO)
-        case kVK_ANSI_U: // 左の仮想デスクトップ
-            DispatchQueue.main.async { [weak self] in
-                if hasShift {
-                    // Send the window to the desktop on the left (to be implemented in Phase 4)
-                } else {
-                    // Move to the desktop on the left
-                    self?.switchToSpace(direction: .left)
-                }
-            }
-            return true
-
-        case kVK_ANSI_O: // 右の仮想デスクトップ
-            DispatchQueue.main.async { [weak self] in
-                if hasShift {
-                    // Send the window to the desktop on the right (to be implemented in Phase 4)
-                } else {
-                    // Move to the desktop on the right
-                    self?.switchToSpace(direction: .right)
-                }
-            }
-            return true
             
         // MARK: Monitor Cursor (MQ)
         case kVK_ANSI_M, kVK_ANSI_Q: // Monitor間カーソル移動
@@ -400,54 +378,6 @@ class HotkeyManager: ObservableObject {
         let warpY = mainScreenHeight - centerY
 
         CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
-    }
-
-    // MARK: - Virtual Desktop (Space) Switching
-
-    enum SpaceDirection {
-        case left
-        case right
-    }
-
-    /// Switch the virtual desktop (Space)
-    /// Send ctrl+arrow key using CGEvent
-    private func switchToSpace(direction: SpaceDirection) {
-        print("[Axis] switchToSpace: direction=\(direction)")
-
-        // Arrow key key codes
-        let arrowKeyCode: CGKeyCode
-        switch direction {
-        case .left:
-            arrowKeyCode = CGKeyCode(kVK_LeftArrow)
-        case .right:
-            arrowKeyCode = CGKeyCode(kVK_RightArrow)
-        }
-
-        // Create the event source
-        guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            print("[Axis] switchToSpace: Failed to create event source")
-            return
-        }
-
-        // Create a key-down event for ctrl+arrow key
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: true) else {
-            print("[Axis] switchToSpace: Failed to create keyDown event")
-            return
-        }
-        keyDown.flags = .maskControl
-
-        // Create the key-up event
-        guard let keyUp = CGEvent(keyboardEventSource: source, virtualKey: arrowKeyCode, keyDown: false) else {
-            print("[Axis] switchToSpace: Failed to create keyUp event")
-            return
-        }
-        keyUp.flags = .maskControl
-
-        // Post the event (using cgAnnotatedSessionEventTap)
-        keyDown.post(tap: .cgAnnotatedSessionEventTap)
-        keyUp.post(tap: .cgAnnotatedSessionEventTap)
-
-        print("[Axis] switchToSpace: completed")
     }
     
     // MARK: - Window Select Mode Key Handling
