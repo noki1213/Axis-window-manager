@@ -298,6 +298,13 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        // MARK: Focus Mode
+        case kVK_ANSI_F:
+            DispatchQueue.main.async {
+                FocusModeManager.shared.toggle()
+            }
+            return true
+            
         // MARK: Mode Switching
         case kVK_ANSI_S: // ウィンドウ選択モード
             DispatchQueue.main.async { [weak self] in
