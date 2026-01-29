@@ -325,8 +325,8 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Move Window to Virtual Desktop (HZ)
-        case kVK_ANSI_H: // ウィンドウを左の仮想デスクトップに送る
+        // MARK: Move Window to Virtual Desktop (UO)
+        case kVK_ANSI_U: // ウィンドウを左の仮想デスクトップに送る
             if hasShift {
                 DispatchQueue.main.async { [weak self] in
                     self?.moveWindowToSpace(direction: .left)
@@ -335,7 +335,7 @@ class HotkeyManager: ObservableObject {
             }
             return false
 
-        case kVK_ANSI_Z: // ウィンドウを右の仮想デスクトップに送る
+        case kVK_ANSI_O: // ウィンドウを右の仮想デスクトップに送る
             if hasShift {
                 DispatchQueue.main.async { [weak self] in
                     self?.moveWindowToSpace(direction: .right)
