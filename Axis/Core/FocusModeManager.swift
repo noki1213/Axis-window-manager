@@ -8,15 +8,16 @@
 import AppKit
 import Combine
 
-/// Focus Mode: show the focused window centered and dim the background
+/// Focus Mode: show the focused window centered
 class FocusModeManager: ObservableObject {
     static let shared = FocusModeManager()
 
     @Published var isActive: Bool = false
     
-    private var overlayWindow: NSWindow?
     private var focusedWindowID: CGWindowID?
-    private var originalFrame: CGRect?
+    
+    /// Save the original position of a window moved off-screen
+    private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
 
     private init() {}
 
@@ -29,7 +30,7 @@ class FocusModeManager: ObservableObject {
     }
     
     private func enter() {
-        guard let window = AccessibilityManager.shared.getFocusedWindow() else {
+        guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
             print("[Axis] FocusMode: No focused window")
             return
         }
@@ -39,62 +40,106 @@ class FocusModeManager: ObservableObject {
             return
         }
         
-        print("[Axis] FocusMode: Entering with window '\(window.title)'")
+        print("[Axis] FocusMode: Entering with window '\(focusedWindow.title)'")
         
         // Save the state
-        focusedWindowID = window.id
-        originalFrame = window.frame
+        focusedWindowID = focusedWindow.id
         isActive = true
         
         // Hide the border
         BorderManager.shared.hideBorder()
         
-        // Show the overlay
-        showOverlay(on: screen)
+        // Move other windows off-screen (same screen only)
+        hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
         
-        // Move the window to the center
-        centerWindow(window, on: screen)
+        // Move the focused window to the center
+        centerWindow(focusedWindow, on: screen)
         
         // Focus the window
-        window.focus()
+        focusedWindow.focus()
     }
     
     private func exit() {
-        print("[Axis] FocusMode: Exiting")
+        print("[Axis] FocusMode: Exiting, will restore \(hiddenWindowFrames.count) windows")
         
-        // Remove the overlay (use orderOut() rather than close())
-        overlayWindow?.orderOut(nil)
-        overlayWindow = nil
-        
-        // Reset the state
+        // Reset state (reset first to prevent re-entrancy)
         isActive = false
         focusedWindowID = nil
-        originalFrame = nil
         
-        // Retiling puts it back in its original position
-        TilingEngine.shared.tileAllScreens()
+        // Move a window that ended up off-screen back to its original position
+        restoreHiddenWindows()
         
-        // Update the border
-        BorderManager.shared.updateBorder()
+        // Retile after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Retiling puts it back in its original position
+            TilingEngine.shared.tileAllScreens()
+            
+            // Update the border
+            BorderManager.shared.updateBorder()
+        }
     }
     
-    private func showOverlay(on screen: NSScreen) {
-        let overlay = NSWindow(
-            contentRect: screen.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+    private func hideOtherWindows(exceptWindowID: CGWindowID, on targetScreen: NSScreen) {
+        hiddenWindowFrames.removeAll()
         
-        overlay.backgroundColor = NSColor.black.withAlphaComponent(0.7)
-        overlay.isOpaque = false
-        overlay.hasShadow = false
-        overlay.level = .normal
-        overlay.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
-        overlay.ignoresMouseEvents = true
+        // Get all windows
+        let allWindows = AccessibilityManager.shared.getAllWindows()
         
-        overlay.orderFront(nil)
-        overlayWindow = overlay
+        // The target screen's frame (converted to AX coordinates)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        
+        for window in allWindows {
+            // Skip the focused window
+            if window.id == exceptWindowID {
+                continue
+            }
+            
+            // Skip minimized windows
+            if window.isMinimized {
+                continue
+            }
+            
+            // Calculate the window's center point (AX coordinate system)
+            let windowCenterX = window.frame.midX
+            let windowCenterY = window.frame.midY
+            
+            // Convert from AX coordinates to NS coordinates to determine the screen
+            let windowCenterNS = CGPoint(x: windowCenterX, y: mainScreenHeight - windowCenterY)
+            
+            // Skip windows that aren't on the target screen
+            if !targetScreen.frame.contains(windowCenterNS) {
+                continue
+            }
+            
+            // Save the original position
+            hiddenWindowFrames[window.id] = window.frame
+            
+            // Move off-screen (a large offset to the right)
+            let offscreenX: CGFloat = 10000
+            let newFrame = CGRect(x: offscreenX, y: window.frame.origin.y, 
+                                  width: window.frame.width, height: window.frame.height)
+            window.setFrame(newFrame)
+            
+            print("[Axis] FocusMode: Moved window '\(window.title)' offscreen")
+        }
+        
+        print("[Axis] FocusMode: Hidden \(hiddenWindowFrames.count) windows on current screen")
+    }
+    
+    private func restoreHiddenWindows() {
+        // Get all windows
+        let allWindows = AccessibilityManager.shared.getAllWindows()
+        
+        for window in allWindows {
+            // Restore the saved frame if there is one
+            if let originalFrame = hiddenWindowFrames[window.id] {
+                window.setFrame(originalFrame)
+                print("[Axis] FocusMode: Restored window '\(window.title)' to \(originalFrame)")
+            }
+        }
+        
+        print("[Axis] FocusMode: Restored \(hiddenWindowFrames.count) windows")
+        hiddenWindowFrames.removeAll()
     }
     
     private func centerWindow(_ window: WindowInfo, on screen: NSScreen) {
