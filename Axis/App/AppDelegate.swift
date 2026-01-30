@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyManager = HotkeyManager.shared
     private let tilingEngine = TilingEngine.shared
     private let borderManager = BorderManager.shared
+    private let workspaceManager = WorkspaceManager.shared
     
     // For detecting window changes
     private var windowCheckTimer: Timer?
@@ -55,6 +56,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(onModeChanged),
             name: .modeChanged,
+            object: nil
+        )
+
+        // Watch for workspace-change notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(onWorkspaceChanged),
+            name: .workspaceChanged,
             object: nil
         )
     }
@@ -165,14 +174,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startWindowManagement() {
         // Start hotkey monitoring
         hotkeyManager.start()
-        
+
+        // Initialize the workspace (register all windows to workspace 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.workspaceManager.initializeWithCurrentWindows()
+        }
+
         // Run the initial tiling
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.tilingEngine.tileAllScreens()
             self?.borderManager.updateBorder()
         }
-        
-        // Watch for window changes (to be implemented later)
+
+        // Watch for window changes
         setupWindowObservers()
     }
     
@@ -225,12 +239,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkForWindowChanges() {
-        // Skip processing while a Space switch is in progress
-        guard !isSpaceSwitching else {
-            print("[Axis] Skipping window check during space switching")
+        // Skip processing while a Space switch or workspace switch is in progress
+        guard !isSpaceSwitching && !workspaceManager.isSwitching else {
+            print("[Axis] Skipping window check during switching")
             return
         }
-        
+
         // Target only on-screen windows (i.e. windows in the current Space)
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
@@ -241,24 +255,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if currentCount != lastWindowCount {
             print("[Axis] Window count changed: \(lastWindowCount) -> \(currentCount)")
 
-            // If a window was closed, move focus to a neighboring window
+            // When a window was closed
             if currentCount < lastWindowCount {
                 let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
                 print("[Axis] Windows closed: \(closedWindowIDs)")
+
+                // Also unregister from the workspace
+                for closedID in closedWindowIDs {
+                    workspaceManager.unregisterWindow(closedID)
+                }
+
                 focusAdjacentWindowAfterClose()
             }
-            
-            // If a window was added, move focus to the new window
+
+            // When a window was added
             if currentCount > lastWindowCount {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
                 print("[Axis] New windows: \(newWindowIDs)")
+
+                // Register the new window to the current workspace
+                for newID in newWindowIDs {
+                    if let window = currentWindows.first(where: { $0.id == newID }) {
+                        // Determine which screen a window belongs to
+                        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+                        let centerX = window.frame.midX
+                        let centerY = mainScreenHeight - window.frame.midY
+                        let center = CGPoint(x: centerX, y: centerY)
+
+                        for screen in NSScreen.screens {
+                            if screen.frame.contains(center) {
+                                workspaceManager.registerWindow(newID, on: screen)
+                                break
+                            }
+                        }
+                    }
+                }
+
                 focusNewWindow(newWindowIDs: newWindowIDs, allWindows: currentWindows)
             }
 
             lastWindowCount = currentCount
             lastWindowIDs = currentWindowIDs
             tilingEngine.tileAllScreens()
-            
+
             // Update the border after tiling
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.borderManager.updateBorder()
@@ -322,28 +361,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
         print("[Axis] Active space changed")
-        
+
         // Set the Space-switching flag
         isSpaceSwitching = true
-        
+
         // Update the current Space's window info after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
-            
+
             // Update lastWindowIDs with the current Space's on-screen windows
             let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
             let allWindows = self.accessibilityManager.getAllWindows()
             let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
-            
-            // Register the new Space's windows in tiledWindows
-            // (Existing layout info is preserved inside tile(on:))
+
+            // Reinitialize the workspace's window registrations
+            // (The window set may change during a macOS Space switch)
+            self.workspaceManager.initializeWithCurrentWindows()
+
+            // Reapply tiling
             self.tilingEngine.tileAllScreens()
-            
+
             // Update the border
             self.borderManager.updateBorder()
-            
+
             // Clear the flag
             self.isSpaceSwitching = false
             print("[Axis] Space switch completed, tracking \(self.lastWindowCount) windows")
@@ -356,5 +398,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateStatusItemIcon(mode: mode)
             }
         }
+    }
+
+    @objc private func onWorkspaceChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateWorkspaceDisplay()
+        }
+
+        // Update window tracking after a workspace switch
+        // (delayed slightly to wait for the position change to take effect)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else { return }
+            let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
+            let allWindows = self.accessibilityManager.getAllWindows()
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+            self.lastWindowCount = onScreenWindows.count
+            self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
+            print("[Axis] Workspace changed, tracking \(self.lastWindowCount) windows")
+        }
+    }
+
+    /// Show the workspace number in the menu bar
+    private func updateWorkspaceDisplay() {
+        guard let button = statusItem?.button else { return }
+        let ws = workspaceManager.currentWorkspaceForFocusedScreen()
+        button.title = " \(ws)"
     }
 }

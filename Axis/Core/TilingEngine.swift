@@ -38,27 +38,27 @@ class TilingEngine: ObservableObject {
     /// Run tiling on the given screen
     func tile(on screen: NSScreen) {
         let allWindows = accessibilityManager.getAllWindows()
-        
-        // Get the on-screen window IDs (only windows on the current Space)
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+
+        // Get the window IDs belonging to the workspace
+        let workspaceIDs = getWorkspaceWindowIDs(on: screen)
 
         // Filter down to managed windows
         // - shouldBeManaged(): excludes minimized, fullscreen, and non-standard windows
         // - shouldFloat(): excludes windows that should float
-        // - onScreenIDs.contains(): only targets windows on the current Space
+        // - workspaceIDs.contains(): targets only windows in the current workspace
         let managedWindows = allWindows.filter { window in
-            window.shouldBeManaged() && !window.shouldFloat() && onScreenIDs.contains(window.id)
+            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id)
         }
-        
-        // Do nothing if there are no on-screen windows
-        // (To preserve the window layout of other Spaces)
+
+        // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
-            print("[Axis] tile: No on-screen windows on this screen, skipping")
+            print("[Axis] tile: No workspace windows on this screen, skipping")
+            tiledWindows[screen] = []
             return
         }
 
-        // The ID set of all windows (on-screen only)
-        let onScreenManagedIDs = Set(managedWindows.map { $0.id })
+        // The set of all window IDs
+        let managedWindowIDs = Set(managedWindows.map { $0.id })
 
         // A dictionary of all windows (ID -> WindowInfo)
         let windowDict = Dictionary(uniqueKeysWithValues: managedWindows.map { ($0.id, $0) })
@@ -69,56 +69,36 @@ class TilingEngine: ObservableObject {
         // Collect the window IDs already present in the column structure
         let existingWindowIDs = Set(columns.flatMap { $0.map { $0.id } })
 
-        // Remove closed windows from the column structure
-        // But only check ones present in the on-screen list
-        // Keep off-screen windows (on another Space)
+        // Remove closed windows and windows from other workspaces from the column structure
         columns = columns.map { column in
             column.filter { windowInfo in
-                // Keep it if it's on-screen, or if it's absent from the on-screen list (meaning it's on another Space)
-                onScreenManagedIDs.contains(windowInfo.id) || !onScreenIDs.contains(windowInfo.id)
+                managedWindowIDs.contains(windowInfo.id)
             }
         }.filter { !$0.isEmpty }
 
-        // Refresh window info (keep the column structure intact, on-screen windows only)
+        // Refresh the window info to the latest
         columns = columns.map { column in
             column.compactMap { windowInfo in
-                // Refresh on-screen windows with the latest info
                 if let updated = windowDict[windowInfo.id] {
                     return updated
                 }
-                // Keep off-screen windows as-is
-                return windowInfo
+                return nil
             }
-        }
+        }.filter { !$0.isEmpty }
 
         // Add new windows (ones not already in a column)
-        // Determine the screen from the position
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         for window in managedWindows {
             if !existingWindowIDs.contains(window.id) {
-                // Check whether it's on this screen
-                let windowY = mainScreenHeight - window.frame.origin.y - window.frame.height
-                let windowCenter = CGPoint(
-                    x: window.frame.midX,
-                    y: windowY + window.frame.height / 2
-                )
-                if screen.frame.contains(windowCenter) {
-                    // Add the new window as its own separate column
-                    columns.append([window])
-                }
+                // Add the new window as its own separate column
+                columns.append([window])
             }
         }
 
-        // Update the state (keeping layout info for all windows)
+        // Update the state
         tiledWindows[screen] = columns
-        
+
         // Compute and apply the tiling layout
-        // Apply only to on-screen windows (excludes windows on other Spaces)
-        let onScreenColumns = columns.map { column in
-            column.filter { onScreenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
-        
-        applyColumnTiling(columns: onScreenColumns, on: screen)
+        applyColumnTiling(columns: columns, on: screen)
     }
     
     /// Run tiling across all screens
@@ -146,13 +126,13 @@ class TilingEngine: ObservableObject {
 
         print("[Axis] moveFocus: screen frame=\(screen.frame)")
 
-        // Target only on-screen windows (excludes windows on other Spaces)
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        // Target only windows belonging to the current workspace
+        let workspaceIDs = getWorkspaceWindowIDs(on: screen)
         let allColumns = tiledWindows[screen] ?? []
         let columns = allColumns.map { column in
-            column.filter { onScreenIDs.contains($0.id) }
+            column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
-        
+
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
             print("[Axis] Current window not in tiled windows")
             return
@@ -250,15 +230,15 @@ class TilingEngine: ObservableObject {
             return
         }
 
-        // Get the on-screen window IDs
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-        
-        // Get all columns and filter down to on-screen windows only
+        // Get the window IDs of the current workspace
+        let workspaceIDs = getWorkspaceWindowIDs(on: screen)
+
+        // Get all columns and filter down to just the workspace's windows
         let allColumns = tiledWindows[screen] ?? []
         var columns = allColumns.map { column in
-            column.filter { onScreenIDs.contains($0.id) }
+            column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
-        
+
         guard let (columnIndex, rowIndex) = findWindowPosition(window: currentWindow, in: columns) else {
             return
         }
@@ -828,11 +808,11 @@ class TilingEngine: ObservableObject {
         let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
         guard let targetScreen = adjacentScreen else { return nil }
 
-        // Target only windows shown on the current Space
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        // Target only the current workspace's windows
+        let workspaceIDs = getWorkspaceWindowIDs(on: targetScreen)
         let allColumns = tiledWindows[targetScreen] ?? []
         let columns = allColumns.map { column in
-            column.filter { onScreenIDs.contains($0.id) }
+            column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
         guard !columns.isEmpty else { return nil }
 
@@ -1097,7 +1077,59 @@ class TilingEngine: ObservableObject {
         columnWidthRatios[screen] = nil
         rowHeightRatios[screen] = nil
     }
-    
+
+    // MARK: - Workspace State Management
+
+    /// Save the current tiling state (used on workspace switches)
+    func saveTilingStateForScreen(_ screen: NSScreen) -> PerScreenSnapshot {
+        let columns = tiledWindows[screen] ?? []
+        let columnIDs = columns.map { column in
+            column.map { $0.id }
+        }
+        return PerScreenSnapshot(
+            columns: columnIDs,
+            columnWidthRatios: columnWidthRatios[screen],
+            rowHeightRatios: rowHeightRatios[screen]
+        )
+    }
+
+    /// Restore the saved tiling state (used on workspace switches)
+    func restoreTilingStateForScreen(_ screen: NSScreen, snapshot: PerScreenSnapshot) {
+        // Restore the ratios
+        columnWidthRatios[screen] = snapshot.columnWidthRatios
+        rowHeightRatios[screen] = snapshot.rowHeightRatios
+
+        // Restore the column structure (rebuild WindowInfo from window IDs)
+        let allWindows = accessibilityManager.getAllWindows()
+        let windowDict = Dictionary(uniqueKeysWithValues: allWindows.compactMap { w -> (CGWindowID, WindowInfo)? in
+            return (w.id, w)
+        })
+
+        let restoredColumns: [[WindowInfo]] = snapshot.columns.compactMap { columnIDs in
+            let column = columnIDs.compactMap { windowDict[$0] }
+            return column.isEmpty ? nil : column
+        }
+
+        tiledWindows[screen] = restoredColumns
+    }
+
+    /// Clear the tiling state (used when switching to a new workspace)
+    func clearTilingStateForScreen(_ screen: NSScreen) {
+        tiledWindows[screen] = nil
+        columnWidthRatios[screen] = nil
+        rowHeightRatios[screen] = nil
+    }
+
+    /// Get the window IDs belonging to the current workspace (for filtering)
+    private func getWorkspaceWindowIDs(on screen: NSScreen) -> Set<CGWindowID> {
+        let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
+        // Use the on-screen IDs if the workspace hasn't been initialized
+        if workspaceIDs.isEmpty && WorkspaceManager.shared.activeWorkspace.isEmpty {
+            return accessibilityManager.getOnScreenWindowIDs()
+        }
+        return workspaceIDs
+    }
+
     // MARK: - Center-Fixed Resize (Normal Mode)
     
     /// Grow/shrink the focused window while keeping it centered
@@ -1109,13 +1141,13 @@ class TilingEngine: ObservableObject {
             return
         }
         
-        // Target only on-screen windows
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        // Target only the current workspace's windows
+        let workspaceIDs = getWorkspaceWindowIDs(on: screen)
         let allColumns = tiledWindows[screen] ?? []
         let columns = allColumns.map { column in
-            column.filter { onScreenIDs.contains($0.id) }
+            column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
-        
+
         guard let (columnIndex, _) = findWindowPosition(window: focusedWindow, in: columns) else {
             print("[Axis] resizeCurrentWindow: Window not in tiled windows")
             return
