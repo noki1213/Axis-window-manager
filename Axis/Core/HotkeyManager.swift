@@ -340,6 +340,33 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        // MARK: Workspace Switching (O / U)
+        case kVK_ANSI_O: // Next workspace (+1) / move with Shift
+            DispatchQueue.main.async {
+                guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
+                if hasShift {
+                    // Move the focused window to the next workspace
+                    WorkspaceManager.shared.moveWindowToNextWorkspace(on: screen)
+                } else {
+                    // Switch to the next workspace
+                    WorkspaceManager.shared.switchToNextWorkspace(on: screen)
+                }
+            }
+            return true
+
+        case kVK_ANSI_U: // Previous workspace (-1) / move with Shift
+            DispatchQueue.main.async {
+                guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
+                if hasShift {
+                    // Move the focused window to the previous workspace
+                    WorkspaceManager.shared.moveWindowToPreviousWorkspace(on: screen)
+                } else {
+                    // Switch to the previous workspace
+                    WorkspaceManager.shared.switchToPreviousWorkspace(on: screen)
+                }
+            }
+            return true
+
         // MARK: Window Resize (- / =)
         case kVK_ANSI_Minus: // Shrink the window
             DispatchQueue.main.async { [weak self] in

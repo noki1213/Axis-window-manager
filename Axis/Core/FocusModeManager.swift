@@ -81,48 +81,41 @@ class FocusModeManager: ObservableObject {
     
     private func hideOtherWindows(exceptWindowID: CGWindowID, on targetScreen: NSScreen) {
         hiddenWindowFrames.removeAll()
-        
+
+        // Get the window IDs that belong to the current workspace
+        let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: targetScreen)
+
         // Get all windows
         let allWindows = AccessibilityManager.shared.getAllWindows()
-        
-        // The target screen's frame (converted to AX coordinates)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        
+
         for window in allWindows {
             // Skip the focused window
             if window.id == exceptWindowID {
                 continue
             }
-            
+
             // Skip minimized windows
             if window.isMinimized {
                 continue
             }
-            
-            // Calculate the window's center point (AX coordinate system)
-            let windowCenterX = window.frame.midX
-            let windowCenterY = window.frame.midY
-            
-            // Convert from AX coordinates to NS coordinates to determine the screen
-            let windowCenterNS = CGPoint(x: windowCenterX, y: mainScreenHeight - windowCenterY)
-            
-            // Skip windows that aren't on the target screen
-            if !targetScreen.frame.contains(windowCenterNS) {
+
+            // Skip windows that don't belong to the current workspace
+            if !workspaceIDs.contains(window.id) {
                 continue
             }
-            
+
             // Save the original position
             hiddenWindowFrames[window.id] = window.frame
-            
+
             // Move off-screen (a large offset to the right)
             let offscreenX: CGFloat = 10000
-            let newFrame = CGRect(x: offscreenX, y: window.frame.origin.y, 
+            let newFrame = CGRect(x: offscreenX, y: window.frame.origin.y,
                                   width: window.frame.width, height: window.frame.height)
             window.setFrame(newFrame)
-            
+
             print("[Axis] FocusMode: Moved window '\(window.title)' offscreen")
         }
-        
+
         print("[Axis] FocusMode: Hidden \(hiddenWindowFrames.count) windows on current screen")
     }
     

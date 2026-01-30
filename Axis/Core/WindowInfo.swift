@@ -115,6 +115,16 @@ struct WindowInfo: Identifiable, Equatable {
         AXUIElementSetAttributeValue(axElement, kAXSizeAttribute as CFString, sizeValue)
     }
     
+    /// Minimize the window (used to hide windows on workspace switches)
+    func minimize() {
+        AXUIElementSetAttributeValue(axElement, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+    }
+
+    /// Un-minimize the window
+    func unminimize() {
+        AXUIElementSetAttributeValue(axElement, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+    }
+
     /// Set focus to the window
     func focus() {
         // First activate the app
