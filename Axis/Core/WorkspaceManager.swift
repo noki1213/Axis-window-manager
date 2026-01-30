@@ -331,34 +331,103 @@ class WorkspaceManager: ObservableObject {
 		moveWindowToWorkspace(focusedWindow.id, workspace: currentWS - 1, on: screen)
 	}
 
+	// MARK: - Hide Corner (the AeroSpace approach)
+
+	/// The corner used to hide a window
+	private enum HideCorner {
+		case bottomLeft
+		case bottomRight
+	}
+
+	/// Determine the best hidden corner for the given monitor
+	/// Avoid the side that has a neighboring monitor
+	private func optimalHideCorner(for screenID: ScreenIdentifier) -> HideCorner {
+		guard let screen = screen(for: screenID) else {
+			return .bottomLeft
+		}
+
+		let screenFrame = screen.frame
+
+		// Check whether there's another monitor to the right
+		var hasMonitorOnRight = false
+		for otherScreen in NSScreen.screens {
+			let otherId = screenIdentifier(for: otherScreen)
+			if otherId == screenID { continue }
+
+			// If another monitor's left edge is near this monitor's right edge, treat it as being "to the right"
+			if otherScreen.frame.minX >= screenFrame.maxX - 10 {
+				hasMonitorOnRight = true
+				break
+			}
+		}
+
+		// Bottom-left if there's a monitor to the right, otherwise bottom-right (default)
+		return hasMonitorOnRight ? .bottomLeft : .bottomRight
+	}
+
+	/// Compute the position for hiding a window (AX coordinates: top-left origin, Y increases downward)
+	/// Position it at the monitor's corner, leaving just 1 pixel inside the monitor
+	private func hidePosition(for window: WindowInfo, corner: HideCorner, on screenID: ScreenIdentifier) -> CGPoint? {
+		guard let screen = screen(for: screenID) else { return nil }
+
+		// Convert NSScreen coordinates to AX coordinates
+		// AX coordinate system: (0, 0) is top-left, Y increases downward
+		// NSScreen coordinate system: the origin is bottom-left
+		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+		let visibleFrame = screen.visibleFrame
+
+		// Convert visibleFrame to AX coordinates
+		let axVisibleTop = mainScreenHeight - visibleFrame.maxY
+		let axVisibleBottom = mainScreenHeight - visibleFrame.minY
+
+		switch corner {
+		case .bottomLeft:
+			// Position it so the window's right edge sits 1px inside visibleFrame's left edge
+			let x = visibleFrame.minX - window.frame.width + 1
+			// Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
+			let y = axVisibleBottom - 1
+			return CGPoint(x: x, y: y)
+
+		case .bottomRight:
+			// Position it so the window's left edge sits 1px inside visibleFrame's right edge
+			let x = visibleFrame.maxX - 1
+			// Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
+			let y = axVisibleBottom - 1
+			return CGPoint(x: x, y: y)
+		}
+	}
+
 	// MARK: - Private Helpers
 
-	/// Minimize the given workspace's windows to hide them
+	/// Move the given workspace's windows to the corner and hide them (the AeroSpace approach)
 	private func hideWindowsForWorkspace(_ workspace: Int, on screenID: ScreenIdentifier) {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace] else { return }
 
+		let corner = optimalHideCorner(for: screenID)
 		let allWindows = accessibilityManager.getAllWindows()
+
 		for window in allWindows {
 			if windowIDs.contains(window.id) {
-				// Save the original position
+				// Save the original position and size
 				savedFrames[window.id] = window.frame
-				// Minimize it to hide it
-				window.minimize()
+
+				// Move to the corner (position only, size unchanged)
+				if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
+					window.setPosition(hidePos)
+				}
 			}
 		}
-		print("[Axis] WorkspaceManager: Hidden \(windowIDs.count) windows for workspace \(workspace)")
+		print("[Axis] WorkspaceManager: Hidden \(windowIDs.count) windows for workspace \(workspace) using corner: \(corner)")
 	}
 
-	/// Deminiaturize and restore the given workspace's windows
+	/// Restore the given workspace's windows to their original positions
 	private func showWindowsForWorkspace(_ workspace: Int, on screenID: ScreenIdentifier) {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace] else { return }
 
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
 			if windowIDs.contains(window.id) {
-				// Deminiaturize it
-				window.unminimize()
-				// Restore to the saved position
+				// Restore the saved position and size
 				if let savedFrame = savedFrames[window.id] {
 					window.setFrame(savedFrame)
 					savedFrames.removeValue(forKey: window.id)
@@ -368,13 +437,29 @@ class WorkspaceManager: ObservableObject {
 		print("[Axis] WorkspaceManager: Shown \(windowIDs.count) windows for workspace \(workspace)")
 	}
 
-	/// Minimize a single window to hide it
+	/// Move a single window to the corner and hide it
 	private func hideWindow(_ windowID: CGWindowID) {
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
 			if window.id == windowID {
 				savedFrames[window.id] = window.frame
-				window.minimize()
+
+				// Identify which monitor this window is on
+				let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+				let windowCenterX = window.frame.midX
+				let windowCenterY = mainScreenHeight - window.frame.midY
+				let windowCenter = CGPoint(x: windowCenterX, y: windowCenterY)
+
+				for screen in NSScreen.screens {
+					if screen.frame.contains(windowCenter) {
+						let screenID = screenIdentifier(for: screen)
+						let corner = optimalHideCorner(for: screenID)
+						if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
+							window.setPosition(hidePos)
+						}
+						break
+					}
+				}
 				break
 			}
 		}
