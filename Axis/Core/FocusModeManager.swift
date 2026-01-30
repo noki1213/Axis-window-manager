@@ -79,11 +79,69 @@ class FocusModeManager: ObservableObject {
         }
     }
     
+    // MARK: - Hide Corner (the AeroSpace approach)
+
+    /// The corner used to hide a window
+    private enum HideCorner {
+        case bottomLeft
+        case bottomRight
+    }
+
+    /// Determine the best hidden corner for the given monitor
+    /// Avoid the side that has a neighboring monitor
+    private func optimalHideCorner(for screen: NSScreen) -> HideCorner {
+        let screenFrame = screen.frame
+
+        // Check whether there's another monitor to the right
+        var hasMonitorOnRight = false
+        for otherScreen in NSScreen.screens {
+            if otherScreen == screen { continue }
+
+            // If another monitor's left edge is near this monitor's right edge, treat it as being "to the right"
+            if otherScreen.frame.minX >= screenFrame.maxX - 10 {
+                hasMonitorOnRight = true
+                break
+            }
+        }
+
+        // Bottom-left if there's a monitor to the right, otherwise bottom-right (default)
+        return hasMonitorOnRight ? .bottomLeft : .bottomRight
+    }
+
+    /// Compute the position for hiding a window (AX coordinates: top-left origin, Y increases downward)
+    /// Position it at the monitor's corner, leaving just 1 pixel inside the monitor
+    private func hidePosition(for window: WindowInfo, corner: HideCorner, on screen: NSScreen) -> CGPoint {
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let visibleFrame = screen.visibleFrame
+
+        // Convert visibleFrame to AX coordinates
+        let axVisibleBottom = mainScreenHeight - visibleFrame.minY
+
+        switch corner {
+        case .bottomLeft:
+            // Position it so the window's right edge sits 1px inside visibleFrame's left edge
+            let x = visibleFrame.minX - window.frame.width + 1
+            // Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
+            let y = axVisibleBottom - 1
+            return CGPoint(x: x, y: y)
+
+        case .bottomRight:
+            // Position it so the window's left edge sits 1px inside visibleFrame's right edge
+            let x = visibleFrame.maxX - 1
+            // Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
+            let y = axVisibleBottom - 1
+            return CGPoint(x: x, y: y)
+        }
+    }
+
     private func hideOtherWindows(exceptWindowID: CGWindowID, on targetScreen: NSScreen) {
         hiddenWindowFrames.removeAll()
 
         // Get the window IDs that belong to the current workspace
         let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: targetScreen)
+
+        // Decide the best corner to hide it in
+        let corner = optimalHideCorner(for: targetScreen)
 
         // Get all windows
         let allWindows = AccessibilityManager.shared.getAllWindows()
@@ -107,16 +165,14 @@ class FocusModeManager: ObservableObject {
             // Save the original position
             hiddenWindowFrames[window.id] = window.frame
 
-            // Move off-screen (a large offset to the right)
-            let offscreenX: CGFloat = 10000
-            let newFrame = CGRect(x: offscreenX, y: window.frame.origin.y,
-                                  width: window.frame.width, height: window.frame.height)
-            window.setFrame(newFrame)
+            // Move to the corner (position only, size unchanged)
+            let hidePos = hidePosition(for: window, corner: corner, on: targetScreen)
+            window.setPosition(hidePos)
 
-            print("[Axis] FocusMode: Moved window '\(window.title)' offscreen")
+            print("[Axis] FocusMode: Moved window '\(window.title)' to corner")
         }
 
-        print("[Axis] FocusMode: Hidden \(hiddenWindowFrames.count) windows on current screen")
+        print("[Axis] FocusMode: Hidden \(hiddenWindowFrames.count) windows using corner: \(corner)")
     }
     
     private func restoreHiddenWindows() {
