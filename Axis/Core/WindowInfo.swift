@@ -103,9 +103,11 @@ struct WindowInfo: Identifiable, Equatable {
     
     /// Set the window's position
     func setPosition(_ position: CGPoint) {
-        var pos = position
-        let positionValue = AXValueCreate(.cgPoint, &pos)!
-        AXUIElementSetAttributeValue(axElement, kAXPositionAttribute as CFString, positionValue)
+        disableAnimations {
+            var pos = position
+            let positionValue = AXValueCreate(.cgPoint, &pos)!
+            AXUIElementSetAttributeValue(axElement, kAXPositionAttribute as CFString, positionValue)
+        }
     }
     
     /// Set the window's size
