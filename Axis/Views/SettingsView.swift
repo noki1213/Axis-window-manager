@@ -115,7 +115,6 @@ struct LayoutSettingsView: View {
 
 struct FloatingAppsView: View {
     @State private var floatingApps: [String] = [
-        "com.apple.finder",
         "com.apple.systempreferences"
     ]
     

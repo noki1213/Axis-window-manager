@@ -828,7 +828,12 @@ class TilingEngine: ObservableObject {
         let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
         guard let targetScreen = adjacentScreen else { return nil }
 
-        let columns = tiledWindows[targetScreen] ?? []
+        // Target only windows shown on the current Space
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allColumns = tiledWindows[targetScreen] ?? []
+        let columns = allColumns.map { column in
+            column.filter { onScreenIDs.contains($0.id) }
+        }.filter { !$0.isEmpty }
         guard !columns.isEmpty else { return nil }
 
         switch direction {
