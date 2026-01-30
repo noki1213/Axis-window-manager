@@ -320,7 +320,15 @@ class WorkspaceManager: ObservableObject {
 		guard let focusedWindow = accessibilityManager.getFocusedWindow() else { return }
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
-		moveWindowToWorkspace(focusedWindow.id, workspace: currentWS + 1, on: screen)
+		let targetWS = currentWS + 1
+		
+		// Move the window
+		moveWindowToWorkspace(focusedWindow.id, workspace: targetWS, on: screen)
+		
+		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+			self?.switchWorkspace(to: targetWS, on: screen)
+		}
 	}
 
 	/// Move the focused window to the previous workspace
@@ -328,7 +336,15 @@ class WorkspaceManager: ObservableObject {
 		guard let focusedWindow = accessibilityManager.getFocusedWindow() else { return }
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
-		moveWindowToWorkspace(focusedWindow.id, workspace: currentWS - 1, on: screen)
+		let targetWS = currentWS - 1
+		
+		// Move the window
+		moveWindowToWorkspace(focusedWindow.id, workspace: targetWS, on: screen)
+		
+		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+			self?.switchWorkspace(to: targetWS, on: screen)
+		}
 	}
 
 	// MARK: - Hide Corner (the AeroSpace approach)
