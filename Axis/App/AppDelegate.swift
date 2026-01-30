@@ -319,13 +319,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// After a window is closed, move focus to a neighboring window
+    /// After a window closes, move focus to the window under the mouse cursor
     private func focusAdjacentWindowAfterClose() {
         // Move focus after a short delay (waiting for tiling to finish)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self = self else { return }
 
-            // If no window is currently focused, focus the first window
+            // Get the current mouse position
+            let mouseLocation = NSEvent.mouseLocation
+            
+            // Find the window at the mouse position
+            if let windowUnderMouse = self.accessibilityManager.getWindowAt(mouseLocation) {
+                print("[Axis] Focusing window under mouse: \(windowUnderMouse.title)")
+                windowUnderMouse.focus()
+                return
+            }
+
+            // Only fall back to the top-left when there's no window under the mouse and nothing currently has focus
             if self.accessibilityManager.getFocusedWindow() == nil {
                 // Focus the first of the tiled windows
                 for screen in NSScreen.screens {
@@ -333,7 +343,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                        let firstColumn = columns.first,
                        let firstWindow = firstColumn.first {
                         firstWindow.focus()
-                        print("[Axis] Focused first available window: \(firstWindow.title)")
+                        print("[Axis] Focused first available window (fallback): \(firstWindow.title)")
                         return
                     }
                 }

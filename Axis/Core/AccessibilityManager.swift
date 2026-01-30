@@ -133,6 +133,28 @@ class AccessibilityManager: ObservableObject {
         let windowElement = axWindow as! AXUIElement
         return WindowInfo(axElement: windowElement, app: frontApp)
     }
+    
+    /// Get the window at the given coordinates (screen coordinate system: bottom-left origin)
+    func getWindowAt(_ point: CGPoint) -> WindowInfo? {
+        // Target only on-screen windows
+        let onScreenIDs = getOnScreenWindowIDs()
+        let allWindows = getAllWindows().filter { onScreenIDs.contains($0.id) }
+        
+        // We'd like to check in Z-order (frontmost first), but getAllWindows returns them in app order
+        // so ideally we'd use WindowList to sort by Z-order, but
+        // As a simple heuristic, the smallest window by area among the ones found (accounting for overlap), or
+        // Simply returns whatever hits.
+        // This simply returns whatever hits, but with overlapping windows the result can depend on app order.
+        // In practice, since this is a tiling WM, overlap should be rare.
+        
+        // Convert to the Accessibility API's coordinate system (top-left origin)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let axPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
+        
+        return allWindows.first { window in
+            window.frame.contains(axPoint)
+        }
+    }
 }
 
 // MARK: - Notification Names
