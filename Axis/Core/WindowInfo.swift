@@ -175,7 +175,6 @@ struct WindowInfo: Identifiable, Equatable {
         
         // Exclude specific apps (to be made configurable later)
         let floatingBundleIds = [
-            "com.apple.finder",
             "com.apple.systempreferences",
             "com.apple.SystemPreferences"
         ]
