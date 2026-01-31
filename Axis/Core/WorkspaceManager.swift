@@ -144,6 +144,11 @@ class WorkspaceManager: ObservableObject {
 		}
 	}
 
+	/// Return window IDs across every monitor × every workspace (for the window switcher)
+	func allWindowsByWorkspace() -> [ScreenIdentifier: [Int: Set<CGWindowID>]] {
+		return workspaceWindows
+	}
+
 	/// Register every window to workspace 0 at launch
 	func initializeWithCurrentWindows() {
 		let allWindows = accessibilityManager.getAllWindows()

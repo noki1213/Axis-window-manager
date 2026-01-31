@@ -13,6 +13,8 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - **Window Selection Mode**: Select and merge multiple windows into columns
 - **Normal Mode Resize**: Resize focused window with center-fixed positioning
 - **Visual Feedback**: Border highlights around the focused window
+- **Focus Mode**: Focus on a single window by centering it and hiding others
+- **Workspace Management**: Efficiently navigate and move windows between workspaces
 
 ## Keyboard Shortcuts
 
@@ -47,6 +49,15 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - `S`: Split selected windows into separate columns
 - `R`: Reset all windows to single columns
 - `Escape`: Exit window selection mode
+
+### Focus Mode
+- `Ctrl + Option + F`: Toggle Focus Mode
+
+### Workspace Management
+- `Ctrl + Option + O`: Switch to next workspace
+- `Ctrl + Option + U`: Switch to previous workspace
+- `Ctrl + Option + Shift + O`: Move focused window to next workspace
+- `Ctrl + Option + Shift + U`: Move focused window to previous workspace
 
 ## Installation
 
