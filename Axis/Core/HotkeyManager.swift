@@ -19,6 +19,7 @@ class HotkeyManager: ObservableObject {
         case normal = "Normal"
         case windowSelect = "Window Select"
         case gapSelect = "Gap Select"
+        case windowSwitcher = "Window Switcher"
     }
     
     @Published var currentMode: Mode = .normal
@@ -42,6 +43,7 @@ class HotkeyManager: ObservableObject {
     private let tilingEngine = TilingEngine.shared
     private let windowSelectManager = WindowSelectManager.shared
     private let gapSelectManager = GapSelectManager.shared
+    private let windowSwitcherManager = WindowSwitcherManager.shared
 
     private init() {}
     
@@ -195,7 +197,14 @@ class HotkeyManager: ObservableObject {
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         // Return to normal mode with Escape
         if event.keyCode == kVK_Escape {
-            if currentMode == .gapSelect {
+            if currentMode == .windowSwitcher {
+                DispatchQueue.main.async { [weak self] in
+                    self?.windowSwitcherManager.endSwitcher()
+                    self?.currentMode = .normal
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+                return true
+            } else if currentMode == .gapSelect {
                 DispatchQueue.main.async { [weak self] in
                     self?.gapSelectManager.endGapSelectMode()
                     self?.currentMode = .normal
@@ -220,6 +229,11 @@ class HotkeyManager: ObservableObject {
         // Special key handling while in gap selection mode
         if currentMode == .gapSelect {
             return handleGapSelectModeKeyEvent(event)
+        }
+
+        // Special key handling in window switcher mode
+        if currentMode == .windowSwitcher {
+            return handleWindowSwitcherModeKeyEvent(event)
         }
 
         // Check whether ctrl+option is held down
@@ -317,6 +331,15 @@ class HotkeyManager: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 self?.currentMode = .gapSelect
                 self?.gapSelectManager.startGapSelectMode()
+                NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+            }
+            return true
+
+        // MARK: Window Switcher (W)
+        case kVK_ANSI_W: // ウィンドウスイッチャーモード
+            DispatchQueue.main.async { [weak self] in
+                self?.currentMode = .windowSwitcher
+                self?.windowSwitcherManager.startSwitcher()
                 NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
             }
             return true
@@ -562,6 +585,49 @@ class HotkeyManager: ObservableObject {
                 } else {
                     self?.gapSelectManager.moveToNextGap(direction: .down)
                 }
+            }
+            return true
+
+        default:
+            // Block every key while in this mode (don't pass them to the app)
+            return true
+        }
+    }
+
+    // MARK: - Window Switcher Mode Key Handling
+
+    /// Key handling in window switcher mode
+    private func handleWindowSwitcherModeKeyEvent(_ event: NSEvent) -> Bool {
+        // Enter: confirm the selection (automatically returns to normal mode afterward)
+        if event.keyCode == kVK_Return {
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSwitcherManager.confirmSelection()
+            }
+            return true
+        }
+
+        switch Int(event.keyCode) {
+        case kVK_ANSI_I: // 上に移動（前のワークスペースへ）
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSwitcherManager.moveUp()
+            }
+            return true
+
+        case kVK_ANSI_K: // 下に移動（次のワークスペースへ）
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSwitcherManager.moveDown()
+            }
+            return true
+
+        case kVK_ANSI_J: // 左に移動（前のウィンドウへ）
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSwitcherManager.moveLeft()
+            }
+            return true
+
+        case kVK_ANSI_L: // 右に移動（次のウィンドウへ）
+            DispatchQueue.main.async { [weak self] in
+                self?.windowSwitcherManager.moveRight()
             }
             return true
 

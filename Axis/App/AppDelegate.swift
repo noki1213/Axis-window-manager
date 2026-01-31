@@ -120,6 +120,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             iconName = "rectangle.stack" // ウィンドウ選択
         case .gapSelect:
             iconName = "arrow.left.and.right" // ギャップ選択
+        case .windowSwitcher:
+            iconName = "rectangle.grid.2x2" // ウィンドウスイッチャー
         }
         
         button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: mode.rawValue)
