@@ -214,7 +214,7 @@ class TilingEngine: ObservableObject {
     }
 
     /// Look up a window's position (column index, row index) within the column structure
-    private func findWindowPosition(window: WindowInfo, in columns: [[WindowInfo]]) -> (columnIndex: Int, rowIndex: Int)? {
+    func findWindowPosition(window: WindowInfo, in columns: [[WindowInfo]]) -> (columnIndex: Int, rowIndex: Int)? {
         for (columnIndex, column) in columns.enumerated() {
             if let rowIndex = column.firstIndex(of: window) {
                 return (columnIndex, rowIndex)

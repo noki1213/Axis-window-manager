@@ -243,6 +243,51 @@ class HotkeyManager: ObservableObject {
         }
         
         let hasShift = event.modifierFlags.contains(.shift)
+        let hasCommand = event.modifierFlags.contains(.command)
+
+        // MARK: Quick Gap Resize (Cmd + Ctrl + Option + J/K/L/I)
+        if hasCommand {
+            switch Int(event.keyCode) {
+            case kVK_ANSI_J: // 左のギャップ
+                DispatchQueue.main.async { [weak self] in
+                    if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
+                        self?.currentMode = .gapSelect
+                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                    }
+                }
+                return true
+                
+            case kVK_ANSI_L: // 右のギャップ
+                DispatchQueue.main.async { [weak self] in
+                    if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
+                        self?.currentMode = .gapSelect
+                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                    }
+                }
+                return true
+                
+            case kVK_ANSI_I: // 上のギャップ
+                DispatchQueue.main.async { [weak self] in
+                    if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
+                        self?.currentMode = .gapSelect
+                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                    }
+                }
+                return true
+                
+            case kVK_ANSI_K: // 下のギャップ
+                DispatchQueue.main.async { [weak self] in
+                    if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
+                        self?.currentMode = .gapSelect
+                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                    }
+                }
+                return true
+                
+            default:
+                break
+            }
+        }
         
         // Branch handling based on the key code
         switch Int(event.keyCode) {
@@ -541,7 +586,12 @@ class HotkeyManager: ObservableObject {
         // Enter: select the gap / confirm the resize
         if event.keyCode == kVK_Return {
             DispatchQueue.main.async { [weak self] in
-                self?.gapSelectManager.selectCurrentGap()
+                guard let self = self else { return }
+                if self.gapSelectManager.selectCurrentGap() {
+                    self.gapSelectManager.endGapSelectMode()
+                    self.currentMode = .normal
+                    NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
+                }
             }
             return true
         }

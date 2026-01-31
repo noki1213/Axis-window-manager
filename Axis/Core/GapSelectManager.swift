@@ -169,23 +169,88 @@ class GapSelectManager: ObservableObject {
 		}
 	}
 
-	/// Select the current gap (enters resize mode)
-	func selectCurrentGap() {
+	/// Select the current gap (enters resize mode).
+	/// If a resize is in progress, confirm it and return true (signaling that it should end).
+	func selectCurrentGap() -> Bool {
 		guard state == .selecting else {
 			// Confirm it if a resize is already in progress
 			confirmResize()
-			return
+			return true
 		}
 
-		guard selectedGap != nil else { return }
+		guard selectedGap != nil else { return false }
 
 		print("[Axis] GapSelectManager: selectCurrentGap - entering resize mode")
 		state = .resizing
 		updateOverlay()
+		return false
+	}
+	
+	/// Select the gap in the given direction and start resize mode
+	func startResizeGapInDirection(_ direction: Direction) -> Bool {
+		guard let screen = getCurrentScreen() else { return false }
+		
+		// Calculate the gap
+		calculateGaps(for: screen)
+		guard !availableGaps.isEmpty else { return false }
+		
+		// Get the currently focused window
+		guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return false }
+		// Update the frame info
+		focusedWindow.refreshFrame()
+		
+		// Find the target gap
+		var targetGapIndex: Int? = nil
+		
+		// Identify which column/row a window is in
+		// columns is of type [[WindowInfo]], obtainable via tilingEngine.tiledWindows[screen]
+		let columns = tilingEngine.tiledWindows[screen] ?? []
+		guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else { return false }
+		
+		for (index, gap) in availableGaps.enumerated() {
+			switch direction {
+			case .left:
+				// Vertical gap to the left of this column (colIndex), at index colIndex - 1
+				if gap.type == .vertical && gap.columnIndex == colIndex - 1 {
+					targetGapIndex = index
+				}
+				
+			case .right:
+				// Vertical gap to the right of this column (colIndex), at index colIndex
+				if gap.type == .vertical && gap.columnIndex == colIndex {
+					targetGapIndex = index
+				}
+				
+			case .up: // 画面上方向（行インデックスが小さい方）
+				// Horizontal gap between this row and the one above it (rowIndex - 1), at index rowIndex - 1
+				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex - 1 {
+					targetGapIndex = index
+				}
+				
+			case .down: // 画面下方向（行インデックスが大きい方）
+				// Horizontal gap between this row and the one below it (rowIndex + 1), at index rowIndex
+				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex {
+					targetGapIndex = index
+				}
+			}
+			
+			if targetGapIndex != nil { break }
+		}
+		
+		if let index = targetGapIndex {
+			selectedGapIndex = index
+			state = .resizing
+			// Show the overlay
+			showOverlay(on: screen)
+			BorderManager.shared.updateBorder() // ボーダー消す
+			return true
+		}
+		
+		return false
 	}
 
 	/// Confirm the resize
-	func confirmResize() {
+	private func confirmResize() {
 		print("[Axis] GapSelectManager: confirmResize")
 		state = .selecting
 		updateOverlay()
