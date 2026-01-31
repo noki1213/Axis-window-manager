@@ -243,54 +243,46 @@ class HotkeyManager: ObservableObject {
         }
         
         let hasShift = event.modifierFlags.contains(.shift)
-        let hasCommand = event.modifierFlags.contains(.command)
 
-        // MARK: Quick Gap Resize (Cmd + Ctrl + Option + J/K/L/I)
-        if hasCommand {
-            switch Int(event.keyCode) {
-            case kVK_ANSI_J: // Left gap
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_L: // Right gap
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_I: // Top gap
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_K: // Bottom gap
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            default:
-                break
-            }
-        }
-        
         // Branch handling based on the key code
         switch Int(event.keyCode) {
+        // MARK: Quick Gap Resize (SDFE)
+        case kVK_ANSI_S: // Operate on the left gap
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_F: // Operate on the right gap
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_E: // Operate on the top gap
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_D: // Operate on the bottom gap
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+
         // MARK: Focus / Move (JKLI)
         case kVK_ANSI_J: // Left
             DispatchQueue.main.async { [weak self] in
@@ -357,15 +349,15 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
-        // MARK: Focus Mode
-        case kVK_ANSI_F:
+        // MARK: Zen Mode
+        case kVK_ANSI_Z:
             DispatchQueue.main.async {
-                FocusModeManager.shared.toggle()
+                ZenModeManager.shared.toggle()
             }
             return true
             
         // MARK: Mode Switching
-        case kVK_ANSI_S: // Window selection mode
+        case kVK_ANSI_W: // Window selection mode
             DispatchQueue.main.async { [weak self] in
                 self?.currentMode = .windowSelect
                 NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -380,8 +372,8 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Window Switcher (W)
-        case kVK_ANSI_W: // Window switcher mode
+        // MARK: Window Switcher (P)
+        case kVK_ANSI_P: // Window switcher mode
             DispatchQueue.main.async { [weak self] in
                 self?.currentMode = .windowSwitcher
                 self?.windowSwitcherManager.startSwitcher()

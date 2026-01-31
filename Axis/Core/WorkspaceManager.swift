@@ -206,9 +206,9 @@ class WorkspaceManager: ObservableObject {
 		// Set the switching-in-progress flag (prevents checkForWindowChanges from misfiring)
 		isSwitching = true
 
-		// Disable FocusMode first if it's active
-		if FocusModeManager.shared.isActive {
-			FocusModeManager.shared.toggle()
+		// Disable Zen Mode first if it's active
+		if ZenModeManager.shared.isActive {
+			ZenModeManager.shared.toggle()
 		}
 
 		// 1. Save the current workspace's TilingEngine state

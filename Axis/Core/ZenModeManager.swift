@@ -1,5 +1,5 @@
 //
-//  FocusModeManager.swift
+//  ZenModeManager.swift
 //  Axis
 //
 //  Created on 2026/01/29.
@@ -8,9 +8,9 @@
 import AppKit
 import Combine
 
-/// Focus Mode: show the focused window centered
-class FocusModeManager: ObservableObject {
-    static let shared = FocusModeManager()
+/// Zen Mode: display the focused window centered
+class ZenModeManager: ObservableObject {
+    static let shared = ZenModeManager()
 
     @Published var isActive: Bool = false
     
@@ -31,16 +31,16 @@ class FocusModeManager: ObservableObject {
     
     private func enter() {
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
-            print("[Axis] FocusMode: No focused window")
+            print("[Axis] ZenMode: No focused window")
             return
         }
         
         guard let screen = NSScreen.main else {
-            print("[Axis] FocusMode: No screen")
+            print("[Axis] ZenMode: No screen")
             return
         }
         
-        print("[Axis] FocusMode: Entering with window '\(focusedWindow.title)'")
+        print("[Axis] ZenMode: Entering with window '\(focusedWindow.title)'")
         
         // Save the state
         focusedWindowID = focusedWindow.id
@@ -60,7 +60,7 @@ class FocusModeManager: ObservableObject {
     }
     
     private func exit() {
-        print("[Axis] FocusMode: Exiting, will restore \(hiddenWindowFrames.count) windows")
+        print("[Axis] ZenMode: Exiting, will restore \(hiddenWindowFrames.count) windows")
         
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
@@ -169,10 +169,10 @@ class FocusModeManager: ObservableObject {
             let hidePos = hidePosition(for: window, corner: corner, on: targetScreen)
             window.setPosition(hidePos)
 
-            print("[Axis] FocusMode: Moved window '\(window.title)' to corner")
+            print("[Axis] ZenMode: Moved window '\(window.title)' to corner")
         }
 
-        print("[Axis] FocusMode: Hidden \(hiddenWindowFrames.count) windows using corner: \(corner)")
+        print("[Axis] ZenMode: Hidden \(hiddenWindowFrames.count) windows using corner: \(corner)")
     }
     
     private func restoreHiddenWindows() {
@@ -183,11 +183,11 @@ class FocusModeManager: ObservableObject {
             // Restore the saved frame if there is one
             if let originalFrame = hiddenWindowFrames[window.id] {
                 window.setFrame(originalFrame)
-                print("[Axis] FocusMode: Restored window '\(window.title)' to \(originalFrame)")
+                print("[Axis] ZenMode: Restored window '\(window.title)' to \(originalFrame)")
             }
         }
         
-        print("[Axis] FocusMode: Restored \(hiddenWindowFrames.count) windows")
+        print("[Axis] ZenMode: Restored \(hiddenWindowFrames.count) windows")
         hiddenWindowFrames.removeAll()
     }
     
@@ -209,7 +209,7 @@ class FocusModeManager: ObservableObject {
         
         let targetFrame = CGRect(x: originX, y: originY, width: targetWidth, height: targetHeight)
         
-        print("[Axis] FocusMode: Moving window to \(targetFrame)")
+        print("[Axis] ZenMode: Moving window to \(targetFrame)")
         window.setFrame(targetFrame)
     }
 }
