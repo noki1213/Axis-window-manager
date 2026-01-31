@@ -275,6 +275,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Register the new window to the current workspace
                 for newID in newWindowIDs {
+                    // Skip if it's already registered in some workspace
+                    // (avoids mistakenly registering a window from another workspace right after a workspace switch)
+                    if workspaceManager.isWindowInAnyWorkspace(newID) {
+                        print("[Axis] Window \(newID) already in a workspace, skipping registration")
+                        continue
+                    }
+
                     if let window = currentWindows.first(where: { $0.id == newID }) {
                         // Determine which screen a window belongs to
                         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
