@@ -243,54 +243,46 @@ class HotkeyManager: ObservableObject {
         }
         
         let hasShift = event.modifierFlags.contains(.shift)
-        let hasCommand = event.modifierFlags.contains(.command)
 
-        // MARK: Quick Gap Resize (Cmd + Ctrl + Option + J/K/L/I)
-        if hasCommand {
-            switch Int(event.keyCode) {
-            case kVK_ANSI_J: // 左のギャップ
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_L: // 右のギャップ
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_I: // 上のギャップ
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            case kVK_ANSI_K: // 下のギャップ
-                DispatchQueue.main.async { [weak self] in
-                    if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
-                        self?.currentMode = .gapSelect
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                }
-                return true
-                
-            default:
-                break
-            }
-        }
-        
         // Branch handling based on the key code
         switch Int(event.keyCode) {
+        // MARK: Quick Gap Resize (SDFE)
+        case kVK_ANSI_S: // 左のギャップを操作
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_F: // 右のギャップを操作
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_E: // 上のギャップを操作
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+            
+        case kVK_ANSI_D: // 下のギャップを操作
+            DispatchQueue.main.async { [weak self] in
+                if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
+                    self?.currentMode = .gapSelect
+                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                }
+            }
+            return true
+
         // MARK: Focus / Move (JKLI)
         case kVK_ANSI_J: // 左
             DispatchQueue.main.async { [weak self] in
@@ -357,15 +349,15 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
-        // MARK: Focus Mode
-        case kVK_ANSI_F:
+        // MARK: Zen Mode
+        case kVK_ANSI_Z:
             DispatchQueue.main.async {
-                FocusModeManager.shared.toggle()
+                ZenModeManager.shared.toggle()
             }
             return true
             
         // MARK: Mode Switching
-        case kVK_ANSI_S: // ウィンドウ選択モード
+        case kVK_ANSI_W: // ウィンドウ選択モード
             DispatchQueue.main.async { [weak self] in
                 self?.currentMode = .windowSelect
                 NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -380,8 +372,8 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Window Switcher (W)
-        case kVK_ANSI_W: // ウィンドウスイッチャーモード
+        // MARK: Window Switcher (P)
+        case kVK_ANSI_P: // ウィンドウスイッチャーモード
             DispatchQueue.main.async { [weak self] in
                 self?.currentMode = .windowSwitcher
                 self?.windowSwitcherManager.startSwitcher()
