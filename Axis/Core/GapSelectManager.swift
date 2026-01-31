@@ -195,7 +195,7 @@ class GapSelectManager: ObservableObject {
 		guard !availableGaps.isEmpty else { return false }
 		
 		// Get the currently focused window
-		guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return false }
+		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return false }
 		// Update the frame info
 		focusedWindow.refreshFrame()
 		
