@@ -408,7 +408,6 @@ class WorkspaceManager: ObservableObject {
 		let visibleFrame = screen.visibleFrame
 
 		// Convert visibleFrame to AX coordinates
-		let axVisibleTop = mainScreenHeight - visibleFrame.maxY
 		let axVisibleBottom = mainScreenHeight - visibleFrame.minY
 
 		switch corner {
