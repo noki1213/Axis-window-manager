@@ -120,36 +120,271 @@ class WorkspaceManager: ObservableObject {
 		return false
 	}
 
-	/// Remove a closed window from every workspace
-	func unregisterWindow(_ windowID: CGWindowID) {
-		for screenID in workspaceWindows.keys {
-			guard let workspaces = workspaceWindows[screenID]?.keys else { continue }
-			for workspace in workspaces {
-				workspaceWindows[screenID]?[workspace]?.remove(windowID)
-			}
-		}
-		savedFrames.removeValue(forKey: windowID)
+	    /// Remove a closed window from every workspace
 
-		// Also remove it from the tiling snapshot
-		for screenID in tilingSnapshots.keys {
-			guard let workspaces = tilingSnapshots[screenID]?.keys else { continue }
-			for workspace in workspaces {
-				if var snapshot = tilingSnapshots[screenID]?[workspace] {
-					snapshot.columns = snapshot.columns.map { column in
-						column.filter { $0 != windowID }
-					}.filter { !$0.isEmpty }
-					tilingSnapshots[screenID]?[workspace] = snapshot
-				}
-			}
-		}
-	}
+	    func unregisterWindow(_ windowID: CGWindowID) {
 
-	/// Return window IDs across every monitor × every workspace (for the window switcher)
-	func allWindowsByWorkspace() -> [ScreenIdentifier: [Int: Set<CGWindowID>]] {
-		return workspaceWindows
-	}
+	        for screenID in workspaceWindows.keys {
 
-	/// Register every window to workspace 0 at launch
+	            guard let workspaces = workspaceWindows[screenID]?.keys else { continue }
+
+	            var needsCleanup = false
+
+	            
+
+	            for workspace in workspaces {
+
+	                if workspaceWindows[screenID]?[workspace]?.contains(windowID) == true {
+
+	                    workspaceWindows[screenID]?[workspace]?.remove(windowID)
+
+	                    needsCleanup = true
+
+	                }
+
+	            }
+
+	            
+
+	            savedFrames.removeValue(forKey: windowID)
+
+	
+
+	            // Also remove it from the tiling snapshot
+
+	            guard let workspacesSnapshot = tilingSnapshots[screenID]?.keys else { continue }
+
+	            for workspace in workspacesSnapshot {
+
+	                if var snapshot = tilingSnapshots[screenID]?[workspace] {
+
+	                    snapshot.columns = snapshot.columns.map { column in
+
+	                        column.filter { $0 != windowID }
+
+	                    }.filter { !$0.isEmpty }
+
+	                    tilingSnapshots[screenID]?[workspace] = snapshot
+
+	                }
+
+	            }
+
+	            
+
+	            // Run cleanup for the monitors that changed
+
+	            if needsCleanup, let screen = screen(for: screenID) {
+
+	                cleanupEmptyWorkspaces(on: screen)
+
+	            }
+
+	        }
+
+	    }
+
+	
+
+	    /// Return window IDs across every monitor × every workspace (for the window switcher)
+
+	    func allWindowsByWorkspace() -> [ScreenIdentifier: [Int: Set<CGWindowID>]] {
+
+	        return workspaceWindows
+
+	    }
+
+	    
+
+	    // MARK: - Workspace Cleanup
+
+	    
+
+	    /// Delete empty workspaces and compact the numbering
+
+	    private func cleanupEmptyWorkspaces(on screen: NSScreen) {
+
+	        let id = screenIdentifier(for: screen)
+
+	        guard let workspaces = workspaceWindows[id] else { return }
+
+	        
+
+	        // Get the existing workspace IDs in ascending order
+
+	        let sortedIDs = workspaces.keys.sorted()
+
+	        
+
+	        // Build the mapping to the new ID
+
+	        // Rule:
+
+	        // 1. Keep workspaces that still have windows
+
+	        // 2. Always keep workspace 0 (the default)
+
+	        // 3. Should we keep the active workspace even if it's empty? -> No — the requirement is "delete once it's gone", so compact it away.
+
+	        //    However, index 0 is never deleted, no matter what.
+
+	        
+
+	        var mapping: [Int: Int] = [:]
+
+	        var nextID = 0
+
+	        var hasChanges = false
+
+	        
+
+	        for oldID in sortedIDs {
+
+	            let windowCount = workspaces[oldID]?.count ?? 0
+
+	            
+
+	            // Keep condition: it's index 0, OR it has windows in it
+
+	            // (Don't consider whether it's active — if it's empty, compact it without mercy)
+
+	            if oldID == 0 || windowCount > 0 {
+
+	                if oldID != nextID {
+
+	                    hasChanges = true
+
+	                }
+
+	                mapping[oldID] = nextID
+
+	                nextID += 1
+
+	            } else {
+
+	                // To be removed
+
+	                hasChanges = true
+
+	                print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
+
+	            }
+
+	        }
+
+	        
+
+	        guard hasChanges else { return }
+
+	        
+
+	        print("[Axis] WorkspaceManager: Reordering workspaces on screen \(id.displayID)...")
+
+	        
+
+	        // Rebuild the data with the new ID
+
+	        var newWorkspaceWindows: [Int: Set<CGWindowID>] = [:]
+
+	        var newTilingSnapshots: [Int: PerScreenSnapshot] = [:]
+
+	        
+
+	        for (oldID, newID) in mapping {
+
+	            // Migrate the window info
+
+	            if let windows = workspaces[oldID] {
+
+	                newWorkspaceWindows[newID] = windows
+
+	            }
+
+	            
+
+	            // Migrate the tiling info
+
+	            if let snapshot = tilingSnapshots[id]?[oldID] {
+
+	                newTilingSnapshots[newID] = snapshot
+
+	            }
+
+	        }
+
+	        
+
+	        workspaceWindows[id] = newWorkspaceWindows
+
+	        tilingSnapshots[id] = newTilingSnapshots
+
+	        
+
+	        // Adjust the active workspace
+
+	        if let currentActive = activeWorkspace[id] {
+
+	            if let newActive = mapping[currentActive] {
+
+	                // When the spot this window was at has moved (or stayed the same)
+
+	                activeWorkspace[id] = newActive
+
+	                if currentActive != newActive {
+
+	                    print("[Axis] WorkspaceManager: Active workspace changed \(currentActive) -> \(newActive)")
+
+	                }
+
+	            } else {
+
+	                // When the spot this window was at has been deleted
+
+	                // Example: you're on Space 2 (empty) and it gets removed -> if a next Space exists it becomes the new Space 2, so
+
+	                // The index itself either stays the same or gets clamped to the max value.
+
+	                // The next Space should have been compacted down to the same number.
+
+	                // However, if it was the last Space, move to the previous one (nextID - 1).
+
+	                
+
+	                let maxID = max(0, nextID - 1)
+
+	                let newActive = min(currentActive, maxID)
+
+	                activeWorkspace[id] = newActive
+
+	                print("[Axis] WorkspaceManager: Active workspace was removed, moved to \(newActive)")
+
+	            }
+
+	        }
+
+	        
+
+	        // Notification
+
+	        NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+	        
+
+	        // Also call the border update so things like the menu bar get refreshed
+
+	        DispatchQueue.main.async {
+
+	             BorderManager.shared.updateBorder()
+
+	        }
+
+	    }
+
+	
+
+	    /// Register every window to workspace 0 at launch
+
+	
 	func initializeWithCurrentWindows() {
 		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
@@ -318,8 +553,14 @@ class WorkspaceManager: ObservableObject {
 		// Re-apply tiling on the current monitor
 		tilingEngine.tile(on: screen)
 
+        // Added: clean up once the original workspace becomes empty
+        cleanupEmptyWorkspaces(on: screen)
+        
+        // Re-fetch it, since cleanup may have changed activeWorkspace
+        let updatedCurrentWS = activeWorkspace[id] ?? 0
+        
 		// Focus the remaining window
-		focusFirstWindow(in: currentWS, on: id)
+		focusFirstWindow(in: updatedCurrentWS, on: id)
 
 		// Update the border
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
