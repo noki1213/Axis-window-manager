@@ -105,6 +105,21 @@ class WorkspaceManager: ObservableObject {
 		print("[Axis] WorkspaceManager: Registered window \(windowID) to workspace \(workspace) on screen \(id.displayID)")
 	}
 
+	/// Check whether the window is already registered to any workspace
+	/// - Parameter windowID: the window ID being checked
+	/// - Returns: true if it's already registered
+	func isWindowInAnyWorkspace(_ windowID: CGWindowID) -> Bool {
+		for screenID in workspaceWindows.keys {
+			guard let workspaces = workspaceWindows[screenID] else { continue }
+			for (_, windowSet) in workspaces {
+				if windowSet.contains(windowID) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	/// Remove a closed window from every workspace
 	func unregisterWindow(_ windowID: CGWindowID) {
 		for screenID in workspaceWindows.keys {
