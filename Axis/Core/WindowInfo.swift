@@ -154,14 +154,21 @@ struct WindowInfo: Identifiable, Equatable {
     /// Whether it should be managed as a tiling target
     func shouldBeManaged() -> Bool {
         // Exclude minimized windows
-        if isMinimized { return false }
+        if isMinimized {
+            print("[Axis] Window '\(title)' excluded: minimized")
+            return false
+        }
         
         // Exclude fullscreen windows
-        if isFullscreen { return false }
+        if isFullscreen {
+            print("[Axis] Window '\(title)' excluded: fullscreen")
+            return false
+        }
         
         // Only standard windows are tiled
         // Based on AeroSpace's isWindowHeuristic
         guard subrole == kAXStandardWindowSubrole as String else {
+            print("[Axis] Window '\(title)' excluded: subrole=\(subrole ?? "nil"), role=\(role ?? "nil")")
             return false
         }
         
