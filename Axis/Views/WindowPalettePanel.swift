@@ -1,5 +1,5 @@
 //
-//  WindowSwitcherPanel.swift
+//  WindowPalettePanel.swift
 //  Axis
 //
 //  Created on 2026/01/31.
@@ -7,8 +7,8 @@
 
 import AppKit
 
-/// Display data for the window switcher (one entry per window)
-struct WindowSwitcherItem {
+/// Data displayed in the window palette (for a single window)
+struct WindowPaletteItem {
 	let windowID: CGWindowID
 	let appName: String
 	let windowTitle: String
@@ -18,26 +18,26 @@ struct WindowSwitcherItem {
 }
 
 /// A section for a single workspace (Space)
-struct WindowSwitcherSection {
+struct WindowPaletteSection {
 	let workspace: Int
-	var items: [WindowSwitcherItem]
+	var items: [WindowPaletteItem]
 }
 
 /// Data for a single monitor (Display)
-struct WindowSwitcherDisplay {
+struct WindowPaletteDisplay {
 	let displayNumber: Int
 	let screenID: ScreenIdentifier
-	var spaces: [WindowSwitcherSection]
+	var spaces: [WindowPaletteSection]
 }
 
 /// A translucent panel that shows the window list
 /// Display columns run left to right, with Spaces stacked vertically within each column
-class WindowSwitcherPanel: NSPanel {
+class WindowPalettePanel: NSPanel {
 
 	// MARK: - Properties
 
 	/// Data per Display
-	private var displays: [WindowSwitcherDisplay] = []
+	private var displays: [WindowPaletteDisplay] = []
 
 	/// The selected Display index
 	private var selectedDisplayIndex: Int = 0
@@ -50,7 +50,7 @@ class WindowSwitcherPanel: NSPanel {
 
 	/// A 3D array of card views
 	/// cardViews[displayIndex][spaceIndex][itemIndex]
-	private var cardViews: [[[WindowSwitcherItemView]]] = []
+	private var cardViews: [[[WindowPaletteItemView]]] = []
 
 	/// The main horizontal stack (lays Display columns out side by side)
 	private let mainHorizontalStack = NSStackView()
@@ -142,7 +142,7 @@ class WindowSwitcherPanel: NSPanel {
 	// MARK: - Public Methods
 
 	/// Set the Display data and show the panel
-	func showWithDisplays(_ newDisplays: [WindowSwitcherDisplay], displayIndex: Int, spaceIndex: Int, itemIndex: Int) {
+	func showWithDisplays(_ newDisplays: [WindowPaletteDisplay], displayIndex: Int, spaceIndex: Int, itemIndex: Int) {
 		self.displays = newDisplays
 		self.selectedDisplayIndex = displayIndex
 		self.selectedSpaceIndex = spaceIndex
@@ -203,7 +203,7 @@ class WindowSwitcherPanel: NSPanel {
 			displayTitle.translatesAutoresizingMaskIntoConstraints = false
 			displayColumn.addArrangedSubview(displayTitle)
 
-			var displayCardViews: [[WindowSwitcherItemView]] = []
+			var displayCardViews: [[WindowPaletteItemView]] = []
 
 			// Each Space section
 			for space in display.spaces {
@@ -219,10 +219,10 @@ class WindowSwitcherPanel: NSPanel {
 				cardRow.spacing = cardSpacing
 				cardRow.translatesAutoresizingMaskIntoConstraints = false
 
-				var spaceCardViews: [WindowSwitcherItemView] = []
+				var spaceCardViews: [WindowPaletteItemView] = []
 
 				for item in space.items {
-					let card = WindowSwitcherItemView()
+					let card = WindowPaletteItemView()
 					card.translatesAutoresizingMaskIntoConstraints = false
 					card.configure(
 						icon: item.appIcon,
@@ -231,8 +231,8 @@ class WindowSwitcherPanel: NSPanel {
 					)
 
 					NSLayoutConstraint.activate([
-						card.widthAnchor.constraint(equalToConstant: WindowSwitcherItemView.cardWidth),
-						card.heightAnchor.constraint(equalToConstant: WindowSwitcherItemView.cardHeight),
+						card.widthAnchor.constraint(equalToConstant: WindowPaletteItemView.cardWidth),
+						card.heightAnchor.constraint(equalToConstant: WindowPaletteItemView.cardHeight),
 					])
 
 					cardRow.addArrangedSubview(card)
@@ -293,7 +293,7 @@ class WindowSwitcherPanel: NSPanel {
 		var totalWidth: CGFloat = 0
 		for display in displays {
 			let maxCards = display.spaces.map { $0.items.count }.max() ?? 1
-			let columnWidth = CGFloat(maxCards) * (WindowSwitcherItemView.cardWidth + cardSpacing) - cardSpacing
+			let columnWidth = CGFloat(maxCards) * (WindowPaletteItemView.cardWidth + cardSpacing) - cardSpacing
 			totalWidth += columnWidth
 		}
 		// Spacing and divider between Display columns
@@ -304,7 +304,7 @@ class WindowSwitcherPanel: NSPanel {
 
 		// Panel height: match whichever Display has the most Spaces
 		let maxSpaces = displays.map { $0.spaces.count }.max() ?? 1
-		let spaceHeight = labelHeight + 4 + WindowSwitcherItemView.cardHeight
+		let spaceHeight = labelHeight + 4 + WindowPaletteItemView.cardHeight
 		let contentHeight = displayTitleHeight + sectionSpacing
 			+ CGFloat(maxSpaces) * spaceHeight
 			+ CGFloat(max(maxSpaces - 1, 0)) * sectionSpacing
