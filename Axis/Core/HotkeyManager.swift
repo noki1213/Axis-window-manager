@@ -19,7 +19,7 @@ class HotkeyManager: ObservableObject {
         case normal = "Normal"
         case windowSelect = "Window Select"
         case gapSelect = "Gap Select"
-        case windowSwitcher = "Window Switcher"
+        case windowPalette = "Window Palette"
     }
     
     @Published var currentMode: Mode = .normal
@@ -43,7 +43,7 @@ class HotkeyManager: ObservableObject {
     private let tilingEngine = TilingEngine.shared
     private let windowSelectManager = WindowSelectManager.shared
     private let gapSelectManager = GapSelectManager.shared
-    private let windowSwitcherManager = WindowSwitcherManager.shared
+    private let windowPaletteManager = WindowPaletteManager.shared
 
     private init() {}
     
@@ -197,9 +197,9 @@ class HotkeyManager: ObservableObject {
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         // Return to normal mode with Escape
         if event.keyCode == kVK_Escape {
-            if currentMode == .windowSwitcher {
+            if currentMode == .windowPalette {
                 DispatchQueue.main.async { [weak self] in
-                    self?.windowSwitcherManager.endSwitcher()
+                    self?.windowPaletteManager.endPalette()
                     self?.currentMode = .normal
                     NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
                 }
@@ -231,9 +231,9 @@ class HotkeyManager: ObservableObject {
             return handleGapSelectModeKeyEvent(event)
         }
 
-        // Special key handling in window switcher mode
-        if currentMode == .windowSwitcher {
-            return handleWindowSwitcherModeKeyEvent(event)
+        // Special key handling while in window palette mode
+        if currentMode == .windowPalette {
+            return handleWindowPaletteModeKeyEvent(event)
         }
 
         // Check whether ctrl+option is held down
@@ -372,16 +372,16 @@ class HotkeyManager: ObservableObject {
             }
             return true
 
-        // MARK: Window Switcher (P)
-        case kVK_ANSI_P: // ウィンドウスイッチャーモード
+        // MARK: Window Palette (P)
+        case kVK_ANSI_P: // ウィンドウパレットモード
             DispatchQueue.main.async { [weak self] in
                 // While in Zen mode, carry over just the position info without restoring the window
                 var zenFrames: [CGWindowID: CGRect] = [:]
                 if ZenModeManager.shared.isActive {
                     zenFrames = ZenModeManager.shared.exitAndHandOffHiddenFrames()
                 }
-                self?.currentMode = .windowSwitcher
-                self?.windowSwitcherManager.startSwitcher(inheritedHiddenFrames: zenFrames)
+                self?.currentMode = .windowPalette
+                self?.windowPaletteManager.startPalette(inheritedHiddenFrames: zenFrames)
                 NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
             }
             return true
@@ -641,14 +641,14 @@ class HotkeyManager: ObservableObject {
         }
     }
 
-    // MARK: - Window Switcher Mode Key Handling
+    // MARK: - Window Palette Mode Key Handling
 
-    /// Key handling in window switcher mode
-    private func handleWindowSwitcherModeKeyEvent(_ event: NSEvent) -> Bool {
+    /// Key handling while in window palette mode
+    private func handleWindowPaletteModeKeyEvent(_ event: NSEvent) -> Bool {
         // Enter: confirm the selection (automatically returns to normal mode afterward)
         if event.keyCode == kVK_Return {
             DispatchQueue.main.async { [weak self] in
-                self?.windowSwitcherManager.confirmSelection()
+                self?.windowPaletteManager.confirmSelection()
             }
             return true
         }
@@ -656,25 +656,25 @@ class HotkeyManager: ObservableObject {
         switch Int(event.keyCode) {
         case kVK_ANSI_I: // 上に移動（前のワークスペースへ）
             DispatchQueue.main.async { [weak self] in
-                self?.windowSwitcherManager.moveUp()
+                self?.windowPaletteManager.moveUp()
             }
             return true
 
         case kVK_ANSI_K: // 下に移動（次のワークスペースへ）
             DispatchQueue.main.async { [weak self] in
-                self?.windowSwitcherManager.moveDown()
+                self?.windowPaletteManager.moveDown()
             }
             return true
 
         case kVK_ANSI_J: // 左に移動（前のウィンドウへ）
             DispatchQueue.main.async { [weak self] in
-                self?.windowSwitcherManager.moveLeft()
+                self?.windowPaletteManager.moveLeft()
             }
             return true
 
         case kVK_ANSI_L: // 右に移動（次のウィンドウへ）
             DispatchQueue.main.async { [weak self] in
-                self?.windowSwitcherManager.moveRight()
+                self?.windowPaletteManager.moveRight()
             }
             return true
 

@@ -1,5 +1,5 @@
 //
-//  WindowSwitcherManager.swift
+//  WindowPaletteManager.swift
 //  Axis
 //
 //  Created on 2026/01/31.
@@ -7,7 +7,7 @@
 
 import AppKit
 
-/// The core logic for the window switcher
+/// The window palette's core logic
 /// Fetch and display the window list across all workspaces, and
 /// Switch to the selected window's workspace and focus it
 ///
@@ -19,16 +19,16 @@ import AppKit
 /// Operations:
 ///   I/K → move up/down between Spaces (within the same Display)
 ///   J/L → move left/right between windows (moves to the neighboring Display when it hits the edge)
-class WindowSwitcherManager {
-	static let shared = WindowSwitcherManager()
+class WindowPaletteManager {
+	static let shared = WindowPaletteManager()
 
 	// MARK: - Properties
 
-	/// The switcher panel
-	private var panel: WindowSwitcherPanel?
+	/// The palette panel
+	private var panel: WindowPalettePanel?
 
 	/// Data per Display
-	private var displays: [WindowSwitcherDisplay] = []
+	private var displays: [WindowPaletteDisplay] = []
 
 	/// The currently selected Display (monitor column)
 	private var selectedDisplayIndex: Int = 0
@@ -39,7 +39,7 @@ class WindowSwitcherManager {
 	/// The currently selected window
 	private var selectedItemIndex: Int = 0
 
-	/// The original position of a window that was moved off-screen while the switcher was showing
+	/// The original position of windows stashed off screen while the palette is showing
 	private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
 
 	/// Whether there's a frame carried over from Zen mode etc. (re-tiling is needed on exit)
@@ -52,13 +52,13 @@ class WindowSwitcherManager {
 
 	// MARK: - Public Methods
 
-	/// Start switcher mode
+	/// Start palette mode
 	/// - Parameter inheritedHiddenFrames: the original positions of windows carried over from Zen mode etc.
-	func startSwitcher(inheritedHiddenFrames: [CGWindowID: CGRect] = [:]) {
+	func startPalette(inheritedHiddenFrames: [CGWindowID: CGRect] = [:]) {
 		displays = collectDisplays()
 
 		guard !displays.isEmpty else {
-			print("[Axis] WindowSwitcher: ウィンドウが見つかりません")
+			print("[Axis] WindowPalette: ウィンドウが見つかりません")
 			return
 		}
 
@@ -70,23 +70,23 @@ class WindowSwitcherManager {
 		hideOnScreenWindows()
 
 		// Overwrite with the original position of windows carried over from Zen mode etc.
-		// (Prefer the original pre-Zen-mode position over the one the switcher saved)
+		// (Prefer the original pre-Zen position over the one the palette saved)
 		needsRetileOnClose = !inheritedHiddenFrames.isEmpty
 		for (id, frame) in inheritedHiddenFrames {
 			hiddenWindowFrames[id] = frame
 		}
 
 		if panel == nil {
-			panel = WindowSwitcherPanel()
+			panel = WindowPalettePanel()
 		}
 		panel?.showWithDisplays(displays, displayIndex: 0, spaceIndex: 0, itemIndex: 0)
 
 		let totalWindows = displays.flatMap { $0.spaces }.flatMap { $0.items }.count
-		print("[Axis] WindowSwitcher: 開始（\(displays.count) Display、\(totalWindows) ウィンドウ）")
+		print("[Axis] WindowPalette: 開始（\(displays.count) Display、\(totalWindows) ウィンドウ）")
 	}
 
-	/// End switcher mode (cancel)
-	func endSwitcher() {
+	/// End palette mode (cancel)
+	func endPalette() {
 		panel?.hidePanel()
 
 		// Restore the window that was hidden
@@ -105,7 +105,7 @@ class WindowSwitcherManager {
 		selectedDisplayIndex = 0
 		selectedSpaceIndex = 0
 		selectedItemIndex = 0
-		print("[Axis] WindowSwitcher: キャンセル")
+		print("[Axis] WindowPalette: キャンセル")
 	}
 
 	/// Move up (to the previous Space within the same Display)
@@ -229,7 +229,7 @@ class WindowSwitcherManager {
 			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
 		}
 
-		print("[Axis] WindowSwitcher: 確定（\(selectedItem.appName) - \(selectedItem.windowTitle)）")
+		print("[Axis] WindowPalette: 確定（\(selectedItem.appName) - \(selectedItem.windowTitle)）")
 	}
 
 	// MARK: - Private Methods
@@ -344,7 +344,7 @@ class WindowSwitcherManager {
 			}
 		}
 
-		print("[Axis] WindowSwitcher: \(hiddenWindowFrames.count) ウィンドウを退避")
+		print("[Axis] WindowPalette: \(hiddenWindowFrames.count) ウィンドウを退避")
 	}
 
 	/// Return the stashed window to its original position
@@ -359,13 +359,13 @@ class WindowSwitcherManager {
 
 		let count = hiddenWindowFrames.count
 		hiddenWindowFrames.removeAll()
-		print("[Axis] WindowSwitcher: \(count) ウィンドウを復元")
+		print("[Axis] WindowPalette: \(count) ウィンドウを復元")
 	}
 
 	// MARK: - Data Collection
 
 	/// Collect window info for every workspace, grouped by Display
-	private func collectDisplays() -> [WindowSwitcherDisplay] {
+	private func collectDisplays() -> [WindowPaletteDisplay] {
 		// Get the window IDs across all workspaces
 		let allWorkspaces = workspaceManager.allWindowsByWorkspace()
 
@@ -386,14 +386,14 @@ class WindowSwitcherManager {
 		}
 
 		// Build the data per Display
-		var displayMap: [ScreenIdentifier: WindowSwitcherDisplay] = [:]
+		var displayMap: [ScreenIdentifier: WindowPaletteDisplay] = [:]
 
 		for (screenID, workspaces) in allWorkspaces {
 			let displayNumber = displayNumberMap[screenID] ?? 1
 
 			// Create an entry for this Display if one doesn't exist
 			if displayMap[screenID] == nil {
-				displayMap[screenID] = WindowSwitcherDisplay(
+				displayMap[screenID] = WindowPaletteDisplay(
 					displayNumber: displayNumber,
 					screenID: screenID,
 					spaces: []
@@ -405,11 +405,11 @@ class WindowSwitcherManager {
 			for workspace in sortedWorkspaces {
 				guard let windowIDs = workspaces[workspace] else { continue }
 
-				var items: [WindowSwitcherItem] = []
+				var items: [WindowPaletteItem] = []
 				for windowID in windowIDs {
 					guard let windowInfo = windowInfoMap[windowID] else { continue }
 
-					let item = WindowSwitcherItem(
+					let item = WindowPaletteItem(
 						windowID: windowID,
 						appName: windowInfo.app.localizedName ?? "不明なアプリ",
 						windowTitle: windowInfo.title,
@@ -423,7 +423,7 @@ class WindowSwitcherManager {
 				// Only add Spaces that have windows
 				if !items.isEmpty {
 					items.sort { $0.appName < $1.appName }
-					let section = WindowSwitcherSection(workspace: workspace, items: items)
+					let section = WindowPaletteSection(workspace: workspace, items: items)
 					displayMap[screenID]?.spaces.append(section)
 				}
 			}
@@ -442,9 +442,9 @@ class WindowSwitcherManager {
 	}
 
 	/// Switch to the selected window's workspace and focus it
-	private func switchToWindowWorkspace(_ item: WindowSwitcherItem) {
+	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
 		guard let screen = workspaceManager.screen(for: item.screenID) else {
-			print("[Axis] WindowSwitcher: 対象モニターが見つかりません")
+			print("[Axis] WindowPalette: 対象モニターが見つかりません")
 			return
 		}
 
