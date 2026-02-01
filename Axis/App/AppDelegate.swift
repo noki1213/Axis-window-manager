@@ -247,6 +247,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Skip automatic tiling while Zen mode is active (guards against input-source switches like the eisu key)
+        guard !ZenModeManager.shared.isActive else {
+            return
+        }
+
         // Target only on-screen windows (i.e. windows in the current Space)
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
@@ -361,15 +366,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func onAppLaunched(_ notification: Notification) {
+        // Skip automatic tiling while Zen mode is active
+        guard !ZenModeManager.shared.isActive else { return }
+
         // Retile when a new app launches
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard !ZenModeManager.shared.isActive else { return }
             self?.tilingEngine.tileAllScreens()
         }
     }
-    
+
     @objc private func onAppTerminated(_ notification: Notification) {
+        // Skip automatic tiling while Zen mode is active
+        guard !ZenModeManager.shared.isActive else { return }
+
         // Retile when an app quits
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard !ZenModeManager.shared.isActive else { return }
             self?.tilingEngine.tileAllScreens()
         }
     }
