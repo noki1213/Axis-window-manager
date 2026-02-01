@@ -248,6 +248,19 @@ class TilingEngine: ObservableObject {
             if columnIndex > 0 {
                 // Swap the whole columns
                 columns.swapAt(columnIndex, columnIndex - 1)
+
+                // Swap the size ratio info along with it
+                if var ratios = columnWidthRatios[screen], ratios.count == columns.count {
+                    ratios.swapAt(columnIndex, columnIndex - 1)
+                    columnWidthRatios[screen] = ratios
+                }
+                if var allRowRatios = rowHeightRatios[screen] {
+                    let temp = allRowRatios[columnIndex]
+                    allRowRatios[columnIndex] = allRowRatios[columnIndex - 1]
+                    allRowRatios[columnIndex - 1] = temp
+                    rowHeightRatios[screen] = allRowRatios
+                }
+
                 // Only store on-screen windows in tiledWindows
                 tiledWindows[screen] = columns
                 applyColumnTiling(columns: columns, on: screen)
@@ -261,6 +274,19 @@ class TilingEngine: ObservableObject {
             if columnIndex < columns.count - 1 {
                 // Swap the whole columns
                 columns.swapAt(columnIndex, columnIndex + 1)
+
+                // Swap the size ratio info along with it
+                if var ratios = columnWidthRatios[screen], ratios.count == columns.count {
+                    ratios.swapAt(columnIndex, columnIndex + 1)
+                    columnWidthRatios[screen] = ratios
+                }
+                if var allRowRatios = rowHeightRatios[screen] {
+                    let temp = allRowRatios[columnIndex]
+                    allRowRatios[columnIndex] = allRowRatios[columnIndex + 1]
+                    allRowRatios[columnIndex + 1] = temp
+                    rowHeightRatios[screen] = allRowRatios
+                }
+
                 tiledWindows[screen] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
@@ -274,6 +300,16 @@ class TilingEngine: ObservableObject {
             if rowIndex > 0 {
                 // Move up within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex - 1)
+
+                // Swap the row height ratio info along with it
+                if var allRowRatios = rowHeightRatios[screen],
+                   var ratios = allRowRatios[columnIndex],
+                   ratios.count == columns[columnIndex].count {
+                    ratios.swapAt(rowIndex, rowIndex - 1)
+                    allRowRatios[columnIndex] = ratios
+                    rowHeightRatios[screen] = allRowRatios
+                }
+
                 tiledWindows[screen] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
@@ -291,6 +327,16 @@ class TilingEngine: ObservableObject {
             if rowIndex < columns[columnIndex].count - 1 {
                 // Move down within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex + 1)
+
+                // Swap the row height ratio info along with it
+                if var allRowRatios = rowHeightRatios[screen],
+                   var ratios = allRowRatios[columnIndex],
+                   ratios.count == columns[columnIndex].count {
+                    ratios.swapAt(rowIndex, rowIndex + 1)
+                    allRowRatios[columnIndex] = ratios
+                    rowHeightRatios[screen] = allRowRatios
+                }
+
                 tiledWindows[screen] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
