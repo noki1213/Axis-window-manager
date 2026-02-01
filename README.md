@@ -34,6 +34,9 @@ All shortcuts use `Ctrl + Option` as the base modifier.
 
 ### Zen Mode
 - `Ctrl + Option + Z`: Toggle Zen Mode (Focus Mode)
+  - Centers the focused window and hides all other windows on the primary monitor
+  - If the window is on a secondary monitor, it will be moved to the primary monitor
+  - When exiting Zen Mode, the window is restored to its original position
 
 ### Window Palette
 - `Ctrl + Option + P`: Open Window Palette
@@ -144,6 +147,10 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 ### Zen モード
 - Ctrl + Option + Z：Zen モードの切り替え
+  - フォーカス中のウィンドウをメインモニターの中央に表示
+  - 他のすべてのウィンドウを非表示にして、集中できる環境を作成
+  - サブモニターのウィンドウも Zen モードにするとメインモニターに移動
+  - Zen モード解除時は、ウィンドウは元の位置に復元される
 
 ### ウィンドウパレット
 - Ctrl + Option + P：ウィンドウパレットを開く
