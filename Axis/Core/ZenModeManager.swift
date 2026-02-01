@@ -29,6 +29,18 @@ class ZenModeManager: ObservableObject {
         }
     }
 
+    /// Reset the state without restoring windows, and return every window's original position
+    /// Used when switching directly to another mode, such as the palette
+    func exitAndHandOffHiddenFrames() -> [CGWindowID: CGRect] {
+        guard isActive else { return [:] }
+        print("[Axis] ZenMode: Handing off \(hiddenWindowFrames.count) hidden frames")
+        isActive = false
+        focusedWindowID = nil
+        let frames = hiddenWindowFrames
+        hiddenWindowFrames.removeAll()
+        return frames
+    }
+
     private func enter() {
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
             print("[Axis] ZenMode: No focused window")
@@ -51,7 +63,10 @@ class ZenModeManager: ObservableObject {
         
         // Move other windows off-screen (same screen only)
         hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
-        
+
+        // Also save the focused window's original position (before centering it)
+        hiddenWindowFrames[focusedWindow.id] = focusedWindow.frame
+
         // Move the focused window to the center
         centerWindow(focusedWindow, on: screen)
         
