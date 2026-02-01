@@ -1,5 +1,5 @@
 //
-//  WindowSwitcherItemView.swift
+//  WindowPaletteItemView.swift
 //  Axis
 //
 //  Created on 2026/01/31.
@@ -7,9 +7,9 @@
 
 import AppKit
 
-/// The card-shaped view for the window switcher
+/// The card-style view for the window palette
 /// A card stacking the app icon, app name, and window title vertically
-class WindowSwitcherItemView: NSView {
+class WindowPaletteItemView: NSView {
 
 	// MARK: - Properties
 

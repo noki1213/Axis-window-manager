@@ -209,7 +209,7 @@ class WorkspaceManager: ObservableObject {
 
 	
 
-	    /// Return window IDs across every monitor × every workspace (for the window switcher)
+	    /// Returns window IDs across every monitor and workspace (used by the window palette)
 
 	    func allWindowsByWorkspace() -> [ScreenIdentifier: [Int: Set<CGWindowID>]] {
 
