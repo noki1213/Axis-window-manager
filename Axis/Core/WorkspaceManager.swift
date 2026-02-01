@@ -576,12 +576,19 @@ class WorkspaceManager: ObservableObject {
 		// Re-apply tiling on the current monitor
 		tilingEngine.tile(on: screen)
 
-        // Added: clean up once the original workspace becomes empty
+        // Clean up once the original workspace becomes empty
         cleanupEmptyWorkspaces(on: screen)
-        
+
         // Re-fetch it, since cleanup may have changed activeWorkspace
         let updatedCurrentWS = activeWorkspace[id] ?? 0
-        
+
+		// If cleanup automatically switched to the destination workspace,
+		// Restore and tile windows that had been stashed off screen
+		if updatedCurrentWS == workspace {
+			showWindowsForWorkspace(workspace, on: id)
+			tilingEngine.tile(on: screen)
+		}
+
 		// Focus the remaining window
 		focusFirstWindow(in: updatedCurrentWS, on: id)
 
