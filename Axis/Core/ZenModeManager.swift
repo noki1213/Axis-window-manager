@@ -28,7 +28,7 @@ class ZenModeManager: ObservableObject {
             enter()
         }
     }
-    
+
     private func enter() {
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
             print("[Axis] ZenMode: No focused window")
