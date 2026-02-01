@@ -90,6 +90,29 @@ class WorkspaceManager: ObservableObject {
 		return workspaceWindows[id]?[workspace] ?? []
 	}
 
+	/// Move the window to another monitor (for cross-monitor movement)
+	/// Remove it from the original monitor's workspace and register it to the destination monitor's current workspace
+	func moveWindowBetweenScreens(_ windowID: CGWindowID, from sourceScreen: NSScreen, to targetScreen: NSScreen) {
+		let sourceID = screenIdentifier(for: sourceScreen)
+		let targetID = screenIdentifier(for: targetScreen)
+		let sourceWS = activeWorkspace[sourceID] ?? 0
+		let targetWS = activeWorkspace[targetID] ?? 0
+
+		// Remove it from the original monitor's workspace
+		workspaceWindows[sourceID]?[sourceWS]?.remove(windowID)
+
+		// Add it to the destination monitor's workspace
+		if workspaceWindows[targetID] == nil {
+			workspaceWindows[targetID] = [:]
+		}
+		if workspaceWindows[targetID]?[targetWS] == nil {
+			workspaceWindows[targetID]?[targetWS] = []
+		}
+		workspaceWindows[targetID]?[targetWS]?.insert(windowID)
+
+		print("[Axis] WorkspaceManager: Moved window \(windowID) from screen \(sourceID.displayID)/ws\(sourceWS) to screen \(targetID.displayID)/ws\(targetWS)")
+	}
+
 	/// Register a new window to the current workspace
 	func registerWindow(_ windowID: CGWindowID, on screen: NSScreen) {
 		let id = screenIdentifier(for: screen)

@@ -314,6 +314,9 @@ class TilingEngine: ObservableObject {
     private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
         print("[Axis] Moving window to \(position == .left ? "left" : "right") of target screen")
 
+        // Also update the workspace registration to the destination
+        WorkspaceManager.shared.moveWindowBetweenScreens(window.id, from: sourceScreen, to: targetScreen)
+
         // Remove the window from its original screen
         var sourceColumns = tiledWindows[sourceScreen] ?? []
         for colIdx in 0..<sourceColumns.count {
