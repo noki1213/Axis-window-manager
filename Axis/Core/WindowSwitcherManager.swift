@@ -42,6 +42,9 @@ class WindowSwitcherManager {
 	/// The original position of a window that was moved off-screen while the switcher was showing
 	private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
 
+	/// Whether there's a frame carried over from Zen mode etc. (re-tiling is needed on exit)
+	private var needsRetileOnClose = false
+
 	private let workspaceManager = WorkspaceManager.shared
 	private let accessibilityManager = AccessibilityManager.shared
 
@@ -50,7 +53,8 @@ class WindowSwitcherManager {
 	// MARK: - Public Methods
 
 	/// Start switcher mode
-	func startSwitcher() {
+	/// - Parameter inheritedHiddenFrames: the original positions of windows carried over from Zen mode etc.
+	func startSwitcher(inheritedHiddenFrames: [CGWindowID: CGRect] = [:]) {
 		displays = collectDisplays()
 
 		guard !displays.isEmpty else {
@@ -64,6 +68,13 @@ class WindowSwitcherManager {
 
 		// Temporarily hide the on-screen window (for visibility)
 		hideOnScreenWindows()
+
+		// Overwrite with the original position of windows carried over from Zen mode etc.
+		// (Prefer the original pre-Zen-mode position over the one the switcher saved)
+		needsRetileOnClose = !inheritedHiddenFrames.isEmpty
+		for (id, frame) in inheritedHiddenFrames {
+			hiddenWindowFrames[id] = frame
+		}
 
 		if panel == nil {
 			panel = WindowSwitcherPanel()
@@ -80,6 +91,15 @@ class WindowSwitcherManager {
 
 		// Restore the window that was hidden
 		restoreHiddenWindows()
+
+		// If it was carried over from Zen mode, re-tiling and restoring the border are required
+		if needsRetileOnClose {
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+				TilingEngine.shared.tileAllScreens()
+				BorderManager.shared.updateBorder()
+			}
+			needsRetileOnClose = false
+		}
 
 		displays.removeAll()
 		selectedDisplayIndex = 0
@@ -184,6 +204,15 @@ class WindowSwitcherManager {
 
 		// Restore the window that was hidden
 		restoreHiddenWindows()
+
+		// If it was carried over from Zen mode, re-tiling and restoring the border are required
+		if needsRetileOnClose {
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+				TilingEngine.shared.tileAllScreens()
+				BorderManager.shared.updateBorder()
+			}
+			needsRetileOnClose = false
+		}
 
 		// Switch to the selected window's workspace
 		switchToWindowWorkspace(selectedItem)

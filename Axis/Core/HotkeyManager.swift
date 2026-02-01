@@ -375,19 +375,14 @@ class HotkeyManager: ObservableObject {
         // MARK: Window Switcher (P)
         case kVK_ANSI_P: // ウィンドウスイッチャーモード
             DispatchQueue.main.async { [weak self] in
+                // While in Zen mode, carry over just the position info without restoring the window
+                var zenFrames: [CGWindowID: CGRect] = [:]
                 if ZenModeManager.shared.isActive {
-                    // Disable Zen mode, then open the switcher once retiling finishes
-                    ZenModeManager.shared.toggle()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        self?.currentMode = .windowSwitcher
-                        self?.windowSwitcherManager.startSwitcher()
-                        NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-                    }
-                } else {
-                    self?.currentMode = .windowSwitcher
-                    self?.windowSwitcherManager.startSwitcher()
-                    NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+                    zenFrames = ZenModeManager.shared.exitAndHandOffHiddenFrames()
                 }
+                self?.currentMode = .windowSwitcher
+                self?.windowSwitcherManager.startSwitcher(inheritedHiddenFrames: zenFrames)
+                NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
             }
             return true
 
