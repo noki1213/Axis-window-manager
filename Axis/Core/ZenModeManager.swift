@@ -47,7 +47,9 @@ class ZenModeManager: ObservableObject {
             return
         }
         
-        guard let screen = NSScreen.main else {
+        // Get the primary (main) monitor
+        // Don't use NSScreen.main since it returns the monitor with the focused window
+        guard let screen = NSScreen.screens.first else {
             print("[Axis] ZenMode: No screen")
             return
         }
@@ -61,7 +63,7 @@ class ZenModeManager: ObservableObject {
         // Hide the border
         BorderManager.shared.hideBorder()
         
-        // Move other windows off-screen (same screen only)
+        // Move the other windows on all monitors off-screen
         hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
 
         // Also save the focused window's original position (before centering it)
@@ -149,14 +151,18 @@ class ZenModeManager: ObservableObject {
         }
     }
 
-    private func hideOtherWindows(exceptWindowID: CGWindowID, on targetScreen: NSScreen) {
+    private func hideOtherWindows(exceptWindowID: CGWindowID, on mainScreen: NSScreen) {
         hiddenWindowFrames.removeAll()
 
-        // Get the window IDs that belong to the current workspace
-        let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: targetScreen)
+        // Gather the window IDs belonging to the current workspace across all monitors
+        var allWorkspaceIDs = Set<CGWindowID>()
+        for screen in NSScreen.screens {
+            let ids = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
+            allWorkspaceIDs.formUnion(ids)
+        }
 
-        // Decide the best corner to hide it in
-        let corner = optimalHideCorner(for: targetScreen)
+        // Decide which corner of the main screen to hide it in
+        let corner = optimalHideCorner(for: mainScreen)
 
         // Get all windows
         let allWindows = AccessibilityManager.shared.getAllWindows()
@@ -173,21 +179,21 @@ class ZenModeManager: ObservableObject {
             }
 
             // Skip windows that don't belong to the current workspace
-            if !workspaceIDs.contains(window.id) {
+            if !allWorkspaceIDs.contains(window.id) {
                 continue
             }
 
             // Save the original position
             hiddenWindowFrames[window.id] = window.frame
 
-            // Move to the corner (position only, size unchanged)
-            let hidePos = hidePosition(for: window, corner: corner, on: targetScreen)
+            // Move to a corner of the main screen (position only, size unchanged)
+            let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
             window.setPosition(hidePos)
 
             print("[Axis] ZenMode: Moved window '\(window.title)' to corner")
         }
 
-        print("[Axis] ZenMode: Hidden \(hiddenWindowFrames.count) windows using corner: \(corner)")
+        print("[Axis] ZenMode: Hidden \(hiddenWindowFrames.count) windows")
     }
     
     private func restoreHiddenWindows() {
@@ -209,22 +215,28 @@ class ZenModeManager: ObservableObject {
     private func centerWindow(_ window: WindowInfo, on screen: NSScreen) {
         let visibleFrame = screen.visibleFrame
         let padding: CGFloat = 12
-        
+
         // Size: 75% width, full screen height
         let targetWidth = visibleFrame.width * 0.75
         let targetHeight = visibleFrame.height - (padding * 2)
-        
+
         // Center it
         let originX = visibleFrame.minX + (visibleFrame.width - targetWidth) / 2
-        
+
         // Convert to AX coordinates
         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
         let originY = screenTopInAX + padding
-        
+
         let targetFrame = CGRect(x: originX, y: originY, width: targetWidth, height: targetHeight)
-        
+
         print("[Axis] ZenMode: Moving window to \(targetFrame)")
-        window.setFrame(targetFrame)
+
+        // Move it to the main monitor first, then change its size
+        // (while it's on a secondary monitor, macOS constrains it to that monitor's size)
+        window.setPosition(targetFrame.origin)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            window.setFrame(targetFrame)
+        }
     }
 }
