@@ -203,9 +203,16 @@ class GapSelectManager: ObservableObject {
 		var targetGapIndex: Int? = nil
 		
 		// Identify which column/row a window is in
-		// columns is of type [[WindowInfo]], obtainable via tilingEngine.tiledWindows[screen]
-		let columns = tilingEngine.tiledWindows[screen] ?? []
-		guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else { return false }
+		// columns is of type [[WindowInfo]], obtainable via tilingEngine.tiledWindows[ScreenIdentifier(from: screen)]
+		let columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
+		guard columns.count > 0 else {
+			availableGaps = []
+			return false
+		}
+        
+        guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else {
+            return false
+        }
 		
 		for (index, gap) in availableGaps.enumerated() {
 			switch direction {
@@ -301,7 +308,7 @@ class GapSelectManager: ObservableObject {
 	private func calculateGaps(for screen: NSScreen) {
 		var gaps: [GapInfo] = []
 
-		var columns = tilingEngine.tiledWindows[screen] ?? []
+		var columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
 		guard columns.count > 0 else {
 			availableGaps = []
 			return

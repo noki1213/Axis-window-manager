@@ -27,7 +27,7 @@ class TilingEngine: ObservableObject {
 
     /// The windows currently tiled (per screen, per column)
     /// The outer array is "columns," the inner array is "the windows within a column (top to bottom)"
-    @Published var tiledWindows: [NSScreen: [[WindowInfo]]] = [:]
+    @Published var tiledWindows: [ScreenIdentifier: [[WindowInfo]]] = [:]
     
     private let accessibilityManager = AccessibilityManager.shared
     
@@ -37,6 +37,7 @@ class TilingEngine: ObservableObject {
     
     /// Run tiling on the given screen
     func tile(on screen: NSScreen) {
+        let screenID = ScreenIdentifier(from: screen)
         let allWindows = accessibilityManager.getAllWindows()
 
         // Get the window IDs belonging to the workspace
@@ -53,7 +54,7 @@ class TilingEngine: ObservableObject {
         // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
             print("[Axis] tile: No workspace windows on this screen, skipping")
-            tiledWindows[screen] = []
+            tiledWindows[screenID] = []
             return
         }
 
@@ -64,7 +65,7 @@ class TilingEngine: ObservableObject {
         let windowDict = Dictionary(uniqueKeysWithValues: managedWindows.map { ($0.id, $0) })
 
         // Get the existing column structure
-        var columns = tiledWindows[screen] ?? []
+        var columns = tiledWindows[screenID] ?? []
 
         // Collect the window IDs already present in the column structure
         let existingWindowIDs = Set(columns.flatMap { $0.map { $0.id } })
@@ -95,7 +96,7 @@ class TilingEngine: ObservableObject {
         }
 
         // Update the state
-        tiledWindows[screen] = columns
+        tiledWindows[screenID] = columns
 
         // Compute and apply the tiling layout
         applyColumnTiling(columns: columns, on: screen)
@@ -123,12 +124,13 @@ class TilingEngine: ObservableObject {
             print("[Axis] moveFocus: Could not determine screen for window")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
         print("[Axis] moveFocus: screen frame=\(screen.frame)")
 
         // Target only windows belonging to the current workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
-        let allColumns = tiledWindows[screen] ?? []
+        let allColumns = tiledWindows[screenID] ?? []
         let columns = allColumns.map { column in
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
@@ -229,12 +231,13 @@ class TilingEngine: ObservableObject {
               let screen = getScreen(for: currentWindow) else {
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
         // Get the window IDs of the current workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
 
         // Get all columns and filter down to just the workspace's windows
-        let allColumns = tiledWindows[screen] ?? []
+        let allColumns = tiledWindows[screenID] ?? []
         var columns = allColumns.map { column in
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
@@ -250,19 +253,19 @@ class TilingEngine: ObservableObject {
                 columns.swapAt(columnIndex, columnIndex - 1)
 
                 // Swap the size ratio info along with it
-                if var ratios = columnWidthRatios[screen], ratios.count == columns.count {
+                if var ratios = columnWidthRatios[screenID], ratios.count == columns.count {
                     ratios.swapAt(columnIndex, columnIndex - 1)
-                    columnWidthRatios[screen] = ratios
+                    columnWidthRatios[screenID] = ratios
                 }
-                if var allRowRatios = rowHeightRatios[screen] {
+                if var allRowRatios = rowHeightRatios[screenID] {
                     let temp = allRowRatios[columnIndex]
                     allRowRatios[columnIndex] = allRowRatios[columnIndex - 1]
                     allRowRatios[columnIndex - 1] = temp
-                    rowHeightRatios[screen] = allRowRatios
+                    rowHeightRatios[screenID] = allRowRatios
                 }
 
                 // Only store on-screen windows in tiledWindows
-                tiledWindows[screen] = columns
+                tiledWindows[screenID] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the left edge, move to the monitor on the left
@@ -276,18 +279,18 @@ class TilingEngine: ObservableObject {
                 columns.swapAt(columnIndex, columnIndex + 1)
 
                 // Swap the size ratio info along with it
-                if var ratios = columnWidthRatios[screen], ratios.count == columns.count {
+                if var ratios = columnWidthRatios[screenID], ratios.count == columns.count {
                     ratios.swapAt(columnIndex, columnIndex + 1)
-                    columnWidthRatios[screen] = ratios
+                    columnWidthRatios[screenID] = ratios
                 }
-                if var allRowRatios = rowHeightRatios[screen] {
+                if var allRowRatios = rowHeightRatios[screenID] {
                     let temp = allRowRatios[columnIndex]
                     allRowRatios[columnIndex] = allRowRatios[columnIndex + 1]
                     allRowRatios[columnIndex + 1] = temp
-                    rowHeightRatios[screen] = allRowRatios
+                    rowHeightRatios[screenID] = allRowRatios
                 }
 
-                tiledWindows[screen] = columns
+                tiledWindows[screenID] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the right edge, move to the monitor on the right
@@ -302,15 +305,15 @@ class TilingEngine: ObservableObject {
                 columns[columnIndex].swapAt(rowIndex, rowIndex - 1)
 
                 // Swap the row height ratio info along with it
-                if var allRowRatios = rowHeightRatios[screen],
+                if var allRowRatios = rowHeightRatios[screenID],
                    var ratios = allRowRatios[columnIndex],
                    ratios.count == columns[columnIndex].count {
                     ratios.swapAt(rowIndex, rowIndex - 1)
                     allRowRatios[columnIndex] = ratios
-                    rowHeightRatios[screen] = allRowRatios
+                    rowHeightRatios[screenID] = allRowRatios
                 }
 
-                tiledWindows[screen] = columns
+                tiledWindows[screenID] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the top of the column, move to the monitor above (added at the far left)
@@ -329,15 +332,15 @@ class TilingEngine: ObservableObject {
                 columns[columnIndex].swapAt(rowIndex, rowIndex + 1)
 
                 // Swap the row height ratio info along with it
-                if var allRowRatios = rowHeightRatios[screen],
+                if var allRowRatios = rowHeightRatios[screenID],
                    var ratios = allRowRatios[columnIndex],
                    ratios.count == columns[columnIndex].count {
                     ratios.swapAt(rowIndex, rowIndex + 1)
                     allRowRatios[columnIndex] = ratios
-                    rowHeightRatios[screen] = allRowRatios
+                    rowHeightRatios[screenID] = allRowRatios
                 }
 
-                tiledWindows[screen] = columns
+                tiledWindows[screenID] = columns
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the bottom of the column, move to the monitor below (added at the far left)
@@ -359,12 +362,14 @@ class TilingEngine: ObservableObject {
     /// Move the window to another screen
     private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
         print("[Axis] Moving window to \(position == .left ? "left" : "right") of target screen")
+        let sourceID = ScreenIdentifier(from: sourceScreen)
+        let targetID = ScreenIdentifier(from: targetScreen)
 
         // Also update the workspace registration to the destination
         WorkspaceManager.shared.moveWindowBetweenScreens(window.id, from: sourceScreen, to: targetScreen)
 
         // Remove the window from its original screen
-        var sourceColumns = tiledWindows[sourceScreen] ?? []
+        var sourceColumns = tiledWindows[sourceID] ?? []
         for colIdx in 0..<sourceColumns.count {
             if let rowIdx = sourceColumns[colIdx].firstIndex(of: window) {
                 sourceColumns[colIdx].remove(at: rowIdx)
@@ -373,11 +378,11 @@ class TilingEngine: ObservableObject {
         }
         // Remove empty columns
         sourceColumns = sourceColumns.filter { !$0.isEmpty }
-        tiledWindows[sourceScreen] = sourceColumns
+        tiledWindows[sourceID] = sourceColumns
         applyColumnTiling(columns: sourceColumns, on: sourceScreen)
 
         // Add the window to the target screen
-        var targetColumns = tiledWindows[targetScreen] ?? []
+        var targetColumns = tiledWindows[targetID] ?? []
         switch position {
         case .left:
             // Append to the far left
@@ -386,13 +391,13 @@ class TilingEngine: ObservableObject {
             // Append to the far right
             targetColumns.append([window])
         }
-        tiledWindows[targetScreen] = targetColumns
+        tiledWindows[targetID] = targetColumns
         applyColumnTiling(columns: targetColumns, on: targetScreen)
 
         // Reapply tiling after a short delay (to fit the monitor size)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
-            if let columns = self.tiledWindows[targetScreen] {
+            if let columns = self.tiledWindows[targetID] {
                 self.applyColumnTiling(columns: columns, on: targetScreen)
             }
         }
@@ -413,8 +418,9 @@ class TilingEngine: ObservableObject {
             print("[Axis] moveWindows: No focused window or screen")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
-        var columns = tiledWindows[screen] ?? []
+        var columns = tiledWindows[screenID] ?? []
         print("[Axis] moveWindows: columns count = \(columns.count)")
 
         // Get the position of the selected window
@@ -509,7 +515,7 @@ class TilingEngine: ObservableObject {
         // Remove empty columns
         columns = columns.filter { !$0.isEmpty }
 
-        tiledWindows[screen] = columns
+        tiledWindows[screenID] = columns
         applyColumnTiling(columns: columns, on: screen)
 
         // Keep focus as is
@@ -526,8 +532,9 @@ class TilingEngine: ObservableObject {
             print("[Axis] resetToSingleWindowColumns: No focused window or screen")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
-        let columns = tiledWindows[screen] ?? []
+        let columns = tiledWindows[screenID] ?? []
 
         // Take out all the windows and make each one its own column
         let allWindows = columns.flatMap { $0 }
@@ -535,7 +542,7 @@ class TilingEngine: ObservableObject {
 
         print("[Axis] resetToSingleWindowColumns: resetting \(allWindows.count) windows to single columns")
 
-        tiledWindows[screen] = newColumns
+        tiledWindows[screenID] = newColumns
         applyColumnTiling(columns: newColumns, on: screen)
 
         // Keep focus as is
@@ -552,8 +559,9 @@ class TilingEngine: ObservableObject {
             print("[Axis] mergeWindowsIntoColumn: No focused window or screen")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
-        var columns = tiledWindows[screen] ?? []
+        var columns = tiledWindows[screenID] ?? []
 
         // Collect the selected windows (preserving their original order)
         var selectedWindows: [WindowInfo] = []
@@ -599,7 +607,7 @@ class TilingEngine: ObservableObject {
         let insertIndex = min(newTargetCol, columns.count)
         columns.insert(selectedWindows, at: insertIndex)
 
-        tiledWindows[screen] = columns
+        tiledWindows[screenID] = columns
         applyColumnTiling(columns: columns, on: screen)
 
         // Keep focus as is
@@ -616,8 +624,9 @@ class TilingEngine: ObservableObject {
             print("[Axis] splitWindowsToColumns: No focused window or screen")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
 
-        var columns = tiledWindows[screen] ?? []
+        var columns = tiledWindows[screenID] ?? []
 
         // Collect the selected windows (preserving their original order)
         var selectedWindows: [WindowInfo] = []
@@ -665,7 +674,7 @@ class TilingEngine: ObservableObject {
             columns.insert([window], at: newInsertIndex)
         }
 
-        tiledWindows[screen] = columns
+        tiledWindows[screenID] = columns
         applyColumnTiling(columns: columns, on: screen)
 
         // Keep focus as is
@@ -680,12 +689,13 @@ class TilingEngine: ObservableObject {
     /// Use the existing ratio if there is one; otherwise split evenly
     private func applyColumnTiling(columns: [[WindowInfo]], on screen: NSScreen) {
         guard !columns.isEmpty else { return }
+        let screenID = ScreenIdentifier(from: screen)
 
         // Use the existing ratio if there is one
-        if let existingRatios = columnWidthRatios[screen], existingRatios.count == columns.count {
+        if let existingRatios = columnWidthRatios[screenID], existingRatios.count == columns.count {
             // Also check the row ratios and reset them if the window count changed
             var needsRowRatioReset = false
-            if let allRowRatios = rowHeightRatios[screen] {
+            if let allRowRatios = rowHeightRatios[screenID] {
                 for (colIndex, column) in columns.enumerated() {
                     if let ratios = allRowRatios[colIndex], ratios.count != column.count {
                         needsRowRatioReset = true
@@ -694,15 +704,15 @@ class TilingEngine: ObservableObject {
                 }
             }
             if needsRowRatioReset {
-                rowHeightRatios[screen] = nil
+                rowHeightRatios[screenID] = nil
             }
             applyColumnTilingWithRatios(columns: columns, ratios: existingRatios, on: screen)
             return
         }
 
         // Reset the ratios if the number of columns changed
-        columnWidthRatios[screen] = nil
-        rowHeightRatios[screen] = nil
+        columnWidthRatios[screenID] = nil
+        rowHeightRatios[screenID] = nil
 
         let visibleFrame = screen.visibleFrame
         let columnCount = CGFloat(columns.count)
@@ -722,7 +732,7 @@ class TilingEngine: ObservableObject {
             guard !column.isEmpty else { continue }
 
             // Get the row height ratio
-            let rowRatios = rowHeightRatios[screen]?[colIndex]
+            let rowRatios = rowHeightRatios[screenID]?[colIndex]
 
             let rowCount = CGFloat(column.count)
             let totalRowGaps = windowGap * (rowCount - 1)
@@ -757,7 +767,7 @@ class TilingEngine: ObservableObject {
             currentX += columnWidth + windowGap
         }
     }
-    
+
     /// Compute each window's width (accounting for the minimum size)
     private func calculateWindowWidths(windows: [WindowInfo], availableWidth: CGFloat, idealWidth: CGFloat) -> [CGFloat] {
         var widths = [CGFloat](repeating: idealWidth, count: windows.count)
@@ -856,10 +866,11 @@ class TilingEngine: ObservableObject {
 
         let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
         guard let targetScreen = adjacentScreen else { return nil }
+        let targetID = ScreenIdentifier(from: targetScreen)
 
         // Target only the current workspace's windows
         let workspaceIDs = getWorkspaceWindowIDs(on: targetScreen)
-        let allColumns = tiledWindows[targetScreen] ?? []
+        let allColumns = tiledWindows[targetID] ?? []
         let columns = allColumns.map { column in
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
@@ -929,11 +940,11 @@ class TilingEngine: ObservableObject {
 
     /// Column width ratios (per screen)
     /// Key: screen, value: array of each column's width ratio (sums to 1.0)
-    private var columnWidthRatios: [NSScreen: [CGFloat]] = [:]
+    private var columnWidthRatios: [ScreenIdentifier: [CGFloat]] = [:]
 
     /// Row height ratios (per screen, per column)
     /// Key: screen, value: [column index: array of each row's height ratio]
-    private var rowHeightRatios: [NSScreen: [Int: [CGFloat]]] = [:]
+    private var rowHeightRatios: [ScreenIdentifier: [Int: [CGFloat]]] = [:]
 
     /// Resize the gap between columns
     /// - Parameters:
@@ -941,14 +952,15 @@ class TilingEngine: ObservableObject {
     ///   - delta: the amount to move (positive: rightward, negative: leftward)
     ///   - screen: the target screen
     func resizeColumnGap(at columnIndex: Int, delta: CGFloat, on screen: NSScreen) {
-        let columns = tiledWindows[screen] ?? []
+        let screenID = ScreenIdentifier(from: screen)
+        let columns = tiledWindows[screenID] ?? []
         guard columns.count > 1 else { return }
         guard columnIndex >= 0 && columnIndex < columns.count - 1 else { return }
 
         print("[Axis] resizeColumnGap: columnIndex=\(columnIndex), delta=\(delta)")
 
         // Get or initialize the current ratio
-        var ratios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        var ratios = columnWidthRatios[screenID] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
 
         // Reinitialize if the number of ratios doesn't match the number of columns
         if ratios.count != columns.count {
@@ -980,7 +992,7 @@ class TilingEngine: ObservableObject {
         ratios[columnIndex + 1] = newRightRatio
 
         // Save the ratios
-        columnWidthRatios[screen] = ratios
+        columnWidthRatios[screenID] = ratios
 
         // Reapply tiling
         applyColumnTilingWithRatios(columns: columns, ratios: ratios, on: screen)
@@ -993,7 +1005,8 @@ class TilingEngine: ObservableObject {
     ///   - delta: the amount to move (positive: downward, negative: upward)
     ///   - screen: the target screen
     func resizeRowGap(columnIndex: Int, rowIndex: Int, delta: CGFloat, on screen: NSScreen) {
-        let columns = tiledWindows[screen] ?? []
+        let screenID = ScreenIdentifier(from: screen)
+        let columns = tiledWindows[screenID] ?? []
         guard columnIndex >= 0 && columnIndex < columns.count else { return }
 
         let column = columns[columnIndex]
@@ -1003,7 +1016,7 @@ class TilingEngine: ObservableObject {
         print("[Axis] resizeRowGap: columnIndex=\(columnIndex), rowIndex=\(rowIndex), delta=\(delta)")
 
         // Get or initialize the current row height ratio
-        var allRowRatios = rowHeightRatios[screen] ?? [:]
+        var allRowRatios = rowHeightRatios[screenID] ?? [:]
         var ratios = allRowRatios[columnIndex] ?? Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
 
         // Reinitialize if the number of ratios doesn't match the number of rows
@@ -1037,32 +1050,33 @@ class TilingEngine: ObservableObject {
 
         // Save the ratios
         allRowRatios[columnIndex] = ratios
-        rowHeightRatios[screen] = allRowRatios
+        rowHeightRatios[screenID] = allRowRatios
 
         // Reapply tiling
-        let columnRatios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        let columnRatios = columnWidthRatios[screenID] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
         applyColumnTilingWithRatios(columns: columns, ratios: columnRatios, on: screen)
     }
 
     /// Apply tiling with the given ratios
     private func applyColumnTilingWithRatios(columns: [[WindowInfo]], ratios: [CGFloat], on screen: NSScreen) {
+        let screenID = ScreenIdentifier(from: screen)
         guard !columns.isEmpty else { return }
         guard columns.count == ratios.count else {
             // Fall back to normal tiling if the ratios don't match
-            columnWidthRatios[screen] = nil
-            rowHeightRatios[screen] = nil
+            columnWidthRatios[screenID] = nil
+            rowHeightRatios[screenID] = nil
             applyColumnTiling(columns: columns, on: screen)
             return
         }
 
         // Check the row ratios and clear that column's ratio if the window count changed
-        if var allRowRatios = rowHeightRatios[screen] {
+        if var allRowRatios = rowHeightRatios[screenID] {
             for (colIndex, column) in columns.enumerated() {
                 if let colRatios = allRowRatios[colIndex], colRatios.count != column.count {
                     allRowRatios[colIndex] = nil
                 }
             }
-            rowHeightRatios[screen] = allRowRatios
+            rowHeightRatios[screenID] = allRowRatios
         }
 
         let visibleFrame = screen.visibleFrame
@@ -1085,7 +1099,7 @@ class TilingEngine: ObservableObject {
             let columnWidth = availableWidth * ratios[colIndex]
 
             // Get the row height ratio
-            let rowRatios = rowHeightRatios[screen]?[colIndex] ?? Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
+            let rowRatios = rowHeightRatios[screenID]?[colIndex] ?? Array(repeating: 1.0 / CGFloat(column.count), count: column.count)
 
             let rowCount = CGFloat(column.count)
             let totalRowGaps = windowGap * (rowCount - 1)
@@ -1123,30 +1137,33 @@ class TilingEngine: ObservableObject {
 
     /// Reset the ratios (call this when windows are added or removed)
     func resetRatios(for screen: NSScreen) {
-        columnWidthRatios[screen] = nil
-        rowHeightRatios[screen] = nil
+        let screenID = ScreenIdentifier(from: screen)
+        columnWidthRatios[screenID] = nil
+        rowHeightRatios[screenID] = nil
     }
 
     // MARK: - Workspace State Management
 
     /// Save the current tiling state (used on workspace switches)
     func saveTilingStateForScreen(_ screen: NSScreen) -> PerScreenSnapshot {
-        let columns = tiledWindows[screen] ?? []
+        let screenID = ScreenIdentifier(from: screen)
+        let columns = tiledWindows[screenID] ?? []
         let columnIDs = columns.map { column in
             column.map { $0.id }
         }
         return PerScreenSnapshot(
             columns: columnIDs,
-            columnWidthRatios: columnWidthRatios[screen],
-            rowHeightRatios: rowHeightRatios[screen]
+            columnWidthRatios: columnWidthRatios[screenID],
+            rowHeightRatios: rowHeightRatios[screenID]
         )
     }
 
     /// Restore the saved tiling state (used on workspace switches)
     func restoreTilingStateForScreen(_ screen: NSScreen, snapshot: PerScreenSnapshot) {
+        let screenID = ScreenIdentifier(from: screen)
         // Restore the ratios
-        columnWidthRatios[screen] = snapshot.columnWidthRatios
-        rowHeightRatios[screen] = snapshot.rowHeightRatios
+        columnWidthRatios[screenID] = snapshot.columnWidthRatios
+        rowHeightRatios[screenID] = snapshot.rowHeightRatios
 
         // Restore the column structure (rebuild WindowInfo from window IDs)
         let allWindows = accessibilityManager.getAllWindows()
@@ -1159,21 +1176,22 @@ class TilingEngine: ObservableObject {
             return column.isEmpty ? nil : column
         }
 
-        tiledWindows[screen] = restoredColumns
+        tiledWindows[screenID] = restoredColumns
     }
 
     /// Clear the tiling state (used when switching to a new workspace)
     func clearTilingStateForScreen(_ screen: NSScreen) {
-        tiledWindows[screen] = nil
-        columnWidthRatios[screen] = nil
-        rowHeightRatios[screen] = nil
+        let screenID = ScreenIdentifier(from: screen)
+        tiledWindows[screenID] = nil
+        columnWidthRatios[screenID] = nil
+        rowHeightRatios[screenID] = nil
     }
 
     /// Clean up data for a disconnected monitor
     func cleanupDisconnectedScreens() {
-        let currentScreens = Set(NSScreen.screens)
+        let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
         for key in tiledWindows.keys {
-            if !currentScreens.contains(key) {
+            if !currentScreenIDs.contains(key) {
                 tiledWindows.removeValue(forKey: key)
                 columnWidthRatios.removeValue(forKey: key)
                 rowHeightRatios.removeValue(forKey: key)
@@ -1201,10 +1219,11 @@ class TilingEngine: ObservableObject {
             print("[Axis] resizeCurrentWindow: No focused window or screen")
             return
         }
+        let screenID = ScreenIdentifier(from: screen)
         
         // Target only the current workspace's windows
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
-        let allColumns = tiledWindows[screen] ?? []
+        let allColumns = tiledWindows[screenID] ?? []
         let columns = allColumns.map { column in
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
@@ -1225,7 +1244,7 @@ class TilingEngine: ObservableObject {
         let delta = increase ? resizeStep : -resizeStep
         
         // Get or initialize the current ratio
-        var ratios = columnWidthRatios[screen] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+        var ratios = columnWidthRatios[screenID] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
         if ratios.count != columns.count {
             ratios = Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
         }
@@ -1283,7 +1302,7 @@ class TilingEngine: ObservableObject {
         }
         
         // Save the ratios
-        columnWidthRatios[screen] = ratios
+        columnWidthRatios[screenID] = ratios
         
         print("[Axis] resizeCurrentWindow: new ratios = \(ratios)")
         

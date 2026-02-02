@@ -469,7 +469,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if self.accessibilityManager.getFocusedWindow() == nil {
                 // Focus the first of the tiled windows
                 for screen in NSScreen.screens {
-                    if let columns = self.tilingEngine.tiledWindows[screen],
+                    if let columns = self.tilingEngine.tiledWindows[ScreenIdentifier(from: screen)],
                        let firstColumn = columns.first,
                        let firstWindow = firstColumn.first {
                         firstWindow.focus()
