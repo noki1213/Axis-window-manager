@@ -889,6 +889,146 @@ class WorkspaceManager: ObservableObject {
 
 		return NSScreen.main
 	}
+
+	// MARK: - Handling monitor connect/disconnect
+
+	/// Handling for when a monitor is disconnected
+	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
+	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
+		print("[Axis] handleScreenDisconnected: \(removedScreenID.displayID)")
+
+		// Exit the special mode
+		if ZenModeManager.shared.isActive {
+			ZenModeManager.shared.toggle()
+		}
+		if HotkeyManager.shared.currentMode == .windowPalette {
+			WindowPaletteManager.shared.endPalette()
+			HotkeyManager.shared.currentMode = .normal
+			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
+		}
+		isSwitching = true
+
+		// Decide the destination monitor (normally the MacBook's built-in display)
+		guard let targetScreen = NSScreen.screens.first else {
+			print("[Axis] handleScreenDisconnected: 残りのモニターがありません")
+			isSwitching = false
+			return
+		}
+		let targetScreenID = screenIdentifier(for: targetScreen)
+
+		// Get the list of the disconnected monitor's workspaces
+		let removedWSNumbers = workspaceWindows[removedScreenID]?.keys.sorted() ?? []
+		guard !removedWSNumbers.isEmpty else {
+			// Only clean up the data
+			workspaceWindows.removeValue(forKey: removedScreenID)
+			tilingSnapshots.removeValue(forKey: removedScreenID)
+			activeWorkspace.removeValue(forKey: removedScreenID)
+			tilingEngine.cleanupDisconnectedScreens()
+			isSwitching = false
+			return
+		}
+
+		// Assign a new number starting from the max existing destination workspace number + 1
+		let existingWSNumbers = workspaceWindows[targetScreenID]?.keys.sorted() ?? [0]
+		let maxExistingWS = existingWSNumbers.max() ?? 0
+		var nextNewWS = maxExistingWS + 1
+
+		// Collect all the window IDs to migrate
+		var allMigratedWindowIDs = Set<CGWindowID>()
+
+		for oldWS in removedWSNumbers {
+			let windowIDs = workspaceWindows[removedScreenID]?[oldWS] ?? []
+			allMigratedWindowIDs.formUnion(windowIDs)
+
+			// Migrate workspaceWindows
+			if workspaceWindows[targetScreenID] == nil {
+				workspaceWindows[targetScreenID] = [:]
+			}
+			workspaceWindows[targetScreenID]?[nextNewWS] = windowIDs
+
+			// Migrate tilingSnapshots (ratios are cleared, since screen sizes differ)
+			if var snapshot = tilingSnapshots[removedScreenID]?[oldWS] {
+				snapshot.columnWidthRatios = nil
+				snapshot.rowHeightRatios = nil
+				if tilingSnapshots[targetScreenID] == nil {
+					tilingSnapshots[targetScreenID] = [:]
+				}
+				tilingSnapshots[targetScreenID]?[nextNewWS] = snapshot
+			}
+
+			print("[Axis] ワークスペース移行: モニター \(removedScreenID.displayID) WS \(oldWS) → モニター \(targetScreenID.displayID) WS \(nextNewWS)（\(windowIDs.count) 個のウィンドウ）")
+
+			nextNewWS += 1
+		}
+
+		// Delete the migrated window's savedFrames (unusable since it's the disconnected monitor's coordinates)
+		for windowID in allMigratedWindowIDs {
+			savedFrames.removeValue(forKey: windowID)
+		}
+
+		// Move the migrated window to the destination monitor's hidden corner
+		// (Since it's an inactive workspace, put it in a not-shown state)
+		let allWindows = accessibilityManager.getAllWindows()
+		let corner = optimalHideCorner(for: targetScreenID)
+
+		for window in allWindows {
+			if allMigratedWindowIDs.contains(window.id) {
+				if let hidePos = hidePosition(for: window, corner: corner, on: targetScreenID) {
+					window.setPosition(hidePos)
+				}
+			}
+		}
+
+		// Delete the disconnected monitor's data
+		workspaceWindows.removeValue(forKey: removedScreenID)
+		tilingSnapshots.removeValue(forKey: removedScreenID)
+		activeWorkspace.removeValue(forKey: removedScreenID)
+
+		// Clean up TilingEngine
+		tilingEngine.cleanupDisconnectedScreens()
+
+		// Re-tile (rearrange the remaining monitors' active workspaces)
+		tilingEngine.tileAllScreens()
+
+		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+			BorderManager.shared.updateBorder()
+		}
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+			self?.isSwitching = false
+		}
+
+		print("[Axis] handleScreenDisconnected: 完了。\(allMigratedWindowIDs.count) 個のウィンドウを移行")
+	}
+
+	/// Handling for when a monitor is connected
+	/// Initialize an empty workspace 0 on the new monitor
+	func handleScreenConnected(newScreen: NSScreen) {
+		let newScreenID = screenIdentifier(for: newScreen)
+		print("[Axis] handleScreenConnected: \(newScreenID.displayID)")
+
+		// Clean up stale data if present (from the same monitor when it was previously connected)
+		workspaceWindows.removeValue(forKey: newScreenID)
+		tilingSnapshots.removeValue(forKey: newScreenID)
+		activeWorkspace.removeValue(forKey: newScreenID)
+
+		// Initialize an empty workspace 0
+		activeWorkspace[newScreenID] = 0
+		workspaceWindows[newScreenID] = [0: []]
+
+		// Also clear the TilingEngine's data
+		tilingEngine.clearTilingStateForScreen(newScreen)
+
+		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+			BorderManager.shared.updateBorder()
+		}
+
+		print("[Axis] handleScreenConnected: 完了。空のワークスペース 0 を初期化")
+	}
 }
 
 // MARK: - Notification Names
