@@ -896,6 +896,7 @@ class WorkspaceManager: ObservableObject {
 	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
 	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
 		print("[Axis] handleScreenDisconnected: \(removedScreenID.displayID)")
+        DebugLogger.shared.log("WorkspaceManager: handleScreenDisconnected \(removedScreenID.displayID)")
 
 		// Exit the special mode
 		if ZenModeManager.shared.isActive {
@@ -911,13 +912,16 @@ class WorkspaceManager: ObservableObject {
 		// Decide the destination monitor (normally the MacBook's built-in display)
 		guard let targetScreen = NSScreen.screens.first else {
 			print("[Axis] handleScreenDisconnected: 残りのモニターがありません")
+            DebugLogger.shared.log("WorkspaceManager: No target screen found")
 			isSwitching = false
 			return
 		}
 		let targetScreenID = screenIdentifier(for: targetScreen)
+        DebugLogger.shared.log("WorkspaceManager: Target screen is \(targetScreenID.displayID)")
 
 		// Get the list of the disconnected monitor's workspaces
 		let removedWSNumbers = workspaceWindows[removedScreenID]?.keys.sorted() ?? []
+        DebugLogger.shared.log("WorkspaceManager: Removed workspaces: \(removedWSNumbers)")
 		guard !removedWSNumbers.isEmpty else {
 			// Only clean up the data
 			workspaceWindows.removeValue(forKey: removedScreenID)
