@@ -515,6 +515,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Also skip when the monitor configuration has changed but processScreenChange hasn't run yet
+        // (macOS can send the Space-switch notification before the monitor-change one)
+        let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+        if currentScreenIDs != knownScreenIDs {
+            print("[Axis] Skipping space change due to pending screen configuration change")
+            DebugLogger.shared.log("onActiveSpaceChanged: Skipping due to screen ID mismatch. Waiting for onScreenParametersChanged.")
+            return
+        }
+
         print("[Axis] Active space changed")
 
         // Set the Space-switching flag
