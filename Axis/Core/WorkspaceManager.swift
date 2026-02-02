@@ -727,6 +727,24 @@ class WorkspaceManager: ObservableObject {
 		print("[Axis] WorkspaceManager: Hidden \(windowIDs.count) windows for workspace \(workspace) using corner: \(corner)")
 	}
 
+	/// Restore every workspace's hidden windows to their original positions (used when the app quits)
+	func restoreAllHiddenWindows() {
+		guard !savedFrames.isEmpty else { return }
+
+		let allWindows = accessibilityManager.getAllWindows()
+		var restoredCount = 0
+
+		for window in allWindows {
+			if let savedFrame = savedFrames[window.id] {
+				window.setFrame(savedFrame)
+				restoredCount += 1
+			}
+		}
+
+		print("[Axis] WorkspaceManager: 終了前に \(restoredCount) 個のウィンドウを復元")
+		savedFrames.removeAll()
+	}
+
 	/// Restore the given workspace's windows to their original positions
 	private func showWindowsForWorkspace(_ workspace: Int, on screenID: ScreenIdentifier) {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace] else { return }
