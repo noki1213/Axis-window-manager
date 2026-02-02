@@ -357,8 +357,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkForWindowChanges() {
-        // Skip processing while a Space switch or workspace switch is in progress
-        guard !isSpaceSwitching && !workspaceManager.isSwitching else {
+        // Skip while a Space switch, workspace switch, or monitor-change handling is in progress
+        guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange else {
             print("[Axis] Skipping window check during switching")
             return
         }
@@ -508,6 +508,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
+        // Skip while monitor-change handling is in progress
+        // (a Space-switch notification also arrives on monitor connect/disconnect, but that's handled by processScreenChange)
+        guard !isHandlingScreenChange else {
+            print("[Axis] Skipping space change during screen change handling")
+            return
+        }
+
         print("[Axis] Active space changed")
 
         // Set the Space-switching flag
