@@ -1169,6 +1169,18 @@ class TilingEngine: ObservableObject {
         rowHeightRatios[screen] = nil
     }
 
+    /// Clean up data for a disconnected monitor
+    func cleanupDisconnectedScreens() {
+        let currentScreens = Set(NSScreen.screens)
+        for key in tiledWindows.keys {
+            if !currentScreens.contains(key) {
+                tiledWindows.removeValue(forKey: key)
+                columnWidthRatios.removeValue(forKey: key)
+                rowHeightRatios.removeValue(forKey: key)
+            }
+        }
+    }
+
     /// Get the window IDs belonging to the current workspace (for filtering)
     private func getWorkspaceWindowIDs(on screen: NSScreen) -> Set<CGWindowID> {
         let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
