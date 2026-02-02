@@ -42,6 +42,8 @@ class TilingEngine: ObservableObject {
 
         // Get the window IDs belonging to the workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
+        
+        DebugLogger.shared.log("TilingEngine.tile: Screen \(screenID.displayID), Workspace IDs count: \(workspaceIDs.count)")
 
         // Filter down to managed windows
         // - shouldBeManaged(): excludes minimized, fullscreen, and non-standard windows
@@ -50,6 +52,8 @@ class TilingEngine: ObservableObject {
         let managedWindows = allWindows.filter { window in
             window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id)
         }
+        
+        DebugLogger.shared.log("TilingEngine.tile: Managed windows count: \(managedWindows.count)")
 
         // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
