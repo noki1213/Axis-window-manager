@@ -144,7 +144,108 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func quitApp() {
+        // Bring all off-screen windows back on-screen before quitting
+        restoreAllWindowsBeforeQuit()
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Window restoration on quit
+
+    /// Before Axis quits, bring every window that was moved off-screen back on screen
+    private func restoreAllWindowsBeforeQuit() {
+        let allWindows = accessibilityManager.getAllWindows()
+
+        // 1. Restore windows hidden by ZenMode
+        if ZenModeManager.shared.isActive {
+            let hiddenFrames = ZenModeManager.shared.exitAndHandOffHiddenFrames()
+            for window in allWindows {
+                if let frame = hiddenFrames[window.id] {
+                    window.setFrame(frame)
+                }
+            }
+            print("[Axis] 終了処理: ZenMode のウィンドウを復元")
+        }
+
+        // 2. Restore windows hidden by the window palette
+        if hotkeyManager.currentMode == .windowPalette {
+            WindowPaletteManager.shared.endPalette()
+            print("[Axis] 終了処理: ウィンドウパレットのウィンドウを復元")
+        }
+
+        // 3. Restore windows hidden by the workspace
+        workspaceManager.restoreAllHiddenWindows()
+
+        // 4. Safety net: move any windows still off-screen back on-screen
+        rescueOffScreenWindows()
+    }
+
+    /// Move an off-screen window into the bounds of the nearest screen
+    private func rescueOffScreenWindows() {
+        let allWindows = accessibilityManager.getAllWindows()
+        guard let mainScreenHeight = NSScreen.screens.first?.frame.height else { return }
+
+        var rescuedCount = 0
+
+        for window in allWindows {
+            // Skip minimized or fullscreen windows
+            guard !window.isMinimized && !window.isFullscreen else { continue }
+            // Skip windows with zero size
+            guard window.frame.width > 0 && window.frame.height > 0 else { continue }
+
+            // Convert the window's center point to NSScreen coordinates (bottom-left origin)
+            let centerX = window.frame.midX
+            let centerY = mainScreenHeight - window.frame.midY
+            let centerInNS = CGPoint(x: centerX, y: centerY)
+
+            // Check whether it's contained in any screen
+            let isOnScreen = NSScreen.screens.contains { $0.frame.contains(centerInNS) }
+
+            if !isOnScreen {
+                // Find the nearest screen
+                guard let targetScreen = closestScreen(to: centerInNS) else { continue }
+                let visibleFrame = targetScreen.visibleFrame
+
+                // Compute visibleFrame's bounds in the AX coordinate system
+                let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
+                let screenBottomInAX = mainScreenHeight - visibleFrame.minY
+
+                // Keep the window's position within visibleFrame
+                var newX = window.frame.origin.x
+                var newY = window.frame.origin.y
+
+                // Adjustment along the X axis
+                if newX + window.frame.width <= visibleFrame.minX {
+                    newX = visibleFrame.minX
+                } else if newX >= visibleFrame.maxX {
+                    newX = visibleFrame.maxX - window.frame.width
+                }
+
+                // Adjustment along the Y axis (AX coordinate system: smaller values are toward the top)
+                if newY + window.frame.height <= screenTopInAX {
+                    newY = screenTopInAX
+                } else if newY >= screenBottomInAX {
+                    newY = screenBottomInAX - window.frame.height
+                }
+
+                window.setPosition(CGPoint(x: newX, y: newY))
+                rescuedCount += 1
+            }
+        }
+
+        if rescuedCount > 0 {
+            print("[Axis] 終了処理: \(rescuedCount) 個の画面外ウィンドウを画面内に移動")
+        }
+    }
+
+    /// Return the screen nearest to the given coordinates (NSScreen coordinate system)
+    private func closestScreen(to point: CGPoint) -> NSScreen? {
+        return NSScreen.screens.min(by: { screen1, screen2 in
+            let center1 = CGPoint(x: screen1.frame.midX, y: screen1.frame.midY)
+            let center2 = CGPoint(x: screen2.frame.midX, y: screen2.frame.midY)
+            let dist1 = hypot(point.x - center1.x, point.y - center1.y)
+            let dist2 = hypot(point.x - center2.x, point.y - center2.y)
+            return dist1 < dist2
+        })
     }
     
     // MARK: - Accessibility
