@@ -25,9 +25,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowCheckTimer: Timer?
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
-    
+
     // For detecting Space switches
     private var isSpaceSwitching = false
+
+    // For detecting monitor changes
+    private var knownScreenIDs: Set<ScreenIdentifier> = []
+    private var isHandlingScreenChange = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
@@ -278,6 +282,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start hotkey monitoring
         hotkeyManager.start()
 
+        // Record the current monitor list (for detecting monitor connect/disconnect)
+        knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+
         // Initialize the workspace (register all windows to workspace 0)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.workspaceManager.initializeWithCurrentWindows()
@@ -328,7 +335,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil
         )
-        
+
+        // Watch for monitor connect/disconnect
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(onScreenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+
         // Periodically check for window-count changes (detects new and closed windows)
         // Target only on-screen windows
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
@@ -549,6 +564,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
             print("[Axis] Workspace changed, tracking \(self.lastWindowCount) windows")
         }
+    }
+
+    // MARK: - Monitor change handling
+
+    @objc private func onScreenParametersChanged() {
+        // Debounce rapid successive notifications (this can fire multiple times on monitor changes)
+        guard !isHandlingScreenChange else { return }
+        isHandlingScreenChange = true
+
+        // Wait for macOS to fully update the monitor info before proceeding
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            self.processScreenChange()
+
+            // Cooldown period (to guard against rapid successive changes)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.isHandlingScreenChange = false
+            }
+        }
+    }
+
+    private func processScreenChange() {
+        let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+
+        let removedScreenIDs = knownScreenIDs.subtracting(currentScreenIDs)
+        let addedScreenIDs = currentScreenIDs.subtracting(knownScreenIDs)
+
+        // If the monitor count hasn't changed, just retile (a resolution or arrangement change only)
+        guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
+            knownScreenIDs = currentScreenIDs
+            tilingEngine.tileAllScreens()
+            return
+        }
+
+        // Handling for a disconnected monitor
+        for removedID in removedScreenIDs {
+            print("[Axis] モニター切断を検知: displayID=\(removedID.displayID)")
+            workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
+        }
+
+        // Handling for a connected monitor
+        for addedID in addedScreenIDs {
+            if let newScreen = NSScreen.screens.first(where: {
+                ScreenIdentifier(from: $0) == addedID
+            }) {
+                print("[Axis] モニター接続を検知: displayID=\(addedID.displayID)")
+                workspaceManager.handleScreenConnected(newScreen: newScreen)
+            }
+        }
+
+        // Refresh the monitor list
+        knownScreenIDs = currentScreenIDs
+
+        // Update window tracking
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allWindows = accessibilityManager.getAllWindows()
+        let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+        lastWindowCount = onScreenWindows.count
+        lastWindowIDs = Set(onScreenWindows.map { $0.id })
+
+        print("[Axis] モニター構成が変更されました: \(NSScreen.screens.count) 台")
     }
 
     /// Show the workspace number in the menu bar
