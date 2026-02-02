@@ -624,6 +624,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Refresh the monitor list
         knownScreenIDs = currentScreenIDs
 
+        // Remove data keyed by the old NSScreen and retile across all screens
+        // (macOS rebuilds NSScreen objects when the monitor configuration changes)
+        tilingEngine.cleanupDisconnectedScreens()
+        tilingEngine.tileAllScreens()
+        borderManager.updateBorder()
+
         // Update window tracking
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
