@@ -520,7 +520,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
         if currentScreenIDs != knownScreenIDs {
             print("[Axis] Skipping space change due to pending screen configuration change")
-            DebugLogger.shared.log("onActiveSpaceChanged: Skipping due to screen ID mismatch. Waiting for onScreenParametersChanged.")
             return
         }
 
@@ -585,40 +584,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Monitor change handling
 
     @objc private func onScreenParametersChanged() {
-        DebugLogger.shared.log("onScreenParametersChanged: Notification received")
         // Debounce rapid successive notifications (this can fire multiple times on monitor changes)
-        guard !isHandlingScreenChange else {
-            DebugLogger.shared.log("onScreenParametersChanged: Already handling, ignoring")
-            return 
-        }
+        guard !isHandlingScreenChange else { return }
         isHandlingScreenChange = true
 
         // Wait for macOS to fully update the monitor info before proceeding
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self = self else { return }
-            DebugLogger.shared.log("onScreenParametersChanged: Processing delayed change")
             self.processScreenChange()
 
             // Cooldown period (to guard against rapid successive changes)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self.isHandlingScreenChange = false
-                DebugLogger.shared.log("onScreenParametersChanged: Handling complete, flag cleared")
             }
         }
     }
 
     private func processScreenChange() {
-        DebugLogger.shared.log("processScreenChange: Starting")
         let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
-        DebugLogger.shared.log("processScreenChange: Current Screens: \(currentScreenIDs.map { $0.displayID })")
-        DebugLogger.shared.log("processScreenChange: Known Screens: \(knownScreenIDs.map { $0.displayID })")
 
         let removedScreenIDs = knownScreenIDs.subtracting(currentScreenIDs)
         let addedScreenIDs = currentScreenIDs.subtracting(knownScreenIDs)
 
         // If the monitor count hasn't changed, just retile (a resolution or arrangement change only)
         guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
-            DebugLogger.shared.log("processScreenChange: No screen count change. Re-tiling.")
             knownScreenIDs = currentScreenIDs
             tilingEngine.tileAllScreens()
             return
@@ -627,19 +616,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Handling for a disconnected monitor
         for removedID in removedScreenIDs {
             print("[Axis] モニター切断を検知: displayID=\(removedID.displayID)")
-            DebugLogger.shared.log("processScreenChange: Detected DISCONNECT: \(removedID.displayID)")
             workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
-        }
-
-        // Handling for a connected monitor
-        for addedID in addedScreenIDs {
-            if let newScreen = NSScreen.screens.first(where: {
-                ScreenIdentifier(from: $0) == addedID
-            }) {
-                print("[Axis] モニター接続を検知: displayID=\(addedID.displayID)")
-                DebugLogger.shared.log("processScreenChange: Detected CONNECT: \(addedID.displayID)")
-                workspaceManager.handleScreenConnected(newScreen: newScreen)
-            }
         }
 
         // Refresh the monitor list
@@ -647,7 +624,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Remove data keyed by the old NSScreen and retile across all screens
         // (macOS rebuilds NSScreen objects when the monitor configuration changes)
-        DebugLogger.shared.log("processScreenChange: Cleanup and Retile")
         tilingEngine.cleanupDisconnectedScreens()
         tilingEngine.tileAllScreens()
         borderManager.updateBorder()
@@ -660,7 +636,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
         print("[Axis] モニター構成が変更されました: \(NSScreen.screens.count) 台")
-        DebugLogger.shared.log("processScreenChange: Finished. Total screens: \(NSScreen.screens.count)")
     }
 
     /// Show the workspace number in the menu bar
