@@ -896,7 +896,6 @@ class WorkspaceManager: ObservableObject {
 	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
 	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
 		print("[Axis] handleScreenDisconnected: \(removedScreenID.displayID)")
-        DebugLogger.shared.log("WorkspaceManager: handleScreenDisconnected \(removedScreenID.displayID)")
 
 		// Exit the special mode
 		if ZenModeManager.shared.isActive {
@@ -912,16 +911,13 @@ class WorkspaceManager: ObservableObject {
 		// Decide the destination monitor (normally the MacBook's built-in display)
 		guard let targetScreen = NSScreen.screens.first else {
 			print("[Axis] handleScreenDisconnected: 残りのモニターがありません")
-            DebugLogger.shared.log("WorkspaceManager: No target screen found")
 			isSwitching = false
 			return
 		}
 		let targetScreenID = screenIdentifier(for: targetScreen)
-        DebugLogger.shared.log("WorkspaceManager: Target screen is \(targetScreenID.displayID)")
 
 		// Get the list of the disconnected monitor's workspaces
 		let removedWSNumbers = workspaceWindows[removedScreenID]?.keys.sorted() ?? []
-        DebugLogger.shared.log("WorkspaceManager: Removed workspaces: \(removedWSNumbers)")
 		guard !removedWSNumbers.isEmpty else {
 			// Only clean up the data
 			workspaceWindows.removeValue(forKey: removedScreenID)
@@ -1005,33 +1001,6 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		print("[Axis] handleScreenDisconnected: 完了。\(allMigratedWindowIDs.count) 個のウィンドウを移行")
-	}
-
-	/// Handling for when a monitor is connected
-	/// Initialize an empty workspace 0 on the new monitor
-	func handleScreenConnected(newScreen: NSScreen) {
-		let newScreenID = screenIdentifier(for: newScreen)
-		print("[Axis] handleScreenConnected: \(newScreenID.displayID)")
-
-		// Clean up stale data if present (from the same monitor when it was previously connected)
-		workspaceWindows.removeValue(forKey: newScreenID)
-		tilingSnapshots.removeValue(forKey: newScreenID)
-		activeWorkspace.removeValue(forKey: newScreenID)
-
-		// Initialize an empty workspace 0
-		activeWorkspace[newScreenID] = 0
-		workspaceWindows[newScreenID] = [0: []]
-
-		// Also clear the TilingEngine's data
-		tilingEngine.clearTilingStateForScreen(newScreen)
-
-		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-			BorderManager.shared.updateBorder()
-		}
-
-		print("[Axis] handleScreenConnected: 完了。空のワークスペース 0 を初期化")
 	}
 }
 
