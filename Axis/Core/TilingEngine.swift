@@ -916,23 +916,23 @@ class TilingEngine: ObservableObject {
             switch direction {
             case .left:
                 // Whether it's to the left of the current screen
-                return otherFrame.maxX <= currentFrame.minX + 1 &&
+                return otherFrame.maxX <= currentFrame.minX + 10 &&
                        otherFrame.minY < currentFrame.maxY &&
                        otherFrame.maxY > currentFrame.minY
             case .right:
                 // Whether it's to the right of the current screen
-                return otherFrame.minX >= currentFrame.maxX - 1 &&
+                return otherFrame.minX >= currentFrame.maxX - 10 &&
                        otherFrame.minY < currentFrame.maxY &&
                        otherFrame.maxY > currentFrame.minY
             case .up:
                 // Whether it's above the current screen (NSScreen's origin is bottom-left, Y increases upward)
-                let isAbove = otherFrame.minY >= currentFrame.maxY - 1
+                let isAbove = otherFrame.minY >= currentFrame.maxY - 10
                 let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
                 print("[Axis] UP check: isAbove=\(isAbove), hasXOverlap=\(hasXOverlap)")
                 return isAbove && hasXOverlap
             case .down:
                 // Whether it's below the current screen
-                let isBelow = otherFrame.maxY <= currentFrame.minY + 1
+                let isBelow = otherFrame.maxY <= currentFrame.minY + 10
                 let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
                 print("[Axis] DOWN check: isBelow=\(isBelow), hasXOverlap=\(hasXOverlap)")
                 return isBelow && hasXOverlap
