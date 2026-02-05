@@ -73,6 +73,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        // Bring all off-screen windows back on-screen before quitting
+        restoreAllWindowsBeforeQuit()
         hotkeyManager.stop()
         windowCheckTimer?.invalidate()
     }
@@ -148,8 +150,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func quitApp() {
-        // Bring all off-screen windows back on-screen before quitting
-        restoreAllWindowsBeforeQuit()
+        // Runs the window-restore logic from applicationWillTerminate
         NSApp.terminate(nil)
     }
 

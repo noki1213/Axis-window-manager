@@ -226,181 +226,110 @@ class WorkspaceManager: ObservableObject {
 	    /// Delete empty workspaces and compact the numbering
 
 	    private func cleanupEmptyWorkspaces(on screen: NSScreen) {
-
-	        let id = screenIdentifier(for: screen)
-
-	        guard let workspaces = workspaceWindows[id] else { return }
-
-	        
-
-	        // Get the existing workspace IDs in ascending order
-
-	        let sortedIDs = workspaces.keys.sorted()
-
-	        
-
-	        // Build the mapping to the new ID
-
-	        // Rule:
-
-	        // 1. Keep workspaces that still have windows
-
-	        // 2. Always keep workspace 0 (the default)
-
-	        // 3. Should we keep the active workspace even if it's empty? -> No — the requirement is "delete once it's gone", so compact it away.
-
-	        //    However, index 0 is never deleted, no matter what.
-
-	        
-
-	        var mapping: [Int: Int] = [:]
-
-	        var nextID = 0
-
-	        var hasChanges = false
-
-	        
-
-	        for oldID in sortedIDs {
-
-	            let windowCount = workspaces[oldID]?.count ?? 0
-
-	            
-
-	            // Keep condition: it's index 0, OR it has windows in it
-
-	            // (Don't consider whether it's active — if it's empty, compact it without mercy)
-
-	            if oldID == 0 || windowCount > 0 {
-
-	                if oldID != nextID {
-
-	                    hasChanges = true
-
-	                }
-
-	                mapping[oldID] = nextID
-
-	                nextID += 1
-
-	            } else {
-
-	                // To be removed
-
-	                hasChanges = true
-
-	                print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
-
-	            }
-
-	        }
-
-	        
-
-	        guard hasChanges else { return }
-
-	        
-
-	        print("[Axis] WorkspaceManager: Reordering workspaces on screen \(id.displayID)...")
-
-	        
-
-	        // Rebuild the data with the new ID
-
-	        var newWorkspaceWindows: [Int: Set<CGWindowID>] = [:]
-
-	        var newTilingSnapshots: [Int: PerScreenSnapshot] = [:]
-
-	        
-
-	        for (oldID, newID) in mapping {
-
-	            // Migrate the window info
-
-	            if let windows = workspaces[oldID] {
-
-	                newWorkspaceWindows[newID] = windows
-
-	            }
-
-	            
-
-	            // Migrate the tiling info
-
-	            if let snapshot = tilingSnapshots[id]?[oldID] {
-
-	                newTilingSnapshots[newID] = snapshot
-
-	            }
-
-	        }
-
-	        
-
-	        workspaceWindows[id] = newWorkspaceWindows
-
-	        tilingSnapshots[id] = newTilingSnapshots
-
-	        
-
-	        // Adjust the active workspace
-
-	        if let currentActive = activeWorkspace[id] {
-
-	            if let newActive = mapping[currentActive] {
-
-	                // When the spot this window was at has moved (or stayed the same)
-
-	                activeWorkspace[id] = newActive
-
-	                if currentActive != newActive {
-
-	                    print("[Axis] WorkspaceManager: Active workspace changed \(currentActive) -> \(newActive)")
-
-	                }
-
-	            } else {
-
-	                // When the spot this window was at has been deleted
-
-	                // Example: you're on Space 2 (empty) and it gets removed -> if a next Space exists it becomes the new Space 2, so
-
-	                // The index itself either stays the same or gets clamped to the max value.
-
-	                // The next Space should have been compacted down to the same number.
-
-	                // However, if it was the last Space, move to the previous one (nextID - 1).
-
-	                
-
-	                let maxID = max(0, nextID - 1)
-
-	                let newActive = min(currentActive, maxID)
-
-	                activeWorkspace[id] = newActive
-
-	                print("[Axis] WorkspaceManager: Active workspace was removed, moved to \(newActive)")
-
-	            }
-
-	        }
-
-	        
-
-	        // Notification
-
-	        NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-
-	        
-
-	        // Also call the border update so things like the menu bar get refreshed
-
-	        DispatchQueue.main.async {
-
-	             BorderManager.shared.updateBorder()
-
-	        }
-
+		let id = screenIdentifier(for: screen)
+		guard let workspaces = workspaceWindows[id] else { return }
+
+		// Separate negative spaces from non-negative ones
+		// Negative spaces (-1, -2, ...) aren't reordered; keep them as they are
+		let negativeIDs = workspaces.keys.filter { $0 < 0 }.sorted()
+		let nonNegativeIDs = workspaces.keys.filter { $0 >= 0 }.sorted()
+
+		// Build the mapping to the new ID
+		// Rule:
+		// 1. Leave negative spaces as-is without renumbering (delete if empty)
+		// 2. Compact non-negative spaces (0 and above) down to 0, 1, 2, ...
+		// 3. Always keep workspace 0 (the default)
+		// 4. Keep workspaces that still have windows
+
+		var mapping: [Int: Int] = [:]
+		var hasChanges = false
+
+		// Handle negative spaces (numbers stay unchanged)
+		for oldID in negativeIDs {
+			let windowCount = workspaces[oldID]?.count ?? 0
+			if windowCount > 0 {
+				// Keep it if it has windows (don't renumber)
+				mapping[oldID] = oldID
+			} else {
+				// Delete it if empty
+				hasChanges = true
+				print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
+			}
+		}
+
+		// Handle non-negative spaces (compact down to 0, 1, 2, ...)
+		var nextID = 0
+		for oldID in nonNegativeIDs {
+			let windowCount = workspaces[oldID]?.count ?? 0
+
+			// Keep condition: it's index 0, OR it has windows in it
+			if oldID == 0 || windowCount > 0 {
+				if oldID != nextID {
+					hasChanges = true
+				}
+				mapping[oldID] = nextID
+				nextID += 1
+			} else {
+				// To be removed
+				hasChanges = true
+				print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
+			}
+		}
+
+		guard hasChanges else { return }
+
+		print("[Axis] WorkspaceManager: Reordering workspaces on screen \(id.displayID)...")
+
+		// Rebuild the data with the new ID
+		var newWorkspaceWindows: [Int: Set<CGWindowID>] = [:]
+		var newTilingSnapshots: [Int: PerScreenSnapshot] = [:]
+
+		for (oldID, newID) in mapping {
+			// Migrate the window info
+			if let windows = workspaces[oldID] {
+				newWorkspaceWindows[newID] = windows
+			}
+
+			// Migrate the tiling info
+			if let snapshot = tilingSnapshots[id]?[oldID] {
+				newTilingSnapshots[newID] = snapshot
+			}
+		}
+
+		workspaceWindows[id] = newWorkspaceWindows
+		tilingSnapshots[id] = newTilingSnapshots
+
+		// Adjust the active workspace
+		if let currentActive = activeWorkspace[id] {
+			if let newActive = mapping[currentActive] {
+				// When the spot this window was at has moved (or stayed the same)
+				activeWorkspace[id] = newActive
+				if currentActive != newActive {
+					print("[Axis] WorkspaceManager: Active workspace changed \(currentActive) -> \(newActive)")
+				}
+			} else {
+				// When the spot this window was at has been deleted
+				// If it was in a negative space and got deleted, reset it to 0
+				// If it was in a positive space and got deleted, clamp it to the max value
+				if currentActive < 0 {
+					activeWorkspace[id] = 0
+					print("[Axis] WorkspaceManager: Active workspace \(currentActive) was removed, moved to 0")
+				} else {
+					let maxID = max(0, nextID - 1)
+					let newActive = min(currentActive, maxID)
+					activeWorkspace[id] = newActive
+					print("[Axis] WorkspaceManager: Active workspace was removed, moved to \(newActive)")
+				}
+			}
+		}
+
+		// Notification
+		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+		// Also call the border update so things like the menu bar get refreshed
+		DispatchQueue.main.async {
+			BorderManager.shared.updateBorder()
+		}
 	    }
 
 	
