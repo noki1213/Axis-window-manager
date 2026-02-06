@@ -378,7 +378,8 @@ class WorkspaceManager: ObservableObject {
 	/// - Parameters:
 	///   - workspace: the workspace number being switched to
 	///   - screen: the target monitor
-	func switchWorkspace(to workspace: Int, on screen: NSScreen) {
+	///   - focusWindowID: the window ID to focus after switching (defaults to the first window if omitted)
+	func switchWorkspace(to workspace: Int, on screen: NSScreen, focusWindowID: CGWindowID? = nil) {
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 
@@ -426,7 +427,11 @@ class WorkspaceManager: ObservableObject {
 		tilingEngine.tile(on: screen)
 
 		// 8. Focus a window in the workspace
-		focusFirstWindow(in: workspace, on: id)
+		if let windowID = focusWindowID {
+			focusWindow(windowID, in: workspace, on: id)
+		} else {
+			focusFirstWindow(in: workspace, on: id)
+		}
 
 		// 9. Update the border
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -465,7 +470,8 @@ class WorkspaceManager: ObservableObject {
 	///   - windowID: the ID of the window being moved
 	///   - workspace: the destination workspace number
 	///   - screen: the target monitor
-	func moveWindowToWorkspace(_ windowID: CGWindowID, workspace: Int, on screen: NSScreen) {
+	///   - keepSwitchingFlag: if true, don't clear isSwitching (leave it to the subsequent switchWorkspace call)
+	func moveWindowToWorkspace(_ windowID: CGWindowID, workspace: Int, on screen: NSScreen, keepSwitchingFlag: Bool = false) {
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 
@@ -516,10 +522,12 @@ class WorkspaceManager: ObservableObject {
 		if updatedCurrentWS == workspace {
 			showWindowsForWorkspace(workspace, on: id)
 			tilingEngine.tile(on: screen)
+			// Focus the window that was moved
+			focusWindow(windowID, in: workspace, on: id)
+		} else {
+			// Focus a window remaining in the original workspace
+			focusFirstWindow(in: updatedCurrentWS, on: id)
 		}
-
-		// Focus the remaining window
-		focusFirstWindow(in: updatedCurrentWS, on: id)
 
 		// Update the border
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -530,8 +538,11 @@ class WorkspaceManager: ObservableObject {
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
 
 		// Clear the switching-in-progress flag after a short delay
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-			self?.isSwitching = false
+		// If keepSwitchingFlag is true, the caller (switchWorkspace) clears it
+		if !keepSwitchingFlag {
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+				self?.isSwitching = false
+			}
 		}
 	}
 
@@ -541,13 +552,29 @@ class WorkspaceManager: ObservableObject {
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 		let targetWS = currentWS + 1
-		
-		// Move the window
-		moveWindowToWorkspace(focusedWindow.id, workspace: targetWS, on: screen)
-		
+		let movedWindowID = focusedWindow.id
+
+		// Move the window (isSwitching gets cleared by the subsequent switchWorkspace call)
+		moveWindowToWorkspace(movedWindowID, workspace: targetWS, on: screen, keepSwitchingFlag: true)
+
 		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-			self?.switchWorkspace(to: targetWS, on: screen)
+			guard let self = self else { return }
+			let currentActive = self.activeWorkspace[id] ?? 0
+			if currentActive != targetWS {
+				// Switch to the destination if we haven't already
+				self.switchWorkspace(to: targetWS, on: screen, focusWindowID: movedWindowID)
+			} else {
+				// If cleanup already switched to the destination, focus the window that was moved
+				self.focusWindow(movedWindowID, in: targetWS, on: id)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
+				}
+				// Clear isSwitching
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+					self.isSwitching = false
+				}
+			}
 		}
 	}
 
@@ -557,13 +584,29 @@ class WorkspaceManager: ObservableObject {
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 		let targetWS = currentWS - 1
-		
-		// Move the window
-		moveWindowToWorkspace(focusedWindow.id, workspace: targetWS, on: screen)
-		
+		let movedWindowID = focusedWindow.id
+
+		// Move the window (isSwitching gets cleared by the subsequent switchWorkspace call)
+		moveWindowToWorkspace(movedWindowID, workspace: targetWS, on: screen, keepSwitchingFlag: true)
+
 		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-			self?.switchWorkspace(to: targetWS, on: screen)
+			guard let self = self else { return }
+			let currentActive = self.activeWorkspace[id] ?? 0
+			if currentActive != targetWS {
+				// Switch to the destination if we haven't already
+				self.switchWorkspace(to: targetWS, on: screen, focusWindowID: movedWindowID)
+			} else {
+				// If cleanup already switched to the destination, focus the window that was moved
+				self.focusWindow(movedWindowID, in: targetWS, on: id)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
+				}
+				// Clear isSwitching
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+					self.isSwitching = false
+				}
+			}
 		}
 	}
 
@@ -734,6 +777,21 @@ class WorkspaceManager: ObservableObject {
 				return
 			}
 		}
+	}
+
+	/// Focus the window with the given window ID
+	private func focusWindow(_ windowID: CGWindowID, in workspace: Int, on screenID: ScreenIdentifier) {
+		let allWindows = accessibilityManager.getAllWindows()
+		for window in allWindows {
+			if window.id == windowID {
+				window.focus()
+				print("[Axis] WorkspaceManager: Focused window '\(window.title)' (ID: \(windowID)) in workspace \(workspace)")
+				return
+			}
+		}
+		// If the specified window can't be found, focus the first window instead
+		print("[Axis] WorkspaceManager: Window ID \(windowID) not found, focusing first window instead")
+		focusFirstWindow(in: workspace, on: screenID)
 	}
 
 	// MARK: - Tiling State Management
