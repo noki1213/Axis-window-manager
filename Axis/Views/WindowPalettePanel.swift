@@ -55,9 +55,6 @@ class WindowPalettePanel: NSPanel {
 	/// The main horizontal stack (lays Display columns out side by side)
 	private let mainHorizontalStack = NSStackView()
 
-	/// Scroll view
-	private let scrollView = NSScrollView()
-
 	/// The visual effect view used for the background blur
 	private let visualEffectView = NSVisualEffectView()
 
@@ -118,24 +115,17 @@ class WindowPalettePanel: NSPanel {
 		mainHorizontalStack.spacing = displaySpacing
 		mainHorizontalStack.translatesAutoresizingMaskIntoConstraints = false
 
-		// Scroll view
-		scrollView.documentView = mainHorizontalStack
-		scrollView.hasVerticalScroller = false
-		scrollView.hasHorizontalScroller = false
-		scrollView.drawsBackground = false
-		scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-		// Add the scroll view to the visual effect view
-		visualEffectView.addSubview(scrollView)
+		// Add the main stack directly to the visual effect view
+		visualEffectView.addSubview(mainHorizontalStack)
 		visualEffectView.translatesAutoresizingMaskIntoConstraints = false
 
 		self.contentView = visualEffectView
 
 		NSLayoutConstraint.activate([
-			scrollView.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
-			scrollView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor, constant: -panelPadding),
-			scrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
-			scrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -panelPadding),
+			mainHorizontalStack.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
+			mainHorizontalStack.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -panelPadding),
+			mainHorizontalStack.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
+			mainHorizontalStack.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -panelPadding),
 		])
 	}
 
@@ -256,6 +246,12 @@ class WindowPalettePanel: NSPanel {
 
 			cardViews.append(displayCardViews)
 
+			// Set a minimum width for the Display column so the card doesn't shrink
+			let maxCards = display.spaces.map { $0.items.count }.max() ?? 1
+			let columnWidth = CGFloat(maxCards) * (WindowPaletteItemView.cardWidth + cardSpacing) - cardSpacing
+			displayColumn.widthAnchor.constraint(greaterThanOrEqualToConstant: columnWidth).isActive = true
+			displayColumn.setContentCompressionResistancePriority(.required, for: .horizontal)
+
 			// Add a divider between Display columns if there is one
 			if !mainHorizontalStack.arrangedSubviews.isEmpty {
 				let separator = NSView()
@@ -300,7 +296,7 @@ class WindowPalettePanel: NSPanel {
 		if displays.count > 1 {
 			totalWidth += CGFloat(displays.count - 1) * (displaySpacing + 1)
 		}
-		let panelWidth = min(totalWidth + panelPadding * 2, screen.frame.width * 0.9)
+		let panelWidth = min(totalWidth + panelPadding * 2, screen.frame.width)
 
 		// Panel height: match whichever Display has the most Spaces
 		let maxSpaces = displays.map { $0.spaces.count }.max() ?? 1
