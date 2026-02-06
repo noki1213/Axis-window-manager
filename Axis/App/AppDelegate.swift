@@ -32,6 +32,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // For detecting monitor changes
     private var knownScreenIDs: Set<ScreenIdentifier> = []
     private var isHandlingScreenChange = false
+
+    // The startup guide window
+    private var startupGuideController: StartupGuideWindowController?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
@@ -44,7 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !accessibilityManager.checkAccessibility() {
             showAccessibilityAlert()
         } else {
-            startWindowManagement()
+            showStartupGuide()
         }
         
         // Watch for the permission-granted notification
@@ -275,10 +278,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func onAccessibilityPermissionGranted() {
         DispatchQueue.main.async { [weak self] in
+            self?.showStartupGuide()
+        }
+    }
+
+    /// Show the startup guide, and begin window management once the user signals they're ready
+    private func showStartupGuide() {
+        startupGuideController = StartupGuideWindowController()
+        startupGuideController?.show { [weak self] in
+            self?.startupGuideController = nil
             self?.startWindowManagement()
         }
     }
-    
+
     private func startWindowManagement() {
         // Start hotkey monitoring
         hotkeyManager.start()
