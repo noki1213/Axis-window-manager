@@ -18,6 +18,11 @@ struct ScreenIdentifier: Hashable {
 	init(from screen: NSScreen) {
 		self.displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
 	}
+
+	/// Initialize directly from a displayID (used when restoring state)
+	init(displayID: CGDirectDisplayID) {
+		self.displayID = displayID
+	}
 }
 
 // MARK: - PerScreenSnapshot
@@ -30,6 +35,39 @@ struct PerScreenSnapshot {
 	var columnWidthRatios: [CGFloat]?
 	/// Row height ratios (column index -> each row's ratio)
 	var rowHeightRatios: [Int: [CGFloat]]?
+}
+
+// MARK: - Struct for persisting workspace state
+
+/// Information for identifying a window (used to match it up again after a restart)
+struct WindowIdentity: Codable {
+	let bundleID: String
+	let title: String
+	let savedFrame: CGRect
+}
+
+/// Saved data for a single workspace
+struct WorkspaceEntry: Codable {
+	let number: Int
+	let windows: [WindowIdentity]
+	/// Column width ratios
+	let columnWidthRatios: [CGFloat]?
+	/// Row height ratios (keys are the string representation of the column index)
+	let rowHeightRatios: [String: [CGFloat]]?
+	/// Column structure (indices of the windows in each column, referring to positions in the `windows` array)
+	let columnStructure: [[Int]]?
+}
+
+/// Saved data for a single monitor
+struct ScreenState: Codable {
+	let displayID: UInt32
+	let activeWorkspace: Int
+	let workspaces: [WorkspaceEntry]
+}
+
+/// The overall saved data
+struct WorkspaceState: Codable {
+	let screenStates: [ScreenState]
 }
 
 // MARK: - WorkspaceManager
@@ -53,6 +91,12 @@ class WorkspaceManager: ObservableObject {
 
 	/// The original position of a window moved off screen
 	private var savedFrames: [CGWindowID: CGRect] = [:]
+
+	/// Whether it was restored from saved data at launch
+	private(set) var didRestoreStateFromDisk: Bool = false
+
+	/// A cache of window identity info (used when it's off screen and getAllWindows can't retrieve it)
+	private var windowIdentityCache: [CGWindowID: (bundleID: String, title: String)] = [:]
 
 	/// Storage of the column structure and ratios for each monitor x workspace pair
 	private var tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]] = [:]
@@ -338,6 +382,13 @@ class WorkspaceManager: ObservableObject {
 
 	
 	func initializeWithCurrentWindows() {
+		// Skip reinitializing on Space change if we already restored from saved data
+		// (So we don't overwrite the restore result right after launch)
+		if didRestoreStateFromDisk {
+			print("[Axis] WorkspaceManager: Skip initializeWithCurrentWindows (restored from disk)")
+			return
+		}
+
 		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
@@ -446,6 +497,9 @@ class WorkspaceManager: ObservableObject {
 			self?.isSwitching = false
 		}
 
+		// 12. Save workspace state to a file
+		saveStateToDisk()
+
 		print("[Axis] WorkspaceManager: Switched to workspace \(workspace)")
 	}
 
@@ -536,6 +590,9 @@ class WorkspaceManager: ObservableObject {
 
 		// Update the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+		// Save the workspace state to a file
+		saveStateToDisk()
 
 		// Clear the switching-in-progress flag after a short delay
 		// If keepSwitchingFlag is true, the caller (switchWorkspace) clears it
@@ -689,12 +746,19 @@ class WorkspaceManager: ObservableObject {
 				// Save the original position and size
 				savedFrames[window.id] = window.frame
 
-				                // Move to the corner (position only, size unchanged)
-				                if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
-				                    window.setPosition(hidePos)
-				                    // Because some apps don't redraw after a position change unless the size is set again too
-				                    window.setSize(window.frame.size)
-				                }			}
+				// Cache the window's identity info (used when saving)
+				windowIdentityCache[window.id] = (
+					bundleID: window.app.bundleIdentifier ?? "",
+					title: window.title
+				)
+
+				// Move to the corner (position only, size unchanged)
+				if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
+					window.setPosition(hidePos)
+					// Because some apps don't redraw after a position change unless the size is set again too
+					window.setSize(window.frame.size)
+				}
+			}
 		}
 		print("[Axis] WorkspaceManager: Hidden \(windowIDs.count) windows for workspace \(workspace) using corner: \(corner)")
 	}
@@ -740,6 +804,12 @@ class WorkspaceManager: ObservableObject {
 		for window in allWindows {
 			if window.id == windowID {
 				savedFrames[window.id] = window.frame
+
+				// Cache the window's identity info
+				windowIdentityCache[window.id] = (
+					bundleID: window.app.bundleIdentifier ?? "",
+					title: window.title
+				)
 
 				// Identify which monitor this window is on
 				let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -989,6 +1059,405 @@ class WorkspaceManager: ObservableObject {
 
 		print("[Axis] handleScreenDisconnected: 完了。\(allMigratedWindowIDs.count) 個のウィンドウを移行")
 	}
+
+	// MARK: - Persisting workspace state
+
+	/// The path to the save destination file
+	private var stateFilePath: URL {
+		let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+		let axisDir = appSupport.appendingPathComponent("Axis")
+		return axisDir.appendingPathComponent("workspaces.json")
+	}
+
+	/// Save the workspace state to a file
+	func saveStateToDisk() {
+		let allWindows = accessibilityManager.getAllWindows()
+		// Build a dictionary of the windows getAllWindows can retrieve
+		var windowDict: [CGWindowID: WindowInfo] = [:]
+		for window in allWindows {
+			windowDict[window.id] = window
+			// Also update the cache of on-screen windows
+			windowIdentityCache[window.id] = (
+				bundleID: window.app.bundleIdentifier ?? "",
+				title: window.title
+			)
+		}
+
+		var screenStates: [ScreenState] = []
+		var totalSavedWindows = 0
+
+		for (screenID, workspaces) in workspaceWindows {
+			var entries: [WorkspaceEntry] = []
+
+			for (wsNumber, windowIDs) in workspaces.sorted(by: { $0.key < $1.key }) {
+				var windowIdentities: [WindowIdentity] = []
+
+				for windowID in windowIDs {
+					// First use whatever windows getAllWindows could retrieve
+					if let window = windowDict[windowID] {
+						let frame = savedFrames[windowID] ?? window.frame
+						let identity = WindowIdentity(
+							bundleID: window.app.bundleIdentifier ?? "",
+							title: window.title,
+							savedFrame: frame
+						)
+						windowIdentities.append(identity)
+					}
+					// Fall back to the cache when getAllWindows fails to retrieve it
+					else if let cached = windowIdentityCache[windowID] {
+						let frame = savedFrames[windowID] ?? .zero
+						let identity = WindowIdentity(
+							bundleID: cached.bundleID,
+							title: cached.title,
+							savedFrame: frame
+						)
+						windowIdentities.append(identity)
+						print("[Axis] 保存: キャッシュからウィンドウ情報を使用 ID=\(windowID) \(cached.bundleID)/\(cached.title)")
+					} else {
+						print("[Axis] 保存: ウィンドウ情報が取得できません ID=\(windowID)")
+					}
+				}
+
+				// Get the ratios from the tiling snapshot
+				let snapshot = tilingSnapshots[screenID]?[wsNumber]
+				let colWidthRatios = snapshot?.columnWidthRatios
+
+				// Convert rowHeightRatios' Int keys to String (JSON keys must be strings)
+				var rowRatiosStringKeyed: [String: [CGFloat]]? = nil
+				if let rowRatios = snapshot?.rowHeightRatios {
+					rowRatiosStringKeyed = [:]
+					for (key, value) in rowRatios {
+						rowRatiosStringKeyed?[String(key)] = value
+					}
+				}
+
+				// Save the column structure (so window ordering can be restored)
+				var columnStructure: [[Int]]? = nil
+				if let snapshot = snapshot {
+					var structure: [[Int]] = []
+					for column in snapshot.columns {
+						var colIndices: [Int] = []
+						for wid in column {
+							// Find the matching index in windowIdentities
+							let bundleID: String
+							let title: String
+							if let window = windowDict[wid] {
+								bundleID = window.app.bundleIdentifier ?? ""
+								title = window.title
+							} else if let cached = windowIdentityCache[wid] {
+								bundleID = cached.bundleID
+								title = cached.title
+							} else {
+								continue
+							}
+							if let idx = windowIdentities.firstIndex(where: {
+								$0.bundleID == bundleID && $0.title == title
+							}) {
+								colIndices.append(idx)
+							}
+						}
+						if !colIndices.isEmpty {
+							structure.append(colIndices)
+						}
+					}
+					if !structure.isEmpty {
+						columnStructure = structure
+					}
+				}
+
+				totalSavedWindows += windowIdentities.count
+
+				let entry = WorkspaceEntry(
+					number: wsNumber,
+					windows: windowIdentities,
+					columnWidthRatios: colWidthRatios,
+					rowHeightRatios: rowRatiosStringKeyed,
+					columnStructure: columnStructure
+				)
+				entries.append(entry)
+			}
+
+			let screenState = ScreenState(
+				displayID: screenID.displayID,
+				activeWorkspace: activeWorkspace[screenID] ?? 0,
+				workspaces: entries
+			)
+			screenStates.append(screenState)
+		}
+
+		let state = WorkspaceState(screenStates: screenStates)
+
+		do {
+			// Create the directory if it doesn't exist
+			let dir = stateFilePath.deletingLastPathComponent()
+			try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+			let encoder = JSONEncoder()
+			encoder.outputFormatting = .prettyPrinted
+			let data = try encoder.encode(state)
+			try data.write(to: stateFilePath)
+			print("[Axis] ワークスペース状態を保存: \(totalSavedWindows) 個のウィンドウ → \(stateFilePath.path)")
+		} catch {
+			print("[Axis] ワークスペース状態の保存に失敗: \(error)")
+		}
+	}
+
+	/// Restore the workspace state from a file
+	/// - Returns: true if the restore succeeded
+	@discardableResult
+	func restoreStateFromDisk() -> Bool {
+		guard FileManager.default.fileExists(atPath: stateFilePath.path) else {
+			print("[Axis] 保存ファイルが見つかりません: \(stateFilePath.path)")
+			return false
+		}
+
+		do {
+			let data = try Data(contentsOf: stateFilePath)
+			let state = try JSONDecoder().decode(WorkspaceState.self, from: data)
+
+			// Don't restore if the saved data has no windows at all
+			let totalSavedWindows = state.screenStates.flatMap { $0.workspaces }.flatMap { $0.windows }.count
+			guard totalSavedWindows > 0 else {
+				print("[Axis] 保存データにウィンドウがありません、復元をスキップ")
+				return false
+			}
+
+			// Get all current windows (including ones hidden off-screen)
+			let allWindows = accessibilityManager.getAllWindows()
+			let managedWindows = allWindows.filter {
+				$0.shouldBeManaged() && !$0.shouldFloat()
+			}
+
+			print("[Axis] 復元開始: 保存ウィンドウ \(totalSavedWindows) 個、現在のウィンドウ \(managedWindows.count) 個")
+
+			// --- Matching ---
+			// Step 1: match by exact bundleID + title
+			// Step 2: if not found by exact match, match on bundleID alone
+
+			// Dictionary of bundleID+title -> [WindowInfo]
+			var exactMatchPool: [String: [WindowInfo]] = [:]
+			// Dictionary of bundleID -> [WindowInfo] (for step 2)
+			var bundleIDPool: [String: [WindowInfo]] = [:]
+
+			for window in managedWindows {
+				let bundleID = window.app.bundleIdentifier ?? ""
+				let exactKey = bundleID + "||" + window.title
+				exactMatchPool[exactKey, default: []].append(window)
+				bundleIDPool[bundleID, default: []].append(window)
+			}
+
+			// Track window IDs that have already been matched
+			var assignedWindowIDs = Set<CGWindowID>()
+
+			// Collect the match requests for every workspace
+			struct MatchRequest {
+				let screenID: ScreenIdentifier
+				let wsNumber: Int
+				let index: Int
+				let identity: WindowIdentity
+			}
+			var matchRequests: [MatchRequest] = []
+
+			for screenState in state.screenStates {
+				let screenID = ScreenIdentifier(displayID: screenState.displayID)
+				for entry in screenState.workspaces {
+					for (index, identity) in entry.windows.enumerated() {
+						matchRequests.append(MatchRequest(
+							screenID: screenID, wsNumber: entry.number,
+							index: index, identity: identity
+						))
+					}
+				}
+			}
+
+			// Step 1: exact match
+			var matchResults: [Int: WindowInfo] = [:] // matchRequests のインデックス -> WindowInfo
+			for (reqIndex, req) in matchRequests.enumerated() {
+				let exactKey = req.identity.bundleID + "||" + req.identity.title
+				if var candidates = exactMatchPool[exactKey], !candidates.isEmpty {
+					let window = candidates.removeFirst()
+					exactMatchPool[exactKey] = candidates
+					// Also remove from bundleIDPool
+					if var bCandidates = bundleIDPool[req.identity.bundleID] {
+						bCandidates.removeAll { $0.id == window.id }
+						bundleIDPool[req.identity.bundleID] = bCandidates
+					}
+					matchResults[reqIndex] = window
+					assignedWindowIDs.insert(window.id)
+					print("[Axis] 復元照合(完全一致): \(req.identity.bundleID) / \(req.identity.title) -> Window ID \(window.id)")
+				}
+			}
+
+			// Step 2: match on bundleID alone (for what wasn't found by exact match)
+			for (reqIndex, req) in matchRequests.enumerated() {
+				guard matchResults[reqIndex] == nil else { continue }
+				if var candidates = bundleIDPool[req.identity.bundleID], !candidates.isEmpty {
+					// Pick from windows that haven't been assigned yet
+					if let idx = candidates.firstIndex(where: { !assignedWindowIDs.contains($0.id) }) {
+						let window = candidates[idx]
+						candidates.remove(at: idx)
+						bundleIDPool[req.identity.bundleID] = candidates
+						matchResults[reqIndex] = window
+						assignedWindowIDs.insert(window.id)
+						print("[Axis] 復元照合(bundleID): \(req.identity.bundleID) / \(req.identity.title) -> Window ID \(window.id) (title: \(window.title))")
+					}
+				}
+			}
+
+			// Build the workspace using the match results
+			for screenState in state.screenStates {
+				let screenID = ScreenIdentifier(displayID: screenState.displayID)
+
+				// Check whether this monitor is currently connected
+				guard let screen = screen(for: screenID) else {
+					print("[Axis] モニター \(screenState.displayID) は現在接続されていません、スキップ")
+					continue
+				}
+
+				activeWorkspace[screenID] = screenState.activeWorkspace
+
+				if workspaceWindows[screenID] == nil {
+					workspaceWindows[screenID] = [:]
+				}
+				if tilingSnapshots[screenID] == nil {
+					tilingSnapshots[screenID] = [:]
+				}
+
+				for entry in screenState.workspaces {
+					var matchedWindowIDs = Set<CGWindowID>()
+					var matchedByIndex: [Int: WindowInfo] = [:]
+
+					// Look up the matchRequests corresponding to this entry
+					for (reqIndex, req) in matchRequests.enumerated() {
+						if req.screenID == screenID && req.wsNumber == entry.number {
+							if let window = matchResults[reqIndex] {
+								matchedWindowIDs.insert(window.id)
+								matchedByIndex[req.index] = window
+							}
+						}
+					}
+
+					workspaceWindows[screenID]?[entry.number] = matchedWindowIDs
+
+					// Restore the tiling ratios
+					var rowRatiosIntKeyed: [Int: [CGFloat]]? = nil
+					if let rowRatios = entry.rowHeightRatios {
+						rowRatiosIntKeyed = [:]
+						for (key, value) in rowRatios {
+							if let intKey = Int(key) {
+								rowRatiosIntKeyed?[intKey] = value
+							}
+						}
+					}
+
+					// Restore the column structure
+					var restoredColumns: [[CGWindowID]] = []
+					if let columnStructure = entry.columnStructure {
+						for colIndices in columnStructure {
+							var column: [CGWindowID] = []
+							for idx in colIndices {
+								if let window = matchedByIndex[idx] {
+									column.append(window.id)
+								}
+							}
+							if !column.isEmpty {
+								restoredColumns.append(column)
+							}
+						}
+					}
+
+					// Also add windows that weren't part of the column structure
+					let windowsInColumns = Set(restoredColumns.flatMap { $0 })
+					let remainingWindows = matchedWindowIDs.subtracting(windowsInColumns)
+					for wid in remainingWindows {
+						restoredColumns.append([wid])
+					}
+
+					let snapshot = PerScreenSnapshot(
+						columns: restoredColumns.isEmpty ? matchedWindowIDs.map { [$0] } : restoredColumns,
+						columnWidthRatios: entry.columnWidthRatios,
+						rowHeightRatios: rowRatiosIntKeyed
+					)
+					tilingSnapshots[screenID]?[entry.number] = snapshot
+
+					print("[Axis] 復元: モニター \(screenState.displayID) WS \(entry.number) に \(matchedWindowIDs.count) 個のウィンドウを配置")
+				}
+
+				// Move windows outside the active workspace off-screen
+				let activeWS = screenState.activeWorkspace
+				for (wsNumber, windowIDs) in workspaceWindows[screenID] ?? [:] {
+					guard wsNumber != activeWS else { continue }
+					guard !windowIDs.isEmpty else { continue }
+
+					let corner = optimalHideCorner(for: screenID)
+					let savedEntry = screenState.workspaces.first { $0.number == wsNumber }
+
+					for window in allWindows {
+						guard windowIDs.contains(window.id) else { continue }
+
+						// Record the previously saved original position into savedFrames
+						let bundleID = window.app.bundleIdentifier ?? ""
+						if let savedEntry = savedEntry,
+						   let identity = savedEntry.windows.first(where: { $0.bundleID == bundleID }) {
+							savedFrames[window.id] = identity.savedFrame
+						} else {
+							savedFrames[window.id] = window.frame
+						}
+
+						// Update the cache too
+						windowIdentityCache[window.id] = (bundleID: bundleID, title: window.title)
+
+						if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
+							window.setPosition(hidePos)
+						}
+					}
+				}
+
+				// Restore the active workspace's tiling state into TilingEngine
+				if let snapshot = tilingSnapshots[screenID]?[activeWS] {
+					tilingEngine.restoreTilingStateForScreen(screen, snapshot: snapshot)
+				}
+			}
+
+			// Place windows that couldn't be matched into workspace 0
+			let unassignedWindows = managedWindows.filter { !assignedWindowIDs.contains($0.id) }
+			if !unassignedWindows.isEmpty {
+				print("[Axis] 復元: \(unassignedWindows.count) 個のウィンドウが照合できず、ワークスペース 0 に配置")
+
+				let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+				for window in unassignedWindows {
+					let centerX = window.frame.midX
+					let centerY = mainScreenHeight - window.frame.midY
+					let center = CGPoint(x: centerX, y: centerY)
+
+					for screen in NSScreen.screens {
+						if screen.frame.contains(center) {
+							let screenID = screenIdentifier(for: screen)
+							if workspaceWindows[screenID] == nil {
+								workspaceWindows[screenID] = [:]
+							}
+							if workspaceWindows[screenID]?[0] == nil {
+								workspaceWindows[screenID]?[0] = []
+							}
+							workspaceWindows[screenID]?[0]?.insert(window.id)
+							break
+						}
+					}
+				}
+			}
+
+			let totalMatched = assignedWindowIDs.count
+			print("[Axis] ワークスペース状態の復元が完了: \(totalMatched)/\(totalSavedWindows) 個のウィンドウを照合")
+			didRestoreStateFromDisk = totalMatched > 0
+			return totalMatched > 0
+
+		} catch {
+			print("[Axis] ワークスペース状態の復元に失敗: \(error)")
+			didRestoreStateFromDisk = false
+			return false
+		}
+	}
+
 }
 
 // MARK: - Notification Names
