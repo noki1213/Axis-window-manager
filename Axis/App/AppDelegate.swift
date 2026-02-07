@@ -25,6 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowCheckTimer: Timer?
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
+    private var wasScreenLocked = false
 
     // For detecting Space switches
     private var isSpaceSwitching = false
@@ -73,10 +74,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .workspaceChanged,
             object: nil
         )
+
+        // Watch for screen lock/unlock notifications
+        let dist = DistributedNotificationCenter.default()
+        dist.addObserver(
+            self,
+            selector: #selector(onScreenLocked),
+            name: NSNotification.Name("com.apple.screenIsLocked"),
+            object: nil
+        )
+        dist.addObserver(
+            self,
+            selector: #selector(onScreenUnlocked),
+            name: NSNotification.Name("com.apple.screenIsUnlocked"),
+            object: nil
+        )
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        // Bring all off-screen windows back on-screen before quitting
+        // Save workspace state to a file before quitting
+        workspaceManager.saveStateToDisk()
+
+        // Bring every off-screen window back on screen
         restoreAllWindowsBeforeQuit()
         hotkeyManager.stop()
         windowCheckTimer?.invalidate()
@@ -298,9 +317,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
 
-        // Initialize the workspace (register all windows to workspace 0)
+        // Rescue off-screen windows right after launch (a fallback for when the previous quit couldn't restore them)
+        rescueOffScreenWindows()
+
+        // Initialize the workspace (restore from saved data if present, otherwise initialize fresh)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.workspaceManager.initializeWithCurrentWindows()
+            guard let self = self else { return }
+            let restored = self.workspaceManager.restoreStateFromDisk()
+            if !restored {
+                // If there's no saved data, do the normal initialization (register all windows to workspace 0)
+                self.workspaceManager.initializeWithCurrentWindows()
+            }
         }
 
         // Run the initial tiling
@@ -357,6 +384,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // Save workspace state before sleep
+        workspace.notificationCenter.addObserver(
+            self,
+            selector: #selector(onSystemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+
+        // Watch for wake from sleep (to rescue windows left off-screen)
+        workspace.notificationCenter.addObserver(
+            self,
+            selector: #selector(onSystemWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+
         // Periodically check for window-count changes (detects new and closed windows)
         // Target only on-screen windows
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
@@ -387,6 +430,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) }
         let currentCount = currentWindows.count
         let currentWindowIDs = Set(currentWindows.map { $0.id })
+
+        if currentCount == 0 && lastWindowCount > 0 {
+            if wasScreenLocked {
+                print("[Axis] Window count dropped to 0 during screen lock; skipping unregister")
+                return
+            }
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow" {
+                print("[Axis] loginwindow active; skipping unregister")
+                return
+            }
+        }
 
         if currentCount != lastWindowCount {
             print("[Axis] Window count changed: \(lastWindowCount) -> \(currentCount)")
@@ -591,6 +645,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
             print("[Axis] Workspace changed, tracking \(self.lastWindowCount) windows")
+        }
+    }
+
+    // MARK: - Screen lock handling
+
+    @objc private func onScreenLocked() {
+        wasScreenLocked = true
+        print("[Axis] 画面ロックを検知")
+    }
+
+    @objc private func onScreenUnlocked() {
+        wasScreenLocked = false
+        print("[Axis] 画面ロック解除を検知")
+    }
+
+    // MARK: - Sleep/wake handling
+
+    @objc private func onSystemWillSleep() {
+        print("[Axis] システムがスリープに入ります")
+        // Save workspace state before sleep
+        workspaceManager.saveStateToDisk()
+    }
+
+    @objc private func onSystemWake() {
+        print("[Axis] システムがスリープから復帰")
+
+        // Wait a bit right after waking from sleep, since screen info can be unstable
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            self.rescueOffScreenWindows()
+
+            // Retile the current workspace after recovery
+            self.tilingEngine.tileAllScreens()
+            self.borderManager.updateBorder()
         }
     }
 
