@@ -98,6 +98,9 @@ class WorkspaceManager: ObservableObject {
 	/// A cache of window identity info (used when it's off screen and getAllWindows can't retrieve it)
 	private var windowIdentityCache: [CGWindowID: (bundleID: String, title: String)] = [:]
 
+	/// The IDs of windows pulled out of tiling and left floating
+	private(set) var hoverWindowIDs: Set<CGWindowID> = []
+
 	/// Storage of the column structure and ratios for each monitor x workspace pair
 	private var tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]] = [:]
 
@@ -105,6 +108,25 @@ class WorkspaceManager: ObservableObject {
 	private let tilingEngine = TilingEngine.shared
 
 	private init() {}
+
+	// MARK: - Hover (floating)
+
+	/// Toggle the window's hover state
+	/// Windows that are hovering are excluded from tiling and float in place
+	func toggleHover(windowID: CGWindowID) {
+		if hoverWindowIDs.contains(windowID) {
+			hoverWindowIDs.remove(windowID)
+			print("[Axis] WorkspaceManager: Hover OFF for window \(windowID)")
+		} else {
+			hoverWindowIDs.insert(windowID)
+			print("[Axis] WorkspaceManager: Hover ON for window \(windowID)")
+		}
+	}
+
+	/// Returns whether the window is currently hovering
+	func isHovering(_ windowID: CGWindowID) -> Bool {
+		return hoverWindowIDs.contains(windowID)
+	}
 
 	// MARK: - Public Methods
 
@@ -215,7 +237,8 @@ class WorkspaceManager: ObservableObject {
 
 	            savedFrames.removeValue(forKey: windowID)
 
-	
+	            // Also remove it from the hover state
+	            hoverWindowIDs.remove(windowID)
 
 	            // Also remove it from the tiling snapshot
 
@@ -1058,6 +1081,177 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		print("[Axis] handleScreenDisconnected: 完了。\(allMigratedWindowIDs.count) 個のウィンドウを移行")
+	}
+
+	// MARK: - Re-matching window IDs after waking from sleep
+
+	/// Since window IDs may have changed after waking from sleep,
+	/// Re-match by bundleID + title and update the workspace data
+	func rematchWindowIDsAfterWake() {
+		let allWindows = accessibilityManager.getAllWindows()
+		let managedWindows = allWindows.filter {
+			$0.shouldBeManaged() && !$0.shouldFloat()
+		}
+
+		print("[Axis] Wake再照合: 現在のウィンドウ \(managedWindows.count) 個")
+
+		// Group the current windows into a bundleID+title -> [WindowInfo] dictionary
+		var exactPool: [String: [WindowInfo]] = [:]
+		var bundlePool: [String: [WindowInfo]] = [:]
+		for window in managedWindows {
+			let bundleID = window.app.bundleIdentifier ?? ""
+			let key = bundleID + "||" + window.title
+			exactPool[key, default: []].append(window)
+			bundlePool[bundleID, default: []].append(window)
+		}
+
+		// Track new window IDs that have already been used
+		var usedNewIDs = Set<CGWindowID>()
+		// Mapping from old ID to new ID
+		var idMapping: [CGWindowID: CGWindowID] = [:]
+		// Whether anything changed
+		var hasChanges = false
+
+		// Re-match window IDs for each workspace
+		for (_, workspaces) in workspaceWindows {
+			for (_, windowIDs) in workspaces {
+				for oldID in windowIDs {
+					// First check whether the same ID exists in the current window list
+					if managedWindows.contains(where: { $0.id == oldID }) {
+						// ID hasn't changed -> use it as is
+						usedNewIDs.insert(oldID)
+						idMapping[oldID] = oldID
+						continue
+					}
+
+					// ID has changed -> match against the cached info
+					guard let cached = windowIdentityCache[oldID] else {
+						print("[Axis] Wake再照合: ID=\(oldID) のキャッシュなし、スキップ")
+						continue
+					}
+
+					// Step 1: exact match on bundleID + title
+					let exactKey = cached.bundleID + "||" + cached.title
+					if var candidates = exactPool[exactKey],
+					   let idx = candidates.firstIndex(where: { !usedNewIDs.contains($0.id) }) {
+						let newWindow = candidates[idx]
+						candidates.remove(at: idx)
+						exactPool[exactKey] = candidates
+						// Also remove from bundlePool
+						if var bCandidates = bundlePool[cached.bundleID] {
+							bCandidates.removeAll { $0.id == newWindow.id }
+							bundlePool[cached.bundleID] = bCandidates
+						}
+						usedNewIDs.insert(newWindow.id)
+						idMapping[oldID] = newWindow.id
+						hasChanges = true
+						print("[Axis] Wake再照合(完全一致): \(cached.bundleID)/\(cached.title) ID \(oldID) → \(newWindow.id)")
+						continue
+					}
+
+					// Step 2: match on bundleID alone
+					if var candidates = bundlePool[cached.bundleID],
+					   let idx = candidates.firstIndex(where: { !usedNewIDs.contains($0.id) }) {
+						let newWindow = candidates[idx]
+						candidates.remove(at: idx)
+						bundlePool[cached.bundleID] = candidates
+						usedNewIDs.insert(newWindow.id)
+						idMapping[oldID] = newWindow.id
+						hasChanges = true
+						print("[Axis] Wake再照合(bundleID): \(cached.bundleID) ID \(oldID) → \(newWindow.id)")
+						continue
+					}
+
+					// Couldn't be matched (the window may have been closed)
+					print("[Axis] Wake再照合: ID=\(oldID) (\(cached.bundleID)/\(cached.title)) の照合先なし")
+				}
+			}
+		}
+
+		guard hasChanges else {
+			print("[Axis] Wake再照合: ID の変更なし")
+			return
+		}
+
+		// Update the ID in the workspace data
+		var newWorkspaceWindows: [ScreenIdentifier: [Int: Set<CGWindowID>]] = [:]
+		for (screenID, workspaces) in workspaceWindows {
+			newWorkspaceWindows[screenID] = [:]
+			for (wsNumber, windowIDs) in workspaces {
+				var newIDs = Set<CGWindowID>()
+				for oldID in windowIDs {
+					if let newID = idMapping[oldID] {
+						newIDs.insert(newID)
+					}
+					// If there's no mapping, remove the old ID (the window is gone)
+				}
+				newWorkspaceWindows[screenID]?[wsNumber] = newIDs
+			}
+		}
+		workspaceWindows = newWorkspaceWindows
+
+		// Also update the ID in savedFrames
+		var newSavedFrames: [CGWindowID: CGRect] = [:]
+		for (oldID, frame) in savedFrames {
+			if let newID = idMapping[oldID] {
+				newSavedFrames[newID] = frame
+			}
+		}
+		savedFrames = newSavedFrames
+
+		// Also update the ID in windowIdentityCache
+		var newCache: [CGWindowID: (bundleID: String, title: String)] = [:]
+		for (oldID, info) in windowIdentityCache {
+			if let newID = idMapping[oldID] {
+				newCache[newID] = info
+			}
+		}
+		windowIdentityCache = newCache
+
+		// Also update the ID inside tilingSnapshots' column structure
+		var newSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]] = [:]
+		for (screenID, wsSnapshots) in tilingSnapshots {
+			newSnapshots[screenID] = [:]
+			for (wsNumber, snapshot) in wsSnapshots {
+				let newColumns = snapshot.columns.map { column in
+					column.compactMap { oldID in idMapping[oldID] }
+				}.filter { !$0.isEmpty }
+				newSnapshots[screenID]?[wsNumber] = PerScreenSnapshot(
+					columns: newColumns,
+					columnWidthRatios: snapshot.columnWidthRatios,
+					rowHeightRatios: snapshot.rowHeightRatios
+				)
+			}
+		}
+		tilingSnapshots = newSnapshots
+
+		// Add windows that weren't matched (new windows) to workspace 0
+		let unassigned = managedWindows.filter { !usedNewIDs.contains($0.id) }
+		if !unassigned.isEmpty {
+			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+			for window in unassigned {
+				let centerX = window.frame.midX
+				let centerY = mainScreenHeight - window.frame.midY
+				let center = CGPoint(x: centerX, y: centerY)
+				for screen in NSScreen.screens {
+					if screen.frame.contains(center) {
+						let screenID = screenIdentifier(for: screen)
+						if workspaceWindows[screenID]?[0] == nil {
+							if workspaceWindows[screenID] == nil {
+								workspaceWindows[screenID] = [:]
+							}
+							workspaceWindows[screenID]?[0] = []
+						}
+						workspaceWindows[screenID]?[0]?.insert(window.id)
+						print("[Axis] Wake再照合: 新規ウィンドウ ID=\(window.id) をワークスペース 0 に追加")
+						break
+					}
+				}
+			}
+		}
+
+		let totalRemapped = idMapping.filter { $0.key != $0.value }.count
+		print("[Axis] Wake再照合完了: \(totalRemapped) 個の ID を更新")
 	}
 
 	// MARK: - Persisting workspace state
