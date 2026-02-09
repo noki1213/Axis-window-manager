@@ -26,6 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
     private var wasScreenLocked = false
+    private var isWaking = false
 
     // For detecting Space switches
     private var isSpaceSwitching = false
@@ -413,8 +414,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkForWindowChanges() {
-        // Skip while a Space switch, workspace switch, or monitor-change handling is in progress
-        guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange else {
+        // Skip while a Space switch, workspace switch, monitor-change handling, or wake-from-sleep is in progress
+        guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange && !isWaking else {
             print("[Axis] Skipping window check during switching")
             return
         }
@@ -664,6 +665,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func onSystemWillSleep() {
         print("[Axis] システムがスリープに入ります")
+        // Set a flag so window checks don't run during sleep
+        isWaking = true
         // Save workspace state before sleep
         workspaceManager.saveStateToDisk()
     }
@@ -672,13 +675,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("[Axis] システムがスリープから復帰")
 
         // Wait a bit right after waking from sleep, since screen info can be unstable
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
-            self.rescueOffScreenWindows()
+
+            // The window ID may have changed, so re-match it
+            // (don't call rescueOffScreenWindows here — it would break intentionally hidden windows)
+            self.workspaceManager.rematchWindowIDsAfterWake()
 
             // Retile the current workspace after recovery
             self.tilingEngine.tileAllScreens()
             self.borderManager.updateBorder()
+
+            // Update the window tracking info (based on the correct post-recovery state)
+            let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
+            let allWindows = self.accessibilityManager.getAllWindows()
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+            self.lastWindowCount = onScreenWindows.count
+            self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
+
+            // Resume window checking
+            self.isWaking = false
+            print("[Axis] スリープ復帰処理完了、ウィンドウ追跡を再開")
         }
     }
 

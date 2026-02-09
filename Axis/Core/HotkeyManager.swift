@@ -349,6 +349,54 @@ class HotkeyManager: ObservableObject {
             }
             return true
             
+        // MARK: Hover (floating)
+        case kVK_ANSI_H:
+            DispatchQueue.main.async { [weak self] in
+                if hasShift {
+                    // Shift+H: move focus to a hovering window (cycles if there are several)
+                    let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
+                    guard !hoverIDs.isEmpty else { return }
+                    let allWindows = AccessibilityManager.shared.getAllWindows()
+                    let hoverWindows = allWindows.filter { hoverIDs.contains($0.id) }
+                        .sorted { $0.frame.midX < $1.frame.midX }
+                    guard !hoverWindows.isEmpty else { return }
+
+                    // If the currently focused window is hovering, cycle to the next hovering window
+                    if let focused = AccessibilityManager.shared.getFocusedWindow(),
+                       let currentIdx = hoverWindows.firstIndex(where: { $0.id == focused.id }) {
+                        let nextIdx = (currentIdx + 1) % hoverWindows.count
+                        hoverWindows[nextIdx].focus()
+                    } else {
+                        // If focus isn't on a hovering window, move it to the first hovering window
+                        hoverWindows[0].focus()
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                } else {
+                    // H: pull the window out of tiling to float it, or put it back
+                    guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
+                    let wasHovering = WorkspaceManager.shared.isHovering(focusedWindow.id)
+                    WorkspaceManager.shared.toggleHover(windowID: focusedWindow.id)
+
+                    // Move the window to the center of the monitor when hover is turned on
+                    if !wasHovering, let screen = WorkspaceManager.shared.focusedScreen() {
+                        let visibleFrame = screen.visibleFrame
+                        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+                        // Convert the center of visibleFrame to the AX coordinate system (origin top-left)
+                        let centerX = visibleFrame.midX - focusedWindow.frame.width / 2
+                        let centerY = mainScreenHeight - visibleFrame.midY - focusedWindow.frame.height / 2
+                        focusedWindow.setPosition(CGPoint(x: centerX, y: centerY))
+                    }
+
+                    self?.tilingEngine.tileAllScreens()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        BorderManager.shared.updateBorder()
+                    }
+                }
+            }
+            return true
+
         // MARK: Zen Mode
         case kVK_ANSI_Z:
             DispatchQueue.main.async {
