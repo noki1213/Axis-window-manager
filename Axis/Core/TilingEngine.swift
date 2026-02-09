@@ -48,7 +48,7 @@ class TilingEngine: ObservableObject {
         // - shouldFloat(): excludes windows that should float
         // - workspaceIDs.contains(): targets only windows in the current workspace
         let managedWindows = allWindows.filter { window in
-            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id)
+            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isHovering(window.id)
         }
 
         // If there are no target windows, clear the column structure and return
@@ -131,9 +131,28 @@ class TilingEngine: ObservableObject {
         // Target only windows belonging to the current workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
         let allColumns = tiledWindows[screenID] ?? []
-        let columns = allColumns.map { column in
+        var columns = allColumns.map { column in
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
+
+        // Insert hovering windows into a column based on X coordinate too, so they're eligible for focus movement
+        let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
+        if !hoverIDs.isEmpty {
+            let allWins = accessibilityManager.getAllWindows()
+            let hoverWindows = allWins.filter { hoverIDs.contains($0.id) && workspaceIDs.contains($0.id) }
+                .sorted { $0.frame.midX < $1.frame.midX }
+            for hw in hoverWindows {
+                // Look at the X coordinate and insert at the right spot in the tiling columns
+                var insertIndex = columns.count
+                for (i, col) in columns.enumerated() {
+                    if let first = col.first, hw.frame.midX < first.frame.midX {
+                        insertIndex = i
+                        break
+                    }
+                }
+                columns.insert([hw], at: insertIndex)
+            }
+        }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
             print("[Axis] Current window not in tiled windows")
