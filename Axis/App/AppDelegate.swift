@@ -445,23 +445,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Skip everything while the lock screen (loginwindow) is frontmost
+        // because the Accessibility API becomes unusable while locked, making windows appear to have vanished
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow" {
+            print("[Axis] loginwindow active; skipping all window checks")
+            return
+        }
+
+        // Also skip while the screen is locked
+        if wasScreenLocked {
+            print("[Axis] Screen locked; skipping window check")
+            return
+        }
+
         // Target only on-screen windows (i.e. windows in the current Space)
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
         let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) }
         let currentCount = currentWindows.count
-        let currentWindowIDs = Set(currentWindows.map { $0.id })
 
-        if currentCount == 0 && lastWindowCount > 0 {
-            if wasScreenLocked {
-                print("[Axis] Window count dropped to 0 during screen lock; skipping unregister")
-                return
+        // Watchdog: even though no window is registered to the workspace,
+        // If the window is visibly on screen, the state is broken, so restore it
+        if currentCount > 0 {
+            let hasRegisteredWindows = NSScreen.screens.contains { screen in
+                let ids = workspaceManager.windowIDsForCurrentWorkspace(on: screen)
+                return !ids.isEmpty
             }
-            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow" {
-                print("[Axis] loginwindow active; skipping unregister")
+            if !hasRegisteredWindows {
+                // First try restoring from closedWindowsCache
+                var restoredFromCache = false
+                for window in currentWindows {
+                    if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: window.id) {
+                        restoredFromCache = true
+                        print("[Axis] ウォッチドッグ: closedWindowsCache から復元成功")
+                        break
+                    }
+                }
+
+                if !restoredFromCache {
+                    // Reinitialize if restoring from the cache fails
+                    print("[Axis] ウォッチドッグ: キャッシュなし、強制再初期化（画面上に\(currentCount)個のウィンドウ）")
+                    workspaceManager.forceReinitialize()
+                }
+
+                lastWindowCount = currentCount
+                lastWindowIDs = Set(currentWindows.map { $0.id })
+                tilingEngine.tileAllScreens()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.borderManager.updateBorder()
+                }
                 return
             }
         }
+        let currentWindowIDs = Set(currentWindows.map { $0.id })
 
         if currentCount != lastWindowCount {
             print("[Axis] Window count changed: \(lastWindowCount) -> \(currentCount)")
@@ -470,6 +506,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if currentCount < lastWindowCount {
                 let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
                 print("[Axis] Windows closed: \(closedWindowIDs)")
+
+                // If every window disappears at once, that's a sign of the lock screen or sleep
+                // Save the cache and wait, without unregistering the window
+                // (the lock notification can arrive later than checkForWindowChanges)
+                if currentCount == 0 && lastWindowCount > 1 {
+                    workspaceManager.cacheCurrentStateOnWindowClose()
+                    lastWindowCount = 0
+                    lastWindowIDs = []
+                    print("[Axis] 全ウィンドウが消失 → ロック/スリープの可能性があるため unregister をスキップ")
+                    return
+                }
+
+                // Save the cache before unregistering, so we can restore later
+                workspaceManager.cacheCurrentStateOnWindowClose()
 
                 // Also unregister from the workspace
                 for closedID in closedWindowIDs {
@@ -484,7 +534,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
                 print("[Axis] New windows: \(newWindowIDs)")
 
-                // Register the new window to the current workspace
+                // Try to restore from the cache
+                // Restore a vanished window if it comes back after unlock or wake from sleep
+                var restoredFromCache = false
+                for newID in newWindowIDs {
+                    if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: newID) {
+                        restoredFromCache = true
+                        print("[Axis] Restored workspace state from closedWindowsCache")
+                        break
+                    }
+                }
+
+                if restoredFromCache {
+                    // If restored from cache, reapply tiling and finish
+                    lastWindowCount = currentCount
+                    lastWindowIDs = currentWindowIDs
+                    tilingEngine.tileAllScreens()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                        self?.borderManager.updateBorder()
+                    }
+                    return
+                }
+
+                // The normal new-window registration path
                 for newID in newWindowIDs {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
@@ -516,10 +588,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             lastWindowIDs = currentWindowIDs
             tilingEngine.tileAllScreens()
 
-            // Update the border after tiling
+            // Update the border and save state after tiling
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.borderManager.updateBorder()
             }
+
+            // Save state whenever a window change occurs
+            // (don't rely solely on the save-on-shutdown path)
+            workspaceManager.saveStateToDisk()
         }
     }
     
@@ -679,6 +755,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func onScreenUnlocked() {
         wasScreenLocked = false
         print("[Axis] 画面ロック解除を検知")
+
+        // If unlocked after waking from sleep, run the recovery logic here
+        if isWaking {
+            print("[Axis] ロック解除を検知 → スリープ復帰処理を開始")
+            performWakeRecovery()
+        }
     }
 
     // MARK: - Sleep/wake handling
@@ -694,29 +776,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func onSystemWake() {
         print("[Axis] システムがスリープから復帰")
 
-        // Wait a bit right after waking from sleep, since screen info can be unstable
+        // If the screen is locked, wait for it to unlock before running the recovery logic
+        // (the Accessibility API is unavailable while locked)
+        // Check not just the wasScreenLocked flag but also whether loginwindow is frontmost
+        // (because on wake from sleep, the ScreenLocked notification doesn't always arrive first)
+        let isLoginWindow = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow"
+
+        if wasScreenLocked || isLoginWindow {
+            wasScreenLocked = true
+            print("[Axis] 画面ロック中のため、ロック解除を待ちます")
+            // Keep isWaking true → onScreenUnlocked will run the wake-recovery logic
+            return
+        }
+
+        // If the screen isn't locked, go ahead and run the recovery logic
+        performWakeRecovery()
+    }
+
+    /// The actual recovery logic run after waking from sleep
+    /// Guarantee this is called only after the screen lock is released
+    private func performWakeRecovery() {
+        // Wait for the screen info to stabilize
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
 
-            // The window ID may have changed, so re-match it
-            // (don't call rescueOffScreenWindows here — it would break intentionally hidden windows)
-            self.workspaceManager.rematchWindowIDsAfterWake()
+            // If the screen is still locked, wait a bit longer
+            // (a safety net for when this is called almost simultaneously with unlock)
+            if self.wasScreenLocked {
+                print("[Axis] まだ画面ロック中、さらに待機します")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    self?.executeWakeRecovery()
+                }
+                return
+            }
 
-            // Retile the current workspace after recovery
-            self.tilingEngine.tileAllScreens()
-            self.borderManager.updateBorder()
-
-            // Update the window tracking info (based on the correct post-recovery state)
-            let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
-            let allWindows = self.accessibilityManager.getAllWindows()
-            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
-            self.lastWindowCount = onScreenWindows.count
-            self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
-
-            // Resume window checking
-            self.isWaking = false
-            print("[Axis] スリープ復帰処理完了、ウィンドウ追跡を再開")
+            self.executeWakeRecovery()
         }
+    }
+
+    /// The main body of the recovery logic
+    private func executeWakeRecovery() {
+        // The window ID may have changed, so re-match it
+        // (don't call rescueOffScreenWindows here — it would break intentionally hidden windows)
+        workspaceManager.rematchWindowIDsAfterWake()
+
+        // Retile the current workspace after recovery
+        tilingEngine.tileAllScreens()
+        borderManager.updateBorder()
+
+        // Update the window tracking info (based on the correct post-recovery state)
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allWindows = accessibilityManager.getAllWindows()
+        let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+        lastWindowCount = onScreenWindows.count
+        lastWindowIDs = Set(onScreenWindows.map { $0.id })
+
+        // Resume window checking
+        isWaking = false
+        print("[Axis] スリープ復帰処理完了、ウィンドウ追跡を再開（\(lastWindowCount) 個のウィンドウ）")
     }
 
     // MARK: - Monitor change handling
