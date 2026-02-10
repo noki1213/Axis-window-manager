@@ -37,6 +37,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // The startup guide window
     private var startupGuideController: StartupGuideWindowController?
+
+    // The settings window
+    private var settingsWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
@@ -167,8 +170,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func openSettings() {
-        // Open the settings screen (to be implemented later)
-        NSApp.setActivationPolicy(.regular)
+        // Bring it to the front if the window is already open
+        if let window = settingsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // Create the NSWindow that hosts the settings screen
+        let settingsView = SettingsView()
+        let hostingController = NSHostingController(rootView: settingsView)
+
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Axis Settings"
+        window.styleMask = [.titled, .closable]
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
     
