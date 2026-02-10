@@ -176,7 +176,7 @@ class HotkeyManager: ObservableObject {
 	/// Periodically check whether the Event Tap is alive, and revive it if it's dead
 	private func startHeartbeat() {
 		heartbeatTimer?.invalidate()
-		heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+		heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
 			self?.checkEventTapHealth()
 		}
 	}

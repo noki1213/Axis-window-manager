@@ -476,13 +476,10 @@ class WorkspaceManager: ObservableObject {
 		// 1. Save the current workspace's TilingEngine state
 		saveTilingState(for: id, workspace: currentWS, on: screen)
 
-		// 2. Move the current workspace's windows off-screen
-		hideWindowsForWorkspace(currentWS, on: id)
-
-		// 3. Update activeWorkspace
+		// 2. Update activeWorkspace
 		activeWorkspace[id] = workspace
 
-		// 4. Create the destination workspace if it doesn't exist yet
+		// 3. Create the destination workspace if it doesn't exist
 		if workspaceWindows[id]?[workspace] == nil {
 			if workspaceWindows[id] == nil {
 				workspaceWindows[id] = [:]
@@ -491,36 +488,39 @@ class WorkspaceManager: ObservableObject {
 			print("[Axis] WorkspaceManager: Created new workspace \(workspace)")
 		}
 
-		// 5. Restore the TilingEngine state for the destination workspace
+		// 4. Restore the destination workspace's TilingEngine state
 		restoreTilingState(for: id, workspace: workspace, on: screen)
 
-		// 6. Restore the destination workspace's windows
+		// 5. Restore and tile the destination windows first (so an empty screen never shows)
 		showWindowsForWorkspace(workspace, on: id)
-
-		// 7. Reapply tiling
 		tilingEngine.tile(on: screen)
 
-		// 8. Focus a window in the workspace
+		// 6. Focus a window in the workspace
 		if let windowID = focusWindowID {
 			focusWindow(windowID, in: workspace, on: id)
 		} else {
 			focusFirstWindow(in: workspace, on: id)
 		}
 
-		// 9. Update the border
+		// 7. Hide the old windows after a short delay (once the new windows have rendered on screen)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+			self?.hideWindowsForWorkspace(currentWS, on: id)
+		}
+
+		// 8. Update the border
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
 			BorderManager.shared.updateBorder()
 		}
 
-		// 8. Update the workspace number in the menu bar
+		// 9. Update the workspace number in the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
 
-		// 11. Clear the switching-in-progress flag after a short delay
+		// 10. Clear the switching-in-progress flag after a short delay
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
 			self?.isSwitching = false
 		}
 
-		// 12. Save workspace state to a file
+		// 11. Save the workspace state to a file
 		saveStateToDisk()
 
 		print("[Axis] WorkspaceManager: Switched to workspace \(workspace)")
@@ -626,68 +626,50 @@ class WorkspaceManager: ObservableObject {
 		}
 	}
 
-	/// Move the focused window to the next workspace
+	/// Move the focused window to the next workspace (the space switches immediately too)
 	func moveWindowToNextWorkspace(on screen: NSScreen) {
 		guard let focusedWindow = accessibilityManager.getFocusedWindow() else { return }
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 		let targetWS = currentWS + 1
-		let movedWindowID = focusedWindow.id
-
-		// Move the window (isSwitching gets cleared by the subsequent switchWorkspace call)
-		moveWindowToWorkspace(movedWindowID, workspace: targetWS, on: screen, keepSwitchingFlag: true)
-
-		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-			guard let self = self else { return }
-			let currentActive = self.activeWorkspace[id] ?? 0
-			if currentActive != targetWS {
-				// Switch to the destination if we haven't already
-				self.switchWorkspace(to: targetWS, on: screen, focusWindowID: movedWindowID)
-			} else {
-				// If cleanup already switched to the destination, focus the window that was moved
-				self.focusWindow(movedWindowID, in: targetWS, on: id)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
-				// Clear isSwitching
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-					self.isSwitching = false
-				}
-			}
-		}
+		moveWindowToWorkspaceAndSwitch(focusedWindow.id, from: currentWS, to: targetWS, screenID: id, screen: screen)
 	}
 
-	/// Move the focused window to the previous workspace
+	/// Move the focused window to the previous workspace (the space switches immediately too)
 	func moveWindowToPreviousWorkspace(on screen: NSScreen) {
 		guard let focusedWindow = accessibilityManager.getFocusedWindow() else { return }
 		let id = screenIdentifier(for: screen)
 		let currentWS = activeWorkspace[id] ?? 0
 		let targetWS = currentWS - 1
-		let movedWindowID = focusedWindow.id
+		moveWindowToWorkspaceAndSwitch(focusedWindow.id, from: currentWS, to: targetWS, screenID: id, screen: screen)
+	}
 
-		// Move the window (isSwitching gets cleared by the subsequent switchWorkspace call)
-		moveWindowToWorkspace(movedWindowID, workspace: targetWS, on: screen, keepSwitchingFlag: true)
+	/// Register the window to the destination workspace and switch to it immediately
+	private func moveWindowToWorkspaceAndSwitch(_ windowID: CGWindowID, from currentWS: Int, to targetWS: Int, screenID id: ScreenIdentifier, screen: NSScreen) {
+		// Move the window to the destination workspace in the data
+		workspaceWindows[id]?[currentWS]?.remove(windowID)
 
-		// Switch to the destination workspace (delayed slightly so the switch happens after the window move finishes)
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-			guard let self = self else { return }
-			let currentActive = self.activeWorkspace[id] ?? 0
-			if currentActive != targetWS {
-				// Switch to the destination if we haven't already
-				self.switchWorkspace(to: targetWS, on: screen, focusWindowID: movedWindowID)
-			} else {
-				// If cleanup already switched to the destination, focus the window that was moved
-				self.focusWindow(movedWindowID, in: targetWS, on: id)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
-				// Clear isSwitching
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-					self.isSwitching = false
-				}
+		if workspaceWindows[id]?[targetWS] == nil {
+			if workspaceWindows[id] == nil {
+				workspaceWindows[id] = [:]
 			}
+			workspaceWindows[id]?[targetWS] = []
 		}
+		workspaceWindows[id]?[targetWS]?.insert(windowID)
+
+		// Also remove the window from TilingEngine's snapshot
+		if var snapshot = tilingSnapshots[id]?[currentWS] {
+			snapshot.columns = snapshot.columns.map { column in
+				column.filter { $0 != windowID }
+			}.filter { !$0.isEmpty }
+			tilingSnapshots[id]?[currentWS] = snapshot
+		}
+
+		// Switch workspaces immediately (the window stays visible since it's already on screen)
+		switchWorkspace(to: targetWS, on: screen, focusWindowID: windowID)
+
+		// Clean up once the original workspace becomes empty
+		cleanupEmptyWorkspaces(on: screen)
 	}
 
 	// MARK: - Hide Corner (the AeroSpace approach)
