@@ -428,7 +428,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
         lastWindowCount = onScreenWindows.count
         lastWindowIDs = Set(onScreenWindows.map { $0.id })
-        windowCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        windowCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
             self?.checkForWindowChanges()
         }
     }
