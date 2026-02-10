@@ -27,7 +27,12 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Layout", systemImage: "rectangle.split.3x1")
                 }
-            
+
+            ShortcutsSettingsView()
+                .tabItem {
+                    Label("Shortcuts", systemImage: "keyboard")
+                }
+
             FloatingAppsView()
                 .tabItem {
                     Label("Floating", systemImage: "square.on.square")
@@ -38,7 +43,7 @@ struct SettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 450, height: 300)
+        .frame(width: 500, height: 500)
     }
 }
 
@@ -46,10 +51,10 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @ObservedObject private var accessibilityManager = AccessibilityManager.shared
-    
+
     var body: some View {
-        Form {
-            Section {
+        VStack(spacing: 16) {
+            GroupBox {
                 HStack {
                     Text("Accessibility Permission")
                     Spacer()
@@ -66,12 +71,19 @@ struct GeneralSettingsView: View {
                         }
                     }
                 }
+                .padding(.vertical, 4)
             }
-            
-            Section {
-                Toggle("Launch at Login", isOn: .constant(false))
-                    .disabled(true) // 後で実装
+
+            GroupBox {
+                HStack {
+                    Toggle("Launch at Login", isOn: .constant(false))
+                        .disabled(true) // 後で実装
+                    Spacer()
+                }
+                .padding(.vertical, 4)
             }
+
+            Spacer()
         }
         .padding()
     }
@@ -81,36 +93,39 @@ struct GeneralSettingsView: View {
 
 struct LayoutSettingsView: View {
     @ObservedObject private var tilingEngine = TilingEngine.shared
-    
+
     var body: some View {
-        Form {
-            Section("Spacing") {
-                HStack {
-                    Text("Window Gap")
-                    Spacer()
-                    TextField("", value: $tilingEngine.windowGap, formatter: NumberFormatter())
-                        .frame(width: 60)
-                        .textFieldStyle(.roundedBorder)
-                    Text("px")
-                        .foregroundColor(.secondary)
+        VStack(spacing: 16) {
+            GroupBox("Spacing") {
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Window Gap")
+                        Spacer()
+                        TextField("", value: $tilingEngine.windowGap, formatter: NumberFormatter())
+                            .frame(width: 60)
+                            .textFieldStyle(.roundedBorder)
+                        Text("px")
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Text("Screen Padding")
+                        Spacer()
+                        TextField("", value: $tilingEngine.screenPadding, formatter: NumberFormatter())
+                            .frame(width: 60)
+                            .textFieldStyle(.roundedBorder)
+                        Text("px")
+                            .foregroundColor(.secondary)
+                    }
                 }
-                
-                HStack {
-                    Text("Screen Padding")
-                    Spacer()
-                    TextField("", value: $tilingEngine.screenPadding, formatter: NumberFormatter())
-                        .frame(width: 60)
-                        .textFieldStyle(.roundedBorder)
-                    Text("px")
-                        .foregroundColor(.secondary)
-                }
+                .padding(.top, 4)
             }
-            
-            Section {
-                Button("Re-tile All Windows") {
-                    tilingEngine.tileAllScreens()
-                }
+
+            Button("Re-tile All Windows") {
+                tilingEngine.tileAllScreens()
             }
+
+            Spacer()
         }
         .padding()
     }
