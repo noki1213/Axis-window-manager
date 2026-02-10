@@ -1114,7 +1114,8 @@ class WorkspaceManager: ObservableObject {
 
 		// Re-match window IDs for each workspace
 		for (_, workspaces) in workspaceWindows {
-			for (_, windowIDs) in workspaces {
+			for (
+                _, windowIDs) in workspaces {
 				for oldID in windowIDs {
 					// First check whether the same ID exists in the current window list
 					if managedWindows.contains(where: { $0.id == oldID }) {
