@@ -70,6 +70,22 @@ struct WorkspaceState: Codable {
 	let screenStates: [ScreenState]
 }
 
+// MARK: - ClosedWindowsSnapshot (AeroSpace-style)
+
+/// A snapshot of the entire workspace taken when a window is detected as "closed"
+/// When the Accessibility API becomes unusable during the lock screen or sleep,
+/// Since every window appears "closed," save the state at that moment
+/// When the window is redetected, restore its original placement from this snapshot
+struct ClosedWindowsSnapshot {
+	let workspaceWindows: [ScreenIdentifier: [Int: Set<CGWindowID>]]
+	let savedFrames: [CGWindowID: CGRect]
+	let tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]]
+	let activeWorkspace: [ScreenIdentifier: Int]
+	let hoverWindowIDs: Set<CGWindowID>
+	let cachedWindowIDs: Set<CGWindowID>
+	let windowIdentityCache: [CGWindowID: (bundleID: String, title: String)]
+}
+
 // MARK: - WorkspaceManager
 
 /// The central class for the workspace feature
@@ -103,6 +119,10 @@ class WorkspaceManager: ObservableObject {
 
 	/// Storage of the column structure and ratios for each monitor x workspace pair
 	private var tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]] = [:]
+
+	/// The AeroSpace approach: a full snapshot taken when a window is detected as "closed"
+	/// In case windows appear to vanish during the lock screen or sleep
+	private var closedWindowsCache: ClosedWindowsSnapshot?
 
 	private let accessibilityManager = AccessibilityManager.shared
 	private let tilingEngine = TilingEngine.shared
@@ -401,6 +421,66 @@ class WorkspaceManager: ObservableObject {
 
 	
 
+	// MARK: - ClosedWindowsCache (the AeroSpace-style restore mechanism)
+
+	/// Called when a window is detected as "closed"
+	/// Save a snapshot of the entire current workspace into the cache
+	func cacheCurrentStateOnWindowClose() {
+		let allCachedIDs = Set(workspaceWindows.values.flatMap { $0.values.flatMap { $0 } })
+
+		// Don't cache it if there's no managed window
+		guard !allCachedIDs.isEmpty else { return }
+
+		closedWindowsCache = ClosedWindowsSnapshot(
+			workspaceWindows: workspaceWindows,
+			savedFrames: savedFrames,
+			tilingSnapshots: tilingSnapshots,
+			activeWorkspace: activeWorkspace,
+			hoverWindowIDs: hoverWindowIDs,
+			cachedWindowIDs: allCachedIDs,
+			windowIdentityCache: windowIdentityCache
+		)
+		print("[Axis] closedWindowsCache: スナップショットを保存（\(allCachedIDs.count) 個のウィンドウ）")
+	}
+
+	/// Check whether a newly detected window is in the cache, and restore it
+	/// - Parameter detectedWindowID: the ID of the re-detected window
+	/// - Returns: true if it was restored
+	func restoreFromCacheIfNeeded(detectedWindowID: CGWindowID) -> Bool {
+		guard let cache = closedWindowsCache else { return false }
+
+		// No timeout (the AeroSpace approach)
+		// The cache is only reset by user actions (workspace switches, etc.)
+		// So it can still be restored after a long sleep or lock
+
+		// Whether the detected window is present in the cache
+		guard cache.cachedWindowIDs.contains(detectedWindowID) else { return false }
+
+		// Restore everything from the cache
+		print("[Axis] closedWindowsCache: ウィンドウ \(detectedWindowID) がキャッシュに見つかりました。全体を復元します")
+
+		workspaceWindows = cache.workspaceWindows
+		savedFrames = cache.savedFrames
+		tilingSnapshots = cache.tilingSnapshots
+		activeWorkspace = cache.activeWorkspace
+		hoverWindowIDs = cache.hoverWindowIDs
+		windowIdentityCache = cache.windowIdentityCache
+
+		// Clear the cache
+		closedWindowsCache = nil
+
+		return true
+	}
+
+	/// Reset the cache when the user deliberately changes the layout
+	/// Called after a user action, such as a workspace switch or window move
+	func resetClosedWindowsCache() {
+		if closedWindowsCache != nil {
+			closedWindowsCache = nil
+			print("[Axis] closedWindowsCache: ユーザー操作によりキャッシュをリセット")
+		}
+	}
+
 	    /// Register every window to workspace 0 at launch
 
 	
@@ -446,6 +526,24 @@ class WorkspaceManager: ObservableObject {
 		}
 	}
 
+	/// Force re-initialization if the state is broken (for the watchdog)
+	/// Reset didRestoreStateFromDisk and re-register every window to workspace 0
+	func forceReinitialize() {
+		print("[Axis] WorkspaceManager: 強制再初期化を実行")
+
+		// Clear the state
+		didRestoreStateFromDisk = false
+		workspaceWindows.removeAll()
+		savedFrames.removeAll()
+		tilingSnapshots.removeAll()
+		activeWorkspace.removeAll()
+		hoverWindowIDs.removeAll()
+		closedWindowsCache = nil
+
+		// Re-register every window to workspace 0
+		initializeWithCurrentWindows()
+	}
+
 	// MARK: - Workspace Switching
 
 	/// Switch workspaces
@@ -467,6 +565,9 @@ class WorkspaceManager: ObservableObject {
 
 		// Set the switching-in-progress flag (prevents checkForWindowChanges from misfiring)
 		isSwitching = true
+
+		// Reset the cache since this is a user action
+		resetClosedWindowsCache()
 
 		// Disable Zen Mode first if it's active
 		if ZenModeManager.shared.isActive {
@@ -559,6 +660,9 @@ class WorkspaceManager: ObservableObject {
 
 		// Set the switching-in-progress flag
 		isSwitching = true
+
+		// Reset the cache since this is a user action
+		resetClosedWindowsCache()
 
 		// Remove the window from the current workspace
 		workspaceWindows[id]?[currentWS]?.remove(windowID)
@@ -1363,6 +1467,13 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		let state = WorkspaceState(screenStates: screenStates)
+
+		// Safeguard: if not a single window could be saved,
+		// Don't overwrite good existing data with empty data
+		if totalSavedWindows == 0 {
+			print("[Axis] ワークスペース状態の保存をスキップ: ウィンドウ情報が0個（空データで上書きしない）")
+			return
+		}
 
 		do {
 			// Create the directory if it doesn't exist
