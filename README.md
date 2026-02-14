@@ -6,86 +6,73 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 
 ## Features
 
-- **Tiling Layout**: Automatically arranges windows in a tiling layout.
-- **Keyboard Navigation**: Move focus between windows using vim-style keys (J/K/L/I).
-- **Window Movement**: Reorganize windows with keyboard shortcuts.
-- **Zen Mode**: Focus on a single window by centering it and hiding others (distraction-free).
-- **Gap Selection Mode**: Resize windows by selecting and moving gaps between them.
-- **Window Selection Mode**: Select and merge multiple windows into columns.
-- **Window Palette**: Quickly switch between windows across all workspaces.
-- **Visual Feedback**: Border highlights around the focused window.
-- **Smart Workspaces**: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
+- Tiling Layout: Automatically arranges windows in a tiling layout.
+- Keyboard Navigation: Move focus between windows.
+- Window Movement: Reorganize windows with keyboard shortcuts.
+- Hover Mode: Float a window above the tiling layout and position it freely.
+- Zen Mode: Focus on a single window by centering it and hiding others (distraction-free).
+- Gap Selection Mode: Resize windows by selecting and moving gaps between them.
+- Window Selection Mode: Select and merge multiple windows into columns.
+- Window Palette: Quickly switch between windows across all workspaces.
+- Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
+- Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
+- Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
+- State Persistence: Workspaces and window positions are preserved across sleep/lock and app restarts.
+- Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
-## Keyboard Shortcuts
+## Customizing Keyboard Shortcuts
 
-All shortcuts use `Ctrl + Option` as the base modifier.
+1. Click the Axis icon in the menu bar
+2. Select "Settings..."
+3. Open the Shortcuts tab
+4. Click the key field next to the action you want to change
+5. Press the new key combination
+6. The shortcut is applied immediately
 
-### Basic Navigation (Normal Mode)
-- `Ctrl + Option + J`: Move focus left
-- `Ctrl + Option + L`: Move focus right
-- `Ctrl + Option + I`: Move focus up
-- `Ctrl + Option + K`: Move focus down
+If the key combination is already used by another action, a conflict warning will appear. To restore all shortcuts to their defaults, click "Restore Defaults" at the bottom of the settings.
 
-### Window Movement
-- `Ctrl + Option + Shift + J`: Move window left
-- `Ctrl + Option + Shift + L`: Move window right
-- `Ctrl + Option + Shift + I`: Move window up
-- `Ctrl + Option + Shift + K`: Move window down
+## Modes
+
+### Normal Mode
+- Move focus between windows (up / down / left / right)
+- Move windows to a different position
+- Resize windows (shrink / expand)
+- Reset layout (single column per window)
+
+### Hover Mode
+- Removes the focused window from tiling and centers it on screen
+- The window can then be freely repositioned with the mouse
+- Other tiled windows rearrange to fill the gap
+- Cycle focus between hover windows
 
 ### Zen Mode
-- `Ctrl + Option + Z`: Toggle Zen Mode (Focus Mode)
-  - Centers the focused window and hides all other windows on the primary monitor
-  - If the window is on a secondary monitor, it will be moved to the primary monitor
-  - When exiting Zen Mode, the window is restored to its original position
+- Centers the focused window and hides all other windows on the primary monitor
+- If the window is on a secondary monitor, it will be moved to the primary monitor
+- When exiting Zen Mode, the window is restored to its original position
 
 ### Window Palette
-- `Ctrl + Option + P`: Open Window Palette
-  - `I/K`: Navigate up/down (across workspaces)
-  - `J/L`: Navigate left/right (between windows)
-  - `Return`: Switch to selected window
+- Lists all windows across all workspaces
+- Navigate up/down (across workspaces) and left/right (between windows)
+- Press Return to switch to the selected window
 
 ### Window Selection Mode
-- `Ctrl + Option + W`: Enter window selection mode
-  - `J/K/L/I`: Navigate focus
-  - `Return`: Select/Deselect window
-  - `V`: Merge selected windows vertically
-  - `Shift + V`: Split selected windows
-  - `Escape`: Exit mode
+- Navigate and select multiple windows
+- Merge selected windows vertically into a column
+- Split merged windows back apart
+- Press Escape to exit
 
 ### Gap Selection & Resizing
-**Quick Resize (Direct Entry)**
-
-Directly select gaps around the focused window and resize immediately:
-- `Ctrl + Option + S`: Select Left Gap
-- `Ctrl + Option + F`: Select Right Gap
-- `Ctrl + Option + E`: Select Top Gap
-- `Ctrl + Option + D`: Select Bottom Gap
-
-Once selected, use `J/K/L/I` to adjust the gap size, `Return` to confirm, or `Escape` to cancel.
-
-**Standard Entry**
-- `Ctrl + Option + G`: Enter Gap Selection Mode
-
-**In Mode:**
-- `J/K/L/I`: Move gap (Resize)
-- `Return`: Confirm
-- `Escape`: Cancel
-
-### Window Resizing (Normal Mode)
-- `Ctrl + Option + -`: Shrink focused window
-- `Ctrl + Option + =`: Expand focused window
-- `Ctrl + Option + R`: Reset layout (Single column per window)
+- Select a gap (left / right / top / bottom) around the focused window
+- Use directional keys to adjust the gap size
+- Press Return to confirm or Escape to cancel
 
 ### Workspace Management
-- `Ctrl + Option + O`: Switch to next workspace
-- `Ctrl + Option + U`: Switch to previous workspace
-- `Ctrl + Option + Shift + O`: Move focused window to next workspace
-- `Ctrl + Option + Shift + U`: Move focused window to previous workspace
-
-*Note: Empty workspaces are automatically removed and reordered.*
+- Switch to next/previous workspace
+- Move the focused window to next/previous workspace
+- Empty workspaces are automatically removed and reordered
 
 ### Monitor Cursor
-- `Ctrl + Option + M` (or `Q`): Move mouse cursor to next monitor
+- Move the mouse cursor to the next monitor
 
 ## Installation
 
@@ -103,9 +90,10 @@ Once selected, use `J/K/L/I` to adjust the gap size, `Return` to confirm, or `Es
 ## Setup
 
 1. Launch Axis
-2. Go to System Settings > Privacy & Security > Accessibility
-3. Add Axis to the list and enable it
-4. Restart Axis if needed
+2. A startup guide will appear — move all windows to a single desktop before continuing
+3. Go to System Settings > Privacy & Security > Accessibility
+4. Add Axis to the list and enable it
+5. Restart Axis if needed
 
 ## License
 
@@ -120,86 +108,73 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 ## 機能
 
 - タイリングレイアウト：ウィンドウを自動的にタイル状に配置します
-- キーボード操作：vim スタイルのキー（J/K/L/I）でウィンドウ間のフォーカス移動
+- キーボード操作：ウィンドウ間のフォーカス移動
 - ウィンドウ移動：キーボードショートカットでウィンドウを再配置
+- ホバーモード：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
 - Zen モード：一つのウィンドウに集中するため、中央に配置して他のウィンドウを非表示にします
 - ギャップ選択モード：ウィンドウ間のギャップを選択して移動することでリサイズ
 - ウィンドウ選択モード：複数のウィンドウを選択してまとめて列に統合
 - ウィンドウパレット：全ワークスペースのウィンドウを一覧表示して素早く切り替え
-- ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示
+- ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示。現在のモードに応じてメニューバーのアイコンが変化
 - スマートワークスペース：ワークスペース間の移動と、ウィンドウの移動を効率的に実行。空のワークスペースは自動削除されます
+- カスタムキーボードショートカット：設定画面からすべてのショートカットを自由に変更できます
+- 状態の永続化：スリープやロックからの復帰後もワークスペースとウィンドウ配置を維持します
+- 安全な終了：Axis 終了時、すべてのウィンドウを画面内の見える位置に復元します
 
-## キーボードショートカット
+## ショートカットの設定方法
 
-すべてのショートカットは Ctrl + Option を基本修飾キーとして使用します。
+1. メニューバーの Axis アイコンをクリック
+2. Settings... を選択
+3. Shortcuts タブを開く
+4. 変更したい操作の横にあるキー表示部分をクリック
+5. 新しいキーの組み合わせを押す
+6. ショートカットはすぐに反映されます
 
-### 基本操作（ノーマルモード）
-- Ctrl + Option + J：左のウィンドウにフォーカス移動
-- Ctrl + Option + L：右のウィンドウにフォーカス移動
-- Ctrl + Option + I：上のウィンドウにフォーカス移動
-- Ctrl + Option + K：下のウィンドウにフォーカス移動
+すでに他の操作で使われているキーの組み合わせを設定しようとすると、重複の警告が表示されます。すべてのショートカットを元に戻したい場合は、設定画面の下にある「デフォルトに戻す」をクリックしてください。
 
-### ウィンドウの移動
-- Ctrl + Option + Shift + J：ウィンドウを左に移動
-- Ctrl + Option + Shift + L：ウィンドウを右に移動
-- Ctrl + Option + Shift + I：ウィンドウを上に移動
-- Ctrl + Option + Shift + K：ウィンドウを下に移動
+## モード
+
+### ノーマルモード
+- ウィンドウ間のフォーカス移動（上下左右）
+- ウィンドウの位置変更
+- ウィンドウのリサイズ（縮小・拡大）
+- レイアウトのリセット（各ウィンドウを1列に）
+
+### ホバーモード
+- フォーカス中のウィンドウをタイリングから外して、画面中央に表示
+- その後マウスで自由に位置を変更できる
+- 他のタイリングされたウィンドウは、空いたスペースを埋めるように再配置される
+- ホバー中のウィンドウ間でフォーカスを切り替え
 
 ### Zen モード
-- Ctrl + Option + Z：Zen モードの切り替え
-  - フォーカス中のウィンドウをメインモニターの中央に表示
-  - 他のすべてのウィンドウを非表示にして、集中できる環境を作成
-  - サブモニターのウィンドウも Zen モードにするとメインモニターに移動
-  - Zen モード解除時は、ウィンドウは元の位置に復元される
+- フォーカス中のウィンドウをメインモニターの中央に表示
+- 他のすべてのウィンドウを非表示にして、集中できる環境を作成
+- サブモニターのウィンドウも Zen モードにするとメインモニターに移動
+- Zen モード解除時は、ウィンドウは元の位置に復元される
 
 ### ウィンドウパレット
-- Ctrl + Option + P：ウィンドウパレットを開く
-  - I/K：上下に移動（ワークスペース間）
-  - J/L：左右に移動（ウィンドウ間）
-  - Return：選択したウィンドウに切り替え
+- 全ワークスペースのウィンドウを一覧表示
+- 上下に移動（ワークスペース間）、左右に移動（ウィンドウ間）
+- Return で選択したウィンドウに切り替え
 
 ### ウィンドウ選択モード
-- Ctrl + Option + W：ウィンドウ選択モードに入る
-  - J/K/L/I：フォーカス移動
-  - Return：ウィンドウを選択/選択解除
-  - V：選択したウィンドウを縦に統合
-  - Shift + V：選択したウィンドウを分割
-  - Escape：モードを終了
+- ウィンドウ間を移動して複数選択
+- 選択したウィンドウを縦に統合して列にまとめる
+- 統合したウィンドウを分割して元に戻す
+- Escape でモードを終了
 
 ### ギャップ選択とリサイズ
-クイックリサイズ（直接入力）
-
-フォーカス中のウィンドウの周りのギャップを直接選択して、すぐにリサイズできます：
-- Ctrl + Option + S：左のギャップを選択
-- Ctrl + Option + F：右のギャップを選択
-- Ctrl + Option + E：上のギャップを選択
-- Ctrl + Option + D：下のギャップを選択
-
-選択後、J/K/L/I でギャップのサイズを調整し、Return で確定、Escape でキャンセルできます。
-
-標準入力
-- Ctrl + Option + G：ギャップ選択モードに入る
-
-モード内の操作：
-- J/K/L/I：ギャップを移動（リサイズ）
-- Return：確定
-- Escape：キャンセル
-
-### ウィンドウのリサイズ（ノーマルモード）
-- Ctrl + Option + -：フォーカス中のウィンドウを縮小
-- Ctrl + Option + =：フォーカス中のウィンドウを拡大
-- Ctrl + Option + R：レイアウトをリセット（各ウィンドウを1列に）
+- フォーカス中のウィンドウの周りのギャップ（左右上下）を選択
+- 方向キーでギャップのサイズを調整
+- Return で確定、Escape でキャンセル
 
 ### ワークスペース管理
-- Ctrl + Option + O：次のワークスペースに切り替え
-- Ctrl + Option + U：前のワークスペースに切り替え
-- Ctrl + Option + Shift + O：フォーカス中のウィンドウを次のワークスペースに移動
-- Ctrl + Option + Shift + U：フォーカス中のウィンドウを前のワークスペースに移動
-
-注意：空のワークスペースは自動的に削除され、ID が再割り当てされます。
+- 次/前のワークスペースに切り替え
+- フォーカス中のウィンドウを次/前のワークスペースに移動
+- 空のワークスペースは自動的に削除され、ID が再割り当てされます
 
 ### モニター間のカーソル移動
-- Ctrl + Option + M（または Q）：マウスカーソルを次のモニターに移動
+- マウスカーソルを次のモニターに移動
 
 ## インストール
 
@@ -217,6 +192,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 ## セットアップ
 
 1. Axis を起動
-2. システム設定 > プライバシーとセキュリティ > アクセシビリティ を開く
-3. Axis をリストに追加して有効化
-4. 必要に応じて Axis を再起動
+2. 起動ガイドが表示されるので、すべてのウィンドウを 1 つのデスクトップに移動してから続行
+3. システム設定 > プライバシーとセキュリティ > アクセシビリティ を開く
+4. Axis をリストに追加して有効化
+5. 必要に応じて Axis を再起動
