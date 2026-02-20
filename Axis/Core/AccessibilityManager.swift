@@ -56,18 +56,20 @@ class AccessibilityManager: ObservableObject {
     
     /// Get the windows of every application
     func getAllWindows() -> [WindowInfo] {
-        guard isAccessibilityEnabled else { return [] }
-        
-        var windows: [WindowInfo] = []
-        let runningApps = NSWorkspace.shared.runningApplications.filter { 
-            $0.activationPolicy == .regular 
+        guard isAccessibilityEnabled else {
+            return []
         }
-        
+
+        var windows: [WindowInfo] = []
+        let runningApps = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular
+        }
+
         for app in runningApps {
             let appWindows = getWindows(for: app)
             windows.append(contentsOf: appWindows)
         }
-        
+
         return windows
     }
     
@@ -96,7 +98,7 @@ class AccessibilityManager: ObservableObject {
         guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
-        
+
         var windowIDs = Set<CGWindowID>()
         for windowInfo in windowList {
             if let windowNumber = windowInfo[kCGWindowNumber as String] as? CGWindowID {
@@ -109,23 +111,19 @@ class AccessibilityManager: ObservableObject {
     /// Get the focused window
     func getFocusedWindow() -> WindowInfo? {
         guard isAccessibilityEnabled else {
-            print("[Axis] getFocusedWindow: Accessibility not enabled")
             return nil
         }
 
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
-            print("[Axis] getFocusedWindow: No frontmost application")
             return nil
         }
 
-        print("[Axis] getFocusedWindow: frontApp = \(frontApp.localizedName ?? "unknown")")
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         var focusedWindowRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
 
         guard result == .success, let axWindow = focusedWindowRef else {
-            print("[Axis] getFocusedWindow: Failed to get focused window, result = \(result.rawValue)")
             return nil
         }
 

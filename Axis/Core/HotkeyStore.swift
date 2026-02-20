@@ -57,7 +57,6 @@ class HotkeyStore: ObservableObject {
 
 			bindings = merged
 		} catch {
-			print("[Axis] ホットキー設定の読み込みに失敗: \(error). デフォルト値を使用します。")
 			bindings = defaults
 		}
 	}
@@ -72,7 +71,6 @@ class HotkeyStore: ObservableObject {
 			let data = try encoder.encode(bindings)
 			try data.write(to: saveURL, options: .atomic)
 		} catch {
-			print("[Axis] ホットキー設定の保存に失敗: \(error)")
 		}
 	}
 

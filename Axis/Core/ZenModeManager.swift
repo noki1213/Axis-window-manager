@@ -15,9 +15,15 @@ class ZenModeManager: ObservableObject {
     @Published var isActive: Bool = false
     
     private var focusedWindowID: CGWindowID?
-    
+
+    /// The window width fraction while in Zen mode (default 75%)
+    private var widthRatio: CGFloat = 0.75
+
     /// Save the original position of a window moved off-screen
     private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
+
+    /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on getAllWindows)
+    private var hiddenWindowList: [WindowInfo] = []
 
     private init() {}
 
@@ -33,28 +39,26 @@ class ZenModeManager: ObservableObject {
     /// Used when switching directly to another mode, such as the palette
     func exitAndHandOffHiddenFrames() -> [CGWindowID: CGRect] {
         guard isActive else { return [:] }
-        print("[Axis] ZenMode: Handing off \(hiddenWindowFrames.count) hidden frames")
         isActive = false
         focusedWindowID = nil
+        widthRatio = 0.75
         let frames = hiddenWindowFrames
         hiddenWindowFrames.removeAll()
+        hiddenWindowList.removeAll()
         return frames
     }
 
     private func enter() {
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
-            print("[Axis] ZenMode: No focused window")
             return
         }
         
         // Get the primary (main) monitor
         // Don't use NSScreen.main since it returns the monitor with the focused window
         guard let screen = NSScreen.screens.first else {
-            print("[Axis] ZenMode: No screen")
             return
         }
         
-        print("[Axis] ZenMode: Entering with window '\(focusedWindow.title)'")
         
         // Save the state
         focusedWindowID = focusedWindow.id
@@ -76,12 +80,12 @@ class ZenModeManager: ObservableObject {
         focusedWindow.focus()
     }
     
-    private func exit() {
-        print("[Axis] ZenMode: Exiting, will restore \(hiddenWindowFrames.count) windows")
-        
+    func exit() {
+
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
         focusedWindowID = nil
+        widthRatio = 0.75
         
         // Move a window that ended up off-screen back to its original position
         restoreHiddenWindows()
@@ -153,6 +157,7 @@ class ZenModeManager: ObservableObject {
 
     private func hideOtherWindows(exceptWindowID: CGWindowID, on mainScreen: NSScreen) {
         hiddenWindowFrames.removeAll()
+        hiddenWindowList.removeAll()
 
         // Gather the window IDs belonging to the current workspace across all monitors
         var allWorkspaceIDs = Set<CGWindowID>()
@@ -183,60 +188,86 @@ class ZenModeManager: ObservableObject {
                 continue
             }
 
-            // Save the original position
+            // Save the original position and WindowInfo (so restoring doesn't depend on getAllWindows)
             hiddenWindowFrames[window.id] = window.frame
+            hiddenWindowList.append(window)
 
             // Move to a corner of the main screen (position only, size unchanged)
             let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
             window.setPosition(hidePos)
 
-            print("[Axis] ZenMode: Moved window '\(window.title)' to corner")
         }
 
-        print("[Axis] ZenMode: Hidden \(hiddenWindowFrames.count) windows")
     }
     
     private func restoreHiddenWindows() {
-        // Get all windows
-        let allWindows = AccessibilityManager.shared.getAllWindows()
-        
-        for window in allWindows {
-            // Restore the saved frame if there is one
+        // Restore using the saved WindowInfo directly
+        // (because getAllWindows can fail to pick up off-screen windows like Excel's)
+        for window in hiddenWindowList {
             if let originalFrame = hiddenWindowFrames[window.id] {
                 window.setFrame(originalFrame)
-                print("[Axis] ZenMode: Restored window '\(window.title)' to \(originalFrame)")
             }
         }
-        
-        print("[Axis] ZenMode: Restored \(hiddenWindowFrames.count) windows")
+
         hiddenWindowFrames.removeAll()
+        hiddenWindowList.removeAll()
     }
     
     private func centerWindow(_ window: WindowInfo, on screen: NSScreen) {
         let visibleFrame = screen.visibleFrame
         let padding: CGFloat = 12
 
-        // Size: 75% width, full screen height
-        let targetWidth = visibleFrame.width * 0.75
+        // Target size (width determined by widthRatio, height fills the screen)
+        let targetWidth = visibleFrame.width * widthRatio
         let targetHeight = visibleFrame.height - (padding * 2)
 
-        // Center it
-        let originX = visibleFrame.minX + (visibleFrame.width - targetWidth) / 2
-
-        // Convert to AX coordinates
+        // Reference value for the AX coordinate system
         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
-        let originY = screenTopInAX + padding
 
+        // Compute the centered position at the target size and place it in one shot
+        let originX = visibleFrame.minX + (visibleFrame.width - targetWidth) / 2
+        let originY = screenTopInAX + (visibleFrame.height - targetHeight) / 2
         let targetFrame = CGRect(x: originX, y: originY, width: targetWidth, height: targetHeight)
 
-        print("[Axis] ZenMode: Moving window to \(targetFrame)")
 
         // Move it to the main monitor first, then change its size
         // (while it's on a secondary monitor, macOS constrains it to that monitor's size)
         window.setPosition(targetFrame.origin)
+
+        let axElement = window.axElement
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             window.setFrame(targetFrame)
+
+            // Only re-center windows that rejected the resize (fixed-size windows, etc.) afterward
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                var sizeRef: CFTypeRef?
+                let result = AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
+                guard result == .success, let sizeValue = sizeRef else { return }
+                var actualSize = CGSize.zero
+                AXValueGetValue(sizeValue as! AXValue, .cgSize, &actualSize)
+
+                // Only re-center it if the actual size differs significantly from the target
+                let widthDiff = abs(actualSize.width - targetWidth)
+                let heightDiff = abs(actualSize.height - targetHeight)
+                if widthDiff > 10 || heightDiff > 10 {
+                    let correctedX = visibleFrame.minX + (visibleFrame.width - actualSize.width) / 2
+                    let correctedY = screenTopInAX + (visibleFrame.height - actualSize.height) / 2
+                    window.setPosition(CGPoint(x: correctedX, y: correctedY))
+                }
+            }
         }
+    }
+
+    /// Adjusts the window width in 5% steps while in Zen mode
+    func adjustWidth(increase: Bool) {
+        guard isActive else { return }
+        guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
+        guard let screen = NSScreen.screens.first else { return }
+
+        let step: CGFloat = 0.05
+        widthRatio = max(0.1, min(1.0, widthRatio + (increase ? step : -step)))
+
+        centerWindow(focusedWindow, on: screen)
     }
 }

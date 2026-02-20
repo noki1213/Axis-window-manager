@@ -43,6 +43,7 @@ class TilingEngine: ObservableObject {
         // Get the window IDs belonging to the workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
 
+
         // Filter down to managed windows
         // - shouldBeManaged(): excludes minimized, fullscreen, and non-standard windows
         // - shouldFloat(): excludes windows that should float
@@ -51,9 +52,11 @@ class TilingEngine: ObservableObject {
             window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isHovering(window.id)
         }
 
+        for w in managedWindows {
+        }
+
         // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
-            print("[Axis] tile: No workspace windows on this screen, skipping")
             tiledWindows[screenID] = []
             return
         }
@@ -111,22 +114,17 @@ class TilingEngine: ObservableObject {
     
     /// Move window focus in the given direction
     func moveFocus(direction: Direction) {
-        print("[Axis] moveFocus: direction=\(direction)")
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow() else {
-            print("[Axis] No focused window found")
             return
         }
 
-        print("[Axis] moveFocus: focusedWindow=\(focusedWindow.title), frame=\(focusedWindow.frame)")
 
         guard let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] moveFocus: Could not determine screen for window")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
 
-        print("[Axis] moveFocus: screen frame=\(screen.frame)")
 
         // Target only windows belonging to the current workspace
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
@@ -155,7 +153,6 @@ class TilingEngine: ObservableObject {
         }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
-            print("[Axis] Current window not in tiled windows")
             return
         }
 
@@ -168,11 +165,9 @@ class TilingEngine: ObservableObject {
                 let leftColumn = columns[columnIndex - 1]
                 let targetRow = min(rowIndex, leftColumn.count - 1)
                 targetWindow = leftColumn[targetRow]
-                print("[Axis] Moving focus LEFT to: \(targetWindow?.title ?? "unknown")")
             } else {
                 // If at the left edge, go to the monitor on the left
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .left)
-                print("[Axis] Moving focus to LEFT MONITOR")
             }
         case .right:
             if columnIndex < columns.count - 1 {
@@ -180,40 +175,32 @@ class TilingEngine: ObservableObject {
                 let rightColumn = columns[columnIndex + 1]
                 let targetRow = min(rowIndex, rightColumn.count - 1)
                 targetWindow = rightColumn[targetRow]
-                print("[Axis] Moving focus RIGHT to: \(targetWindow?.title ?? "unknown")")
             } else {
                 // If at the right edge, go to the monitor on the right
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .right)
-                print("[Axis] Moving focus to RIGHT MONITOR")
             }
         case .up:
             if rowIndex > 0 {
                 // The window above in the same column
                 targetWindow = columns[columnIndex][rowIndex - 1]
-                print("[Axis] Moving focus UP to: \(targetWindow?.title ?? "unknown")")
             } else {
                 // If at the top of the column, go to the monitor above
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .up)
-                print("[Axis] Moving focus to UP MONITOR")
             }
         case .down:
             if rowIndex < columns[columnIndex].count - 1 {
                 // The window below in the same column
                 targetWindow = columns[columnIndex][rowIndex + 1]
-                print("[Axis] Moving focus DOWN to: \(targetWindow?.title ?? "unknown")")
             } else {
                 // If at the bottom of the column, go to the monitor below
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .down)
-                print("[Axis] Moving focus to DOWN MONITOR")
             }
         }
 
         if let target = targetWindow {
             target.focus()
             moveCursorToWindow(target)
-            print("[Axis] Focused window: \(target.title)")
         } else {
-            print("[Axis] No target window found")
         }
     }
 
@@ -230,7 +217,6 @@ class TilingEngine: ObservableObject {
 
             // CGWarpMouseCursorPosition uses a top-left origin, so it can be used as-is
             CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
-            print("[Axis] Moved cursor to window center: (\(centerX), \(centerY))")
         }
     }
 
@@ -318,7 +304,6 @@ class TilingEngine: ObservableObject {
                 }
             }
         case .up:
-            print("[Axis] moveWindow UP: rowIndex=\(rowIndex), columnCount=\(columns[columnIndex].count)")
             if rowIndex > 0 {
                 // Move up within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex - 1)
@@ -336,16 +321,12 @@ class TilingEngine: ObservableObject {
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the top of the column, move to the monitor above (added at the far left)
-                print("[Axis] moveWindow UP: At top of column, looking for adjacent screen")
                 if let upScreen = getAdjacentScreen(from: screen, direction: .up) {
-                    print("[Axis] moveWindow UP: Found up screen, moving window")
                     moveWindowToScreen(currentWindow, from: screen, to: upScreen, position: .left)
                 } else {
-                    print("[Axis] moveWindow UP: No adjacent screen found")
                 }
             }
         case .down:
-            print("[Axis] moveWindow DOWN: rowIndex=\(rowIndex), columnCount=\(columns[columnIndex].count)")
             if rowIndex < columns[columnIndex].count - 1 {
                 // Move down within the same column
                 columns[columnIndex].swapAt(rowIndex, rowIndex + 1)
@@ -363,12 +344,9 @@ class TilingEngine: ObservableObject {
                 applyColumnTiling(columns: columns, on: screen)
             } else {
                 // If at the bottom of the column, move to the monitor below (added at the far left)
-                print("[Axis] moveWindow DOWN: At bottom of column, looking for adjacent screen")
                 if let downScreen = getAdjacentScreen(from: screen, direction: .down) {
-                    print("[Axis] moveWindow DOWN: Found down screen, moving window")
                     moveWindowToScreen(currentWindow, from: screen, to: downScreen, position: .left)
                 } else {
-                    print("[Axis] moveWindow DOWN: No adjacent screen found")
                 }
             }
         }
@@ -380,7 +358,6 @@ class TilingEngine: ObservableObject {
 
     /// Move the window to another screen
     private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
-        print("[Axis] Moving window to \(position == .left ? "left" : "right") of target screen")
         let sourceID = ScreenIdentifier(from: sourceScreen)
         let targetID = ScreenIdentifier(from: targetScreen)
 
@@ -430,17 +407,14 @@ class TilingEngine: ObservableObject {
 
     /// Move multiple windows in the given direction (for window-selection mode)
     func moveWindows(windowIDs: Set<CGWindowID>, direction: Direction) {
-        print("[Axis] moveWindows called, direction: \(direction), windowIDs: \(windowIDs)")
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] moveWindows: No focused window or screen")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
 
         var columns = tiledWindows[screenID] ?? []
-        print("[Axis] moveWindows: columns count = \(columns.count)")
 
         // Get the position of the selected window
         var selectedPositions: [(columnIndex: Int, rowIndex: Int, window: WindowInfo)] = []
@@ -452,10 +426,8 @@ class TilingEngine: ObservableObject {
             }
         }
 
-        print("[Axis] moveWindows: selectedPositions count = \(selectedPositions.count)")
 
         guard !selectedPositions.isEmpty else {
-            print("[Axis] moveWindows: No selected windows found in tiledWindows")
             return
         }
 
@@ -466,7 +438,6 @@ class TilingEngine: ObservableObject {
         case .left:
             // Move left: swap the selected column with the unselected column to its left
             guard let firstSelectedIdx = selectedColumnIndices.first, firstSelectedIdx > 0 else {
-                print("[Axis] moveWindows: Already at leftmost position")
                 return
             }
 
@@ -490,7 +461,6 @@ class TilingEngine: ObservableObject {
         case .right:
             // Move right: swap the selected column with the unselected column to its right
             guard let lastSelectedIdx = selectedColumnIndices.last, lastSelectedIdx < columns.count - 1 else {
-                print("[Axis] moveWindows: Already at rightmost position")
                 return
             }
 
@@ -539,16 +509,13 @@ class TilingEngine: ObservableObject {
 
         // Keep focus as is
         focusedWindow.focus()
-        print("[Axis] moveWindows: completed")
     }
 
     /// Put every window back into its own column (reset the vertical split)
     func resetToSingleWindowColumns() {
-        print("[Axis] resetToSingleWindowColumns called")
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] resetToSingleWindowColumns: No focused window or screen")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
@@ -559,23 +526,19 @@ class TilingEngine: ObservableObject {
         let allWindows = columns.flatMap { $0 }
         let newColumns = allWindows.map { [$0] }
 
-        print("[Axis] resetToSingleWindowColumns: resetting \(allWindows.count) windows to single columns")
 
         tiledWindows[screenID] = newColumns
         applyColumnTiling(columns: newColumns, on: screen)
 
         // Keep focus as is
         focusedWindow.focus()
-        print("[Axis] resetToSingleWindowColumns: completed")
     }
 
     /// Merge the selected windows into a single column (stack them vertically)
     func mergeWindowsIntoColumn(windowIDs: Set<CGWindowID>) {
-        print("[Axis] mergeWindowsIntoColumn called, windowIDs: \(windowIDs)")
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] mergeWindowsIntoColumn: No focused window or screen")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
@@ -599,11 +562,9 @@ class TilingEngine: ObservableObject {
         }
 
         guard !selectedWindows.isEmpty, let targetCol = targetColumnIndex else {
-            print("[Axis] mergeWindowsIntoColumn: No selected windows found")
             return
         }
 
-        print("[Axis] mergeWindowsIntoColumn: merging \(selectedWindows.count) windows into column \(targetCol)")
 
         // Remove the selected windows from all columns
         for colIdx in 0..<columns.count {
@@ -631,16 +592,13 @@ class TilingEngine: ObservableObject {
 
         // Keep focus as is
         focusedWindow.focus()
-        print("[Axis] mergeWindowsIntoColumn: completed")
     }
 
     /// Split the selected windows into individual columns (undo the vertical split)
     func splitWindowsToColumns(windowIDs: Set<CGWindowID>) {
-        print("[Axis] splitWindowsToColumns called, windowIDs: \(windowIDs)")
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] splitWindowsToColumns: No focused window or screen")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
@@ -664,11 +622,9 @@ class TilingEngine: ObservableObject {
         }
 
         guard !selectedWindows.isEmpty, let insertIndex = firstColumnIndex else {
-            print("[Axis] splitWindowsToColumns: No selected windows found")
             return
         }
 
-        print("[Axis] splitWindowsToColumns: splitting \(selectedWindows.count) windows starting at column \(insertIndex)")
 
         // Remove the selected windows from all columns
         for colIdx in 0..<columns.count {
@@ -698,7 +654,6 @@ class TilingEngine: ObservableObject {
 
         // Keep focus as is
         focusedWindow.focus()
-        print("[Axis] splitWindowsToColumns: completed")
     }
     
     // MARK: - Private Methods
@@ -867,11 +822,8 @@ class TilingEngine: ObservableObject {
 
         let windowCenterInNSScreen = CGPoint(x: windowCenterX, y: windowCenterY)
 
-        print("[Axis] getScreen: window frame (AX)=\(window.frame)")
-        print("[Axis] getScreen: windowCenter (NSScreen)=\(windowCenterInNSScreen)")
 
         for screen in NSScreen.screens {
-            print("[Axis] getScreen: checking screen frame=\(screen.frame), contains=\(screen.frame.contains(windowCenterInNSScreen))")
         }
 
         return NSScreen.screens.first { screen in
@@ -916,12 +868,10 @@ class TilingEngine: ObservableObject {
     private func getAdjacentScreen(from screen: NSScreen, direction: Direction) -> NSScreen? {
         let currentFrame = screen.frame
 
-        print("[Axis] getAdjacentScreen: direction=\(direction), currentFrame=\(currentFrame)")
 
         for otherScreen in NSScreen.screens {
             guard otherScreen != screen else { continue }
             let otherFrame = otherScreen.frame
-            print("[Axis] Checking screen: otherFrame=\(otherFrame)")
         }
 
         return NSScreen.screens.first { otherScreen in
@@ -943,13 +893,11 @@ class TilingEngine: ObservableObject {
                 // Whether it's above the current screen (NSScreen's origin is bottom-left, Y increases upward)
                 let isAbove = otherFrame.minY >= currentFrame.maxY - 1
                 let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
-                print("[Axis] UP check: isAbove=\(isAbove), hasXOverlap=\(hasXOverlap)")
                 return isAbove && hasXOverlap
             case .down:
                 // Whether it's below the current screen
                 let isBelow = otherFrame.maxY <= currentFrame.minY + 1
                 let hasXOverlap = otherFrame.minX < currentFrame.maxX && otherFrame.maxX > currentFrame.minX
-                print("[Axis] DOWN check: isBelow=\(isBelow), hasXOverlap=\(hasXOverlap)")
                 return isBelow && hasXOverlap
             }
         }
@@ -976,7 +924,6 @@ class TilingEngine: ObservableObject {
         guard columns.count > 1 else { return }
         guard columnIndex >= 0 && columnIndex < columns.count - 1 else { return }
 
-        print("[Axis] resizeColumnGap: columnIndex=\(columnIndex), delta=\(delta)")
 
         // Get or initialize the current ratio
         var ratios = columnWidthRatios[screenID] ?? Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
@@ -1003,7 +950,6 @@ class TilingEngine: ObservableObject {
 
         // Check that it doesn't fall below the minimum ratio
         guard newLeftRatio >= minRatio && newRightRatio >= minRatio else {
-            print("[Axis] resizeColumnGap: ratio limit reached")
             return
         }
 
@@ -1032,7 +978,6 @@ class TilingEngine: ObservableObject {
         guard column.count > 1 else { return }
         guard rowIndex >= 0 && rowIndex < column.count - 1 else { return }
 
-        print("[Axis] resizeRowGap: columnIndex=\(columnIndex), rowIndex=\(rowIndex), delta=\(delta)")
 
         // Get or initialize the current row height ratio
         var allRowRatios = rowHeightRatios[screenID] ?? [:]
@@ -1060,7 +1005,6 @@ class TilingEngine: ObservableObject {
 
         // Check that it doesn't fall below the minimum ratio
         guard newUpperRatio >= minRatio && newLowerRatio >= minRatio else {
-            print("[Axis] resizeRowGap: ratio limit reached")
             return
         }
 
@@ -1235,7 +1179,6 @@ class TilingEngine: ObservableObject {
     func resizeCurrentWindow(increase: Bool) {
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow) else {
-            print("[Axis] resizeCurrentWindow: No focused window or screen")
             return
         }
         let screenID = ScreenIdentifier(from: screen)
@@ -1248,13 +1191,11 @@ class TilingEngine: ObservableObject {
         }.filter { !$0.isEmpty }
 
         guard let (columnIndex, _) = findWindowPosition(window: focusedWindow, in: columns) else {
-            print("[Axis] resizeCurrentWindow: Window not in tiled windows")
             return
         }
         
         // Can't resize when there's only one column
         guard columns.count > 1 else {
-            print("[Axis] resizeCurrentWindow: Only one column, cannot resize")
             return
         }
         
@@ -1285,7 +1226,6 @@ class TilingEngine: ObservableObject {
             
             // Minimum ratio check
             guard newLeft >= minRatio && newRight >= minRatio && newCurrent >= minRatio else {
-                print("[Axis] resizeCurrentWindow: ratio limit reached")
                 return
             }
             
@@ -1299,7 +1239,6 @@ class TilingEngine: ObservableObject {
             let newCurrent = ratios[columnIndex] + delta
             
             guard newLeft >= minRatio && newCurrent >= minRatio else {
-                print("[Axis] resizeCurrentWindow: ratio limit reached (left edge)")
                 return
             }
             
@@ -1312,7 +1251,6 @@ class TilingEngine: ObservableObject {
             let newCurrent = ratios[columnIndex] + delta
             
             guard newRight >= minRatio && newCurrent >= minRatio else {
-                print("[Axis] resizeCurrentWindow: ratio limit reached (right edge)")
                 return
             }
             
@@ -1323,7 +1261,6 @@ class TilingEngine: ObservableObject {
         // Save the ratios
         columnWidthRatios[screenID] = ratios
         
-        print("[Axis] resizeCurrentWindow: new ratios = \(ratios)")
         
         // Reapply tiling
         applyColumnTilingWithRatios(columns: columns, ratios: ratios, on: screen)

@@ -75,18 +75,15 @@ class WindowSelectManager: ObservableObject {
     
     /// Move the selected windows in the given direction
     func moveSelectedWindows(direction: Direction) {
-        print("[Axis] moveSelectedWindows called, direction: \(direction), selected: \(selectedWindowIDs.count)")
 
         guard !selectedWindowIDs.isEmpty else {
             // Fall back to normal movement if nothing is selected
-            print("[Axis] No selection, using normal move")
             tilingEngine.moveWindow(direction: direction)
             return
         }
 
         // Move the selected windows
         tilingEngine.moveWindows(windowIDs: selectedWindowIDs, direction: direction)
-        print("[Axis] moveSelectedWindows: completed")
 
         // Also try updating once right after the move
         updateOverlays()
@@ -99,17 +96,14 @@ class WindowSelectManager: ObservableObject {
 
     /// Merge the selected windows into a single column (stack them vertically)
     func mergeSelectedWindowsVertically() {
-        print("[Axis] mergeSelectedWindowsVertically called, selected: \(selectedWindowIDs.count)")
 
         guard selectedWindowIDs.count >= 2 else {
             // Do nothing unless at least two items are selected
-            print("[Axis] Need at least 2 windows to merge")
             return
         }
 
         // Merge the selected windows
         tilingEngine.mergeWindowsIntoColumn(windowIDs: selectedWindowIDs)
-        print("[Axis] mergeSelectedWindowsVertically: completed")
 
         // Update the overlay after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -121,17 +115,14 @@ class WindowSelectManager: ObservableObject {
 
     /// Split the selected windows into individual columns (undo the vertical split)
     func splitSelectedWindowsToColumns() {
-        print("[Axis] splitSelectedWindowsToColumns called, selected: \(selectedWindowIDs.count)")
 
         guard selectedWindowIDs.count >= 1 else {
             // Do nothing unless at least one item is selected
-            print("[Axis] Need at least 1 window to split")
             return
         }
 
         // Split the selected windows into individual columns
         tilingEngine.splitWindowsToColumns(windowIDs: selectedWindowIDs)
-        print("[Axis] splitSelectedWindowsToColumns: completed")
 
         // Update the overlay after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -177,7 +168,6 @@ class WindowSelectManager: ObservableObject {
     }
     
     private func performOverlayUpdate() {
-        print("[Axis] Updating overlays, selected count: \(selectedWindowIDs.count)")
         
         // First update the existing overlay
         let allWindows = accessibilityManager.getAllWindows()
@@ -204,7 +194,6 @@ class WindowSelectManager: ObservableObject {
         // Create or update the overlay for the target window
         for windowID in targetWindowIDs {
             guard let windowInfo = windowDict[windowID] else {
-                print("[Axis] Window not found for ID: \(windowID)")
                 continue
             }
             
@@ -245,7 +234,6 @@ class WindowSelectManager: ObservableObject {
             height: windowInfo.frame.height + (padding * 2)
         )
         
-        print("[Axis] Creating overlay at frame: \(frame)")
         
         let overlay = NSWindow(
             contentRect: frame,
@@ -292,7 +280,6 @@ class WindowSelectManager: ObservableObject {
     }
     
     private func removeAllOverlays() {
-        print("[Axis] Removing all overlays")
         let overlaysCopy = overlayWindows
         overlayWindows.removeAll()
         
