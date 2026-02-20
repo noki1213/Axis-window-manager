@@ -78,11 +78,9 @@ class GapSelectManager: ObservableObject {
 
 	/// Start gap-selection mode
 	func startGapSelectMode() {
-		print("[Axis] GapSelectManager: startGapSelectMode")
 
 		// Get the current screen
 		guard let screen = getCurrentScreen() else {
-			print("[Axis] GapSelectManager: No current screen")
 			return
 		}
 
@@ -90,7 +88,6 @@ class GapSelectManager: ObservableObject {
 		calculateGaps(for: screen)
 
 		guard !availableGaps.isEmpty else {
-			print("[Axis] GapSelectManager: No gaps available")
 			return
 		}
 
@@ -107,7 +104,6 @@ class GapSelectManager: ObservableObject {
 
 	/// End gap-selection mode
 	func endGapSelectMode() {
-		print("[Axis] GapSelectManager: endGapSelectMode")
 
 		// Hide the overlay
 		hideOverlay()
@@ -126,7 +122,6 @@ class GapSelectManager: ObservableObject {
 		guard state == .selecting else { return }
 		guard !availableGaps.isEmpty else { return }
 
-		print("[Axis] GapSelectManager: moveToNextGap direction=\(direction)")
 
 		// Find the next gap based on direction
 		let currentGap = selectedGap
@@ -165,7 +160,6 @@ class GapSelectManager: ObservableObject {
 		if let newIndex = bestIndex {
 			selectedGapIndex = newIndex
 			updateOverlay()
-			print("[Axis] GapSelectManager: moved to gap \(newIndex)")
 		}
 	}
 
@@ -180,7 +174,6 @@ class GapSelectManager: ObservableObject {
 
 		guard selectedGap != nil else { return false }
 
-		print("[Axis] GapSelectManager: selectCurrentGap - entering resize mode")
 		state = .resizing
 		updateOverlay()
 		return false
@@ -258,7 +251,6 @@ class GapSelectManager: ObservableObject {
 
 	/// Confirm the resize
 	private func confirmResize() {
-		print("[Axis] GapSelectManager: confirmResize")
 		state = .selecting
 		updateOverlay()
 	}
@@ -268,7 +260,6 @@ class GapSelectManager: ObservableObject {
 		guard state == .resizing else { return }
 		guard let gap = selectedGap else { return }
 
-		print("[Axis] GapSelectManager: moveGap direction=\(direction)")
 
 		// Movement amount (pixels)
 		let moveAmount: CGFloat = 50
@@ -392,7 +383,6 @@ class GapSelectManager: ObservableObject {
 		}
 
 		availableGaps = gaps
-		print("[Axis] GapSelectManager: calculated \(gaps.count) gaps")
 	}
 
 	/// Show the overlay

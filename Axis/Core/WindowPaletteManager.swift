@@ -58,7 +58,6 @@ class WindowPaletteManager {
 		displays = collectDisplays()
 
 		guard !displays.isEmpty else {
-			print("[Axis] WindowPalette: ウィンドウが見つかりません")
 			return
 		}
 
@@ -82,7 +81,6 @@ class WindowPaletteManager {
 		panel?.showWithDisplays(displays, displayIndex: 0, spaceIndex: 0, itemIndex: 0)
 
 		let totalWindows = displays.flatMap { $0.spaces }.flatMap { $0.items }.count
-		print("[Axis] WindowPalette: 開始（\(displays.count) Display、\(totalWindows) ウィンドウ）")
 	}
 
 	/// End palette mode (cancel)
@@ -105,7 +103,6 @@ class WindowPaletteManager {
 		selectedDisplayIndex = 0
 		selectedSpaceIndex = 0
 		selectedItemIndex = 0
-		print("[Axis] WindowPalette: キャンセル")
 	}
 
 	/// Move up (to the previous Space within the same Display)
@@ -229,7 +226,6 @@ class WindowPaletteManager {
 			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
 		}
 
-		print("[Axis] WindowPalette: 確定（\(selectedItem.appName) - \(selectedItem.windowTitle)）")
 	}
 
 	// MARK: - Private Methods
@@ -344,7 +340,6 @@ class WindowPaletteManager {
 			}
 		}
 
-		print("[Axis] WindowPalette: \(hiddenWindowFrames.count) ウィンドウを退避")
 	}
 
 	/// Return the stashed window to its original position
@@ -359,7 +354,6 @@ class WindowPaletteManager {
 
 		let count = hiddenWindowFrames.count
 		hiddenWindowFrames.removeAll()
-		print("[Axis] WindowPalette: \(count) ウィンドウを復元")
 	}
 
 	// MARK: - Data Collection
@@ -444,7 +438,6 @@ class WindowPaletteManager {
 	/// Switch to the selected window's workspace and focus it
 	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
 		guard let screen = workspaceManager.screen(for: item.screenID) else {
-			print("[Axis] WindowPalette: 対象モニターが見つかりません")
 			return
 		}
 

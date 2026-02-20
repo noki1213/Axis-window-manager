@@ -136,10 +136,8 @@ class WorkspaceManager: ObservableObject {
 	func toggleHover(windowID: CGWindowID) {
 		if hoverWindowIDs.contains(windowID) {
 			hoverWindowIDs.remove(windowID)
-			print("[Axis] WorkspaceManager: Hover OFF for window \(windowID)")
 		} else {
 			hoverWindowIDs.insert(windowID)
-			print("[Axis] WorkspaceManager: Hover ON for window \(windowID)")
 		}
 	}
 
@@ -196,7 +194,6 @@ class WorkspaceManager: ObservableObject {
 		}
 		workspaceWindows[targetID]?[targetWS]?.insert(windowID)
 
-		print("[Axis] WorkspaceManager: Moved window \(windowID) from screen \(sourceID.displayID)/ws\(sourceWS) to screen \(targetID.displayID)/ws\(targetWS)")
 	}
 
 	/// Register a new window to the current workspace
@@ -211,7 +208,6 @@ class WorkspaceManager: ObservableObject {
 			workspaceWindows[id]?[workspace] = []
 		}
 		workspaceWindows[id]?[workspace]?.insert(windowID)
-		print("[Axis] WorkspaceManager: Registered window \(windowID) to workspace \(workspace) on screen \(id.displayID)")
 	}
 
 	/// Check whether the window is already registered to any workspace
@@ -340,7 +336,6 @@ class WorkspaceManager: ObservableObject {
 			} else {
 				// Delete it if empty
 				hasChanges = true
-				print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
 			}
 		}
 
@@ -359,13 +354,11 @@ class WorkspaceManager: ObservableObject {
 			} else {
 				// To be removed
 				hasChanges = true
-				print("[Axis] WorkspaceManager: Removing empty workspace \(oldID) on screen \(id.displayID)")
 			}
 		}
 
 		guard hasChanges else { return }
 
-		print("[Axis] WorkspaceManager: Reordering workspaces on screen \(id.displayID)...")
 
 		// Rebuild the data with the new ID
 		var newWorkspaceWindows: [Int: Set<CGWindowID>] = [:]
@@ -392,7 +385,6 @@ class WorkspaceManager: ObservableObject {
 				// When the spot this window was at has moved (or stayed the same)
 				activeWorkspace[id] = newActive
 				if currentActive != newActive {
-					print("[Axis] WorkspaceManager: Active workspace changed \(currentActive) -> \(newActive)")
 				}
 			} else {
 				// When the spot this window was at has been deleted
@@ -400,12 +392,10 @@ class WorkspaceManager: ObservableObject {
 				// If it was in a positive space and got deleted, clamp it to the max value
 				if currentActive < 0 {
 					activeWorkspace[id] = 0
-					print("[Axis] WorkspaceManager: Active workspace \(currentActive) was removed, moved to 0")
 				} else {
 					let maxID = max(0, nextID - 1)
 					let newActive = min(currentActive, maxID)
 					activeWorkspace[id] = newActive
-					print("[Axis] WorkspaceManager: Active workspace was removed, moved to \(newActive)")
 				}
 			}
 		}
@@ -440,7 +430,6 @@ class WorkspaceManager: ObservableObject {
 			cachedWindowIDs: allCachedIDs,
 			windowIdentityCache: windowIdentityCache
 		)
-		print("[Axis] closedWindowsCache: スナップショットを保存（\(allCachedIDs.count) 個のウィンドウ）")
 	}
 
 	/// Check whether a newly detected window is in the cache, and restore it
@@ -457,7 +446,6 @@ class WorkspaceManager: ObservableObject {
 		guard cache.cachedWindowIDs.contains(detectedWindowID) else { return false }
 
 		// Restore everything from the cache
-		print("[Axis] closedWindowsCache: ウィンドウ \(detectedWindowID) がキャッシュに見つかりました。全体を復元します")
 
 		workspaceWindows = cache.workspaceWindows
 		savedFrames = cache.savedFrames
@@ -477,7 +465,6 @@ class WorkspaceManager: ObservableObject {
 	func resetClosedWindowsCache() {
 		if closedWindowsCache != nil {
 			closedWindowsCache = nil
-			print("[Axis] closedWindowsCache: ユーザー操作によりキャッシュをリセット")
 		}
 	}
 
@@ -488,12 +475,18 @@ class WorkspaceManager: ObservableObject {
 		// Skip reinitializing on Space change if we already restored from saved data
 		// (So we don't overwrite the restore result right after launch)
 		if didRestoreStateFromDisk {
-			print("[Axis] WorkspaceManager: Skip initializeWithCurrentWindows (restored from disk)")
 			return
 		}
 
+
 		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+
+		for (i, screen) in NSScreen.screens.enumerated() {
+			let sid = screenIdentifier(for: screen)
+		}
+
+		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 
 		for screen in NSScreen.screens {
 			let id = screenIdentifier(for: screen)
@@ -504,10 +497,12 @@ class WorkspaceManager: ObservableObject {
 			}
 			workspaceWindows[id]?[0] = []
 
-			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-
 			for window in allWindows {
-				guard window.shouldBeManaged() && !window.shouldFloat() && onScreenIDs.contains(window.id) else {
+				let managed = window.shouldBeManaged()
+				let floating = window.shouldFloat()
+				let onScreen = onScreenIDs.contains(window.id)
+
+				if !managed || floating || !onScreen {
 					continue
 				}
 
@@ -516,20 +511,20 @@ class WorkspaceManager: ObservableObject {
 				let windowCenterY = mainScreenHeight - window.frame.midY
 				let windowCenter = CGPoint(x: windowCenterX, y: windowCenterY)
 
-				if screen.frame.contains(windowCenter) {
+				let contains = screen.frame.contains(windowCenter)
+
+				if contains {
 					workspaceWindows[id]?[0]?.insert(window.id)
 				}
 			}
 
 			let count = workspaceWindows[id]?[0]?.count ?? 0
-			print("[Axis] WorkspaceManager: Initialized screen \(id.displayID) with \(count) windows on workspace 0")
 		}
 	}
 
 	/// Force re-initialization if the state is broken (for the watchdog)
 	/// Reset didRestoreStateFromDisk and re-register every window to workspace 0
 	func forceReinitialize() {
-		print("[Axis] WorkspaceManager: 強制再初期化を実行")
 
 		// Clear the state
 		didRestoreStateFromDisk = false
@@ -557,11 +552,9 @@ class WorkspaceManager: ObservableObject {
 
 		// Do nothing if it's the same workspace
 		guard workspace != currentWS else {
-			print("[Axis] WorkspaceManager: Already on workspace \(workspace)")
 			return
 		}
 
-		print("[Axis] WorkspaceManager: Switching workspace \(currentWS) -> \(workspace) on screen \(id.displayID)")
 
 		// Set the switching-in-progress flag (prevents checkForWindowChanges from misfiring)
 		isSwitching = true
@@ -586,7 +579,6 @@ class WorkspaceManager: ObservableObject {
 				workspaceWindows[id] = [:]
 			}
 			workspaceWindows[id]?[workspace] = []
-			print("[Axis] WorkspaceManager: Created new workspace \(workspace)")
 		}
 
 		// 4. Restore the destination workspace's TilingEngine state
@@ -624,7 +616,6 @@ class WorkspaceManager: ObservableObject {
 		// 11. Save the workspace state to a file
 		saveStateToDisk()
 
-		print("[Axis] WorkspaceManager: Switched to workspace \(workspace)")
 	}
 
 	/// Move to the next workspace (+1)
@@ -656,7 +647,6 @@ class WorkspaceManager: ObservableObject {
 		// Do nothing if it's the same workspace
 		guard workspace != currentWS else { return }
 
-		print("[Axis] WorkspaceManager: Moving window \(windowID) from workspace \(currentWS) to \(workspace)")
 
 		// Set the switching-in-progress flag
 		isSwitching = true
@@ -869,7 +859,6 @@ class WorkspaceManager: ObservableObject {
 				}
 			}
 		}
-		print("[Axis] WorkspaceManager: Hidden \(windowIDs.count) windows for workspace \(workspace) using corner: \(corner)")
 	}
 
 	/// Restore every workspace's hidden windows to their original positions (used when the app quits)
@@ -886,7 +875,6 @@ class WorkspaceManager: ObservableObject {
 			}
 		}
 
-		print("[Axis] WorkspaceManager: 終了前に \(restoredCount) 個のウィンドウを復元")
 		savedFrames.removeAll()
 	}
 
@@ -904,7 +892,6 @@ class WorkspaceManager: ObservableObject {
 				}
 			}
 		}
-		print("[Axis] WorkspaceManager: Shown \(windowIDs.count) windows for workspace \(workspace)")
 	}
 
 	/// Move a single window to the corner and hide it
@@ -952,7 +939,6 @@ class WorkspaceManager: ObservableObject {
 		for window in allWindows {
 			if windowIDs.contains(window.id) {
 				window.focus()
-				print("[Axis] WorkspaceManager: Focused window '\(window.title)' in workspace \(workspace)")
 				return
 			}
 		}
@@ -964,12 +950,10 @@ class WorkspaceManager: ObservableObject {
 		for window in allWindows {
 			if window.id == windowID {
 				window.focus()
-				print("[Axis] WorkspaceManager: Focused window '\(window.title)' (ID: \(windowID)) in workspace \(workspace)")
 				return
 			}
 		}
 		// If the specified window can't be found, focus the first window instead
-		print("[Axis] WorkspaceManager: Window ID \(windowID) not found, focusing first window instead")
 		focusFirstWindow(in: workspace, on: screenID)
 	}
 
@@ -984,17 +968,14 @@ class WorkspaceManager: ObservableObject {
 		}
 		tilingSnapshots[screenID]?[workspace] = state
 
-		print("[Axis] WorkspaceManager: Saved tiling state for workspace \(workspace)")
 	}
 
 	/// Restore the saved TilingEngine state
 	private func restoreTilingState(for screenID: ScreenIdentifier, workspace: Int, on screen: NSScreen) {
 		if let snapshot = tilingSnapshots[screenID]?[workspace] {
 			tilingEngine.restoreTilingStateForScreen(screen, snapshot: snapshot)
-			print("[Axis] WorkspaceManager: Restored tiling state for workspace \(workspace)")
 		} else {
 			tilingEngine.clearTilingStateForScreen(screen)
-			print("[Axis] WorkspaceManager: Cleared tiling state for new workspace \(workspace)")
 		}
 	}
 
@@ -1061,7 +1042,6 @@ class WorkspaceManager: ObservableObject {
 	/// Handling for when a monitor is disconnected
 	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
 	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
-		print("[Axis] handleScreenDisconnected: \(removedScreenID.displayID)")
 
 		// Exit the special mode
 		if ZenModeManager.shared.isActive {
@@ -1076,7 +1056,6 @@ class WorkspaceManager: ObservableObject {
 
 		// Decide the destination monitor (normally the MacBook's built-in display)
 		guard let targetScreen = NSScreen.screens.first else {
-			print("[Axis] handleScreenDisconnected: 残りのモニターがありません")
 			isSwitching = false
 			return
 		}
@@ -1122,7 +1101,6 @@ class WorkspaceManager: ObservableObject {
 				tilingSnapshots[targetScreenID]?[nextNewWS] = snapshot
 			}
 
-			print("[Axis] ワークスペース移行: モニター \(removedScreenID.displayID) WS \(oldWS) → モニター \(targetScreenID.displayID) WS \(nextNewWS)（\(windowIDs.count) 個のウィンドウ）")
 
 			nextNewWS += 1
 		}
@@ -1166,7 +1144,6 @@ class WorkspaceManager: ObservableObject {
 			self?.isSwitching = false
 		}
 
-		print("[Axis] handleScreenDisconnected: 完了。\(allMigratedWindowIDs.count) 個のウィンドウを移行")
 	}
 
 	// MARK: - Re-matching window IDs after waking from sleep
@@ -1179,7 +1156,6 @@ class WorkspaceManager: ObservableObject {
 			$0.shouldBeManaged() && !$0.shouldFloat()
 		}
 
-		print("[Axis] Wake再照合: 現在のウィンドウ \(managedWindows.count) 個")
 
 		// Group the current windows into a bundleID+title -> [WindowInfo] dictionary
 		var exactPool: [String: [WindowInfo]] = [:]
@@ -1213,12 +1189,11 @@ class WorkspaceManager: ObservableObject {
 
 					// ID has changed -> match against the cached info
 					guard let cached = windowIdentityCache[oldID] else {
-						print("[Axis] Wake再照合: ID=\(oldID) のキャッシュなし、スキップ")
 						continue
 					}
 
 					// Step 1: exact match on bundleID + title
-					let exactKey = cached.bundleID + "||" + cached.title
+					let exactKey = cached.bundleID + "||" + cached.title
 					if var candidates = exactPool[exactKey],
 					   let idx = candidates.firstIndex(where: { !usedNewIDs.contains($0.id) }) {
 						let newWindow = candidates[idx]
@@ -1232,7 +1207,6 @@ class WorkspaceManager: ObservableObject {
 						usedNewIDs.insert(newWindow.id)
 						idMapping[oldID] = newWindow.id
 						hasChanges = true
-						print("[Axis] Wake再照合(完全一致): \(cached.bundleID)/\(cached.title) ID \(oldID) → \(newWindow.id)")
 						continue
 					}
 
@@ -1245,18 +1219,15 @@ class WorkspaceManager: ObservableObject {
 						usedNewIDs.insert(newWindow.id)
 						idMapping[oldID] = newWindow.id
 						hasChanges = true
-						print("[Axis] Wake再照合(bundleID): \(cached.bundleID) ID \(oldID) → \(newWindow.id)")
 						continue
 					}
 
 					// Couldn't be matched (the window may have been closed)
-					print("[Axis] Wake再照合: ID=\(oldID) (\(cached.bundleID)/\(cached.title)) の照合先なし")
 				}
 			}
 		}
 
 		guard hasChanges else {
-			print("[Axis] Wake再照合: ID の変更なし")
 			return
 		}
 
@@ -1330,7 +1301,6 @@ class WorkspaceManager: ObservableObject {
 							workspaceWindows[screenID]?[0] = []
 						}
 						workspaceWindows[screenID]?[0]?.insert(window.id)
-						print("[Axis] Wake再照合: 新規ウィンドウ ID=\(window.id) をワークスペース 0 に追加")
 						break
 					}
 				}
@@ -1338,7 +1308,6 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		let totalRemapped = idMapping.filter { $0.key != $0.value }.count
-		print("[Axis] Wake再照合完了: \(totalRemapped) 個の ID を更新")
 	}
 
 	// MARK: - Persisting workspace state
@@ -1393,9 +1362,7 @@ class WorkspaceManager: ObservableObject {
 							savedFrame: frame
 						)
 						windowIdentities.append(identity)
-						print("[Axis] 保存: キャッシュからウィンドウ情報を使用 ID=\(windowID) \(cached.bundleID)/\(cached.title)")
 					} else {
-						print("[Axis] 保存: ウィンドウ情報が取得できません ID=\(windowID)")
 					}
 				}
 
@@ -1471,7 +1438,6 @@ class WorkspaceManager: ObservableObject {
 		// Safeguard: if not a single window could be saved,
 		// Don't overwrite good existing data with empty data
 		if totalSavedWindows == 0 {
-			print("[Axis] ワークスペース状態の保存をスキップ: ウィンドウ情報が0個（空データで上書きしない）")
 			return
 		}
 
@@ -1484,9 +1450,7 @@ class WorkspaceManager: ObservableObject {
 			encoder.outputFormatting = .prettyPrinted
 			let data = try encoder.encode(state)
 			try data.write(to: stateFilePath)
-			print("[Axis] ワークスペース状態を保存: \(totalSavedWindows) 個のウィンドウ → \(stateFilePath.path)")
 		} catch {
-			print("[Axis] ワークスペース状態の保存に失敗: \(error)")
 		}
 	}
 
@@ -1495,7 +1459,6 @@ class WorkspaceManager: ObservableObject {
 	@discardableResult
 	func restoreStateFromDisk() -> Bool {
 		guard FileManager.default.fileExists(atPath: stateFilePath.path) else {
-			print("[Axis] 保存ファイルが見つかりません: \(stateFilePath.path)")
 			return false
 		}
 
@@ -1506,7 +1469,6 @@ class WorkspaceManager: ObservableObject {
 			// Don't restore if the saved data has no windows at all
 			let totalSavedWindows = state.screenStates.flatMap { $0.workspaces }.flatMap { $0.windows }.count
 			guard totalSavedWindows > 0 else {
-				print("[Axis] 保存データにウィンドウがありません、復元をスキップ")
 				return false
 			}
 
@@ -1516,7 +1478,6 @@ class WorkspaceManager: ObservableObject {
 				$0.shouldBeManaged() && !$0.shouldFloat()
 			}
 
-			print("[Axis] 復元開始: 保存ウィンドウ \(totalSavedWindows) 個、現在のウィンドウ \(managedWindows.count) 個")
 
 			// --- Matching ---
 			// Step 1: match by exact bundleID + title
@@ -1572,7 +1533,6 @@ class WorkspaceManager: ObservableObject {
 					}
 					matchResults[reqIndex] = window
 					assignedWindowIDs.insert(window.id)
-					print("[Axis] 復元照合(完全一致): \(req.identity.bundleID) / \(req.identity.title) -> Window ID \(window.id)")
 				}
 			}
 
@@ -1587,7 +1547,6 @@ class WorkspaceManager: ObservableObject {
 						bundleIDPool[req.identity.bundleID] = candidates
 						matchResults[reqIndex] = window
 						assignedWindowIDs.insert(window.id)
-						print("[Axis] 復元照合(bundleID): \(req.identity.bundleID) / \(req.identity.title) -> Window ID \(window.id) (title: \(window.title))")
 					}
 				}
 			}
@@ -1598,7 +1557,6 @@ class WorkspaceManager: ObservableObject {
 
 				// Check whether this monitor is currently connected
 				guard let screen = screen(for: screenID) else {
-					print("[Axis] モニター \(screenState.displayID) は現在接続されていません、スキップ")
 					continue
 				}
 
@@ -1668,7 +1626,6 @@ class WorkspaceManager: ObservableObject {
 					)
 					tilingSnapshots[screenID]?[entry.number] = snapshot
 
-					print("[Axis] 復元: モニター \(screenState.displayID) WS \(entry.number) に \(matchedWindowIDs.count) 個のウィンドウを配置")
 				}
 
 				// Move windows outside the active workspace off-screen
@@ -1710,7 +1667,6 @@ class WorkspaceManager: ObservableObject {
 			// Place windows that couldn't be matched into workspace 0
 			let unassignedWindows = managedWindows.filter { !assignedWindowIDs.contains($0.id) }
 			if !unassignedWindows.isEmpty {
-				print("[Axis] 復元: \(unassignedWindows.count) 個のウィンドウが照合できず、ワークスペース 0 に配置")
 
 				let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 				for window in unassignedWindows {
@@ -1735,12 +1691,10 @@ class WorkspaceManager: ObservableObject {
 			}
 
 			let totalMatched = assignedWindowIDs.count
-			print("[Axis] ワークスペース状態の復元が完了: \(totalMatched)/\(totalSavedWindows) 個のウィンドウを照合")
 			didRestoreStateFromDisk = totalMatched > 0
 			return totalMatched > 0
 
 		} catch {
-			print("[Axis] ワークスペース状態の復元に失敗: \(error)")
 			didRestoreStateFromDisk = false
 			return false
 		}

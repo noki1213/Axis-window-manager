@@ -90,7 +90,6 @@ class HotkeyManager: ObservableObject {
 
 			// Try to re-enable the tap if it got disabled
 			if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-				print("[Axis] Event tap disabled by system (type: \(type.rawValue)). Re-enabling...")
 
 				// Re-enable it immediately
 				if let tap = hotkeyManager.eventTap {
@@ -146,7 +145,6 @@ class HotkeyManager: ObservableObject {
 			callback: callback,
 			userInfo: Unmanaged.passUnretained(self).toOpaque()
 		) else {
-			print("[Axis] Failed to create event tap. Make sure Accessibility permission is granted.")
 			return
 		}
 
@@ -156,7 +154,6 @@ class HotkeyManager: ObservableObject {
 		if let source = runLoopSource {
 			CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
 			CGEvent.tapEnable(tap: tap, enable: true)
-			print("[Axis] Event tap started successfully")
 		}
 	}
 
@@ -184,19 +181,16 @@ class HotkeyManager: ObservableObject {
 	private func checkEventTapHealth() {
 		guard let tap = eventTap else {
 			// Recreate it if nil
-			print("[Axis] Heartbeat: Event tap is missing. Restarting...")
 			setupEventTap()
 			return
 		}
 
 		// Check whether the tap is enabled
 		if !CGEvent.tapIsEnabled(tap: tap) {
-			print("[Axis] Heartbeat: Event tap is disabled. Re-enabling...")
 			CGEvent.tapEnable(tap: tap, enable: true)
 
 			// Recreate it if that still doesn't work
 			if !CGEvent.tapIsEnabled(tap: tap) {
-				print("[Axis] Heartbeat: Failed to re-enable. Recreating...")
 				stop()
 				start()
 			}
@@ -329,6 +323,7 @@ class HotkeyManager: ObservableObject {
 		// MARK: Quick gap resize
 		case .quickGapLeft:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
 					self?.currentMode = .gapSelect
 					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -336,6 +331,7 @@ class HotkeyManager: ObservableObject {
 			}
 		case .quickGapRight:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
 					self?.currentMode = .gapSelect
 					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -343,6 +339,7 @@ class HotkeyManager: ObservableObject {
 			}
 		case .quickGapUp:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
 					self?.currentMode = .gapSelect
 					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -350,6 +347,7 @@ class HotkeyManager: ObservableObject {
 			}
 		case .quickGapDown:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
 					self?.currentMode = .gapSelect
 					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -408,12 +406,14 @@ class HotkeyManager: ObservableObject {
 		// MARK: Mode switching
 		case .windowSelectMode:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				self?.currentMode = .windowSelect
 				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
 			}
 
 		case .gapSelectMode:
 			DispatchQueue.main.async { [weak self] in
+				guard !ZenModeManager.shared.isActive else { return }
 				self?.currentMode = .gapSelect
 				self?.gapSelectManager.startGapSelectMode()
 				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
@@ -441,12 +441,22 @@ class HotkeyManager: ObservableObject {
 
 		case .resizeIncrease:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.resizeCurrentWindow(increase: true)
+				if ZenModeManager.shared.isActive {
+					// Widen the width while in zen mode
+					ZenModeManager.shared.adjustWidth(increase: true)
+				} else {
+					self?.tilingEngine.resizeCurrentWindow(increase: true)
+				}
 			}
 
 		case .resizeDecrease:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.resizeCurrentWindow(increase: false)
+				if ZenModeManager.shared.isActive {
+					// Narrow the width while in zen mode
+					ZenModeManager.shared.adjustWidth(increase: false)
+				} else {
+					self?.tilingEngine.resizeCurrentWindow(increase: false)
+				}
 			}
 
 		// MARK: Monitor
