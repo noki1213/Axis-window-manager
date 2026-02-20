@@ -211,13 +211,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     window.setFrame(frame)
                 }
             }
-            print("[Axis] 終了処理: ZenMode のウィンドウを復元")
         }
 
         // 2. Restore windows hidden by the window palette
         if hotkeyManager.currentMode == .windowPalette {
             WindowPaletteManager.shared.endPalette()
-            print("[Axis] 終了処理: ウィンドウパレットのウィンドウを復元")
         }
 
         // 3. Restore windows hidden by the workspace
@@ -281,7 +279,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if rescuedCount > 0 {
-            print("[Axis] 終了処理: \(rescuedCount) 個の画面外ウィンドウを画面内に移動")
         }
     }
 
@@ -332,23 +329,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startWindowManagement() {
+
         // Start hotkey monitoring
         hotkeyManager.start()
 
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+        for (i, screen) in NSScreen.screens.enumerated() {
+            let sid = ScreenIdentifier(from: screen)
+        }
 
         // Rescue off-screen windows right after launch (a fallback for when the previous quit couldn't restore them)
         rescueOffScreenWindows()
 
-        // Initialize the workspace (restore from saved data if present, otherwise initialize fresh)
+        // Initialize workspaces (respecting windows' current positions, registering them to workspace 0 on each monitor)
+        // Don't use the saved data's monitor assignment (it would move the window to a different monitor)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
-            let restored = self.workspaceManager.restoreStateFromDisk()
-            if !restored {
-                // If there's no saved data, do the normal initialization (register all windows to workspace 0)
-                self.workspaceManager.initializeWithCurrentWindows()
-            }
+            self.workspaceManager.initializeWithCurrentWindows()
         }
 
         // Run the initial tiling
@@ -436,32 +434,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkForWindowChanges() {
         // Skip while a Space switch, workspace switch, monitor-change handling, or wake-from-sleep is in progress
         guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange && !isWaking else {
-            print("[Axis] Skipping window check during switching")
             return
         }
 
         // Skip automatic tiling while Zen mode is active (guards against input-source switches like the eisu key)
-        guard !ZenModeManager.shared.isActive else {
-            return
+        // However, if a window change occurred, automatically exit Zen mode and return to normal tiling
+        if ZenModeManager.shared.isActive {
+            let onScreenIDsZen = accessibilityManager.getOnScreenWindowIDs()
+            let allWindowsZen = accessibilityManager.getAllWindows()
+            let currentCountZen = allWindowsZen.filter { onScreenIDsZen.contains($0.id) && $0.shouldBeManaged() }.count
+
+            guard currentCountZen != lastWindowCount else {
+                return
+            }
+
+            // Window changed → exit Zen mode and return to normal tiling
+            ZenModeManager.shared.exit()
+            // Continue with the normal window-change handling after this
         }
 
         // Skip everything while the lock screen (loginwindow) is frontmost
         // because the Accessibility API becomes unusable while locked, making windows appear to have vanished
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.loginwindow" {
-            print("[Axis] loginwindow active; skipping all window checks")
             return
         }
 
         // Also skip while the screen is locked
         if wasScreenLocked {
-            print("[Axis] Screen locked; skipping window check")
             return
         }
 
         // Target only on-screen windows (i.e. windows in the current Space)
+        // Filtering with shouldBeManaged() screens out transient windows during app launch, and
+        // Exclude internal windows, like Excel's, from the count
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
-        let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+        let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         let currentCount = currentWindows.count
 
         // Watchdog: even though no window is registered to the workspace,
@@ -477,14 +485,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 for window in currentWindows {
                     if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: window.id) {
                         restoredFromCache = true
-                        print("[Axis] ウォッチドッグ: closedWindowsCache から復元成功")
                         break
                     }
                 }
 
                 if !restoredFromCache {
                     // Reinitialize if restoring from the cache fails
-                    print("[Axis] ウォッチドッグ: キャッシュなし、強制再初期化（画面上に\(currentCount)個のウィンドウ）")
                     workspaceManager.forceReinitialize()
                 }
 
@@ -500,12 +506,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentWindowIDs = Set(currentWindows.map { $0.id })
 
         if currentCount != lastWindowCount {
-            print("[Axis] Window count changed: \(lastWindowCount) -> \(currentCount)")
+            // Only log details when something changed
+            for window in currentWindows {
+            }
 
             // When a window was closed
             if currentCount < lastWindowCount {
                 let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
-                print("[Axis] Windows closed: \(closedWindowIDs)")
 
                 // If every window disappears at once, that's a sign of the lock screen or sleep
                 // Save the cache and wait, without unregistering the window
@@ -514,7 +521,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     workspaceManager.cacheCurrentStateOnWindowClose()
                     lastWindowCount = 0
                     lastWindowIDs = []
-                    print("[Axis] 全ウィンドウが消失 → ロック/スリープの可能性があるため unregister をスキップ")
                     return
                 }
 
@@ -532,7 +538,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // When a window was added
             if currentCount > lastWindowCount {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
-                print("[Axis] New windows: \(newWindowIDs)")
 
                 // Try to restore from the cache
                 // Restore a vanished window if it comes back after unlock or wake from sleep
@@ -540,13 +545,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 for newID in newWindowIDs {
                     if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: newID) {
                         restoredFromCache = true
-                        print("[Axis] Restored workspace state from closedWindowsCache")
                         break
                     }
                 }
 
                 if restoredFromCache {
-                    // If restored from cache, reapply tiling and finish
+                    // Even after restoring from the cache, anything not in the cache
+                    // Register new windows (Arc, etc.) individually
+                    for newID in newWindowIDs {
+                        if workspaceManager.isWindowInAnyWorkspace(newID) {
+                            continue
+                        }
+
+                        if let window = currentWindows.first(where: { $0.id == newID }) {
+                            let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+                            let centerX = window.frame.midX
+                            let centerY = mainScreenHeight - window.frame.midY
+                            let center = CGPoint(x: centerX, y: centerY)
+
+
+                            var assigned = false
+                            for screen in NSScreen.screens {
+                                let sid = ScreenIdentifier(from: screen)
+                                if screen.frame.contains(center) {
+                                    workspaceManager.registerWindow(newID, on: screen)
+                                    assigned = true
+                                    break
+                                }
+                            }
+                            if !assigned {
+                                if let nearest = self.closestScreen(to: center) {
+                                    let sid = ScreenIdentifier(from: nearest)
+                                    workspaceManager.registerWindow(newID, on: nearest)
+                                } else {
+                                }
+                            }
+                        }
+                    }
+
                     lastWindowCount = currentCount
                     lastWindowIDs = currentWindowIDs
                     tilingEngine.tileAllScreens()
@@ -561,7 +597,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
                     if workspaceManager.isWindowInAnyWorkspace(newID) {
-                        print("[Axis] Window \(newID) already in a workspace, skipping registration")
                         continue
                     }
 
@@ -572,10 +607,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         let centerY = mainScreenHeight - window.frame.midY
                         let center = CGPoint(x: centerX, y: centerY)
 
+
+                        var assigned = false
                         for screen in NSScreen.screens {
+                            let sid = ScreenIdentifier(from: screen)
                             if screen.frame.contains(center) {
                                 workspaceManager.registerWindow(newID, on: screen)
+                                assigned = true
                                 break
+                            }
+                        }
+                        if !assigned {
+                            // If it doesn't fall inside any monitor, register it to the nearest one
+                            if let nearest = self.closestScreen(to: center) {
+                                let sid = ScreenIdentifier(from: nearest)
+                                workspaceManager.registerWindow(newID, on: nearest)
+                            } else {
                             }
                         }
                     }
@@ -606,7 +653,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if newWindowIDs.contains(window.id) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     window.focus()
-                    print("[Axis] Focused new window: \(window.title)")
                 }
                 return
             }
@@ -623,8 +669,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let mouseLocation = NSEvent.mouseLocation
             
             // Find the window at the mouse position
-            if let windowUnderMouse = self.accessibilityManager.getWindowAt(mouseLocation) {
-                print("[Axis] Focusing window under mouse: \(windowUnderMouse.title)")
+            // Only move focus to windows registered in tiling (excludes unmanaged windows like Arc's)
+            if let windowUnderMouse = self.accessibilityManager.getWindowAt(mouseLocation),
+               self.workspaceManager.isWindowInAnyWorkspace(windowUnderMouse.id) {
                 windowUnderMouse.focus()
                 return
             }
@@ -637,7 +684,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                        let firstColumn = columns.first,
                        let firstWindow = firstColumn.first {
                         firstWindow.focus()
-                        print("[Axis] Focused first available window (fallback): \(firstWindow.title)")
                         return
                     }
                 }
@@ -675,7 +721,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Skip while monitor-change handling is in progress
         // (a Space-switch notification also arrives on monitor connect/disconnect, but that's handled by processScreenChange)
         guard !isHandlingScreenChange else {
-            print("[Axis] Skipping space change during screen change handling")
             return
         }
 
@@ -683,11 +728,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // (macOS can send the Space-switch notification before the monitor-change one)
         let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
         if currentScreenIDs != knownScreenIDs {
-            print("[Axis] Skipping space change due to pending screen configuration change")
             return
         }
 
-        print("[Axis] Active space changed")
 
         // Set the Space-switching flag
         isSpaceSwitching = true
@@ -715,7 +758,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Clear the flag
             self.isSpaceSwitching = false
-            print("[Axis] Space switch completed, tracking \(self.lastWindowCount) windows")
         }
     }
     
@@ -741,7 +783,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
-            print("[Axis] Workspace changed, tracking \(self.lastWindowCount) windows")
         }
     }
 
@@ -749,16 +790,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func onScreenLocked() {
         wasScreenLocked = true
-        print("[Axis] 画面ロックを検知")
     }
 
     @objc private func onScreenUnlocked() {
         wasScreenLocked = false
-        print("[Axis] 画面ロック解除を検知")
 
         // If unlocked after waking from sleep, run the recovery logic here
         if isWaking {
-            print("[Axis] ロック解除を検知 → スリープ復帰処理を開始")
             performWakeRecovery()
         }
     }
@@ -766,7 +804,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Sleep/wake handling
 
     @objc private func onSystemWillSleep() {
-        print("[Axis] システムがスリープに入ります")
         // Set a flag so window checks don't run during sleep
         isWaking = true
         // Save workspace state before sleep
@@ -774,7 +811,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func onSystemWake() {
-        print("[Axis] システムがスリープから復帰")
 
         // If the screen is locked, wait for it to unlock before running the recovery logic
         // (the Accessibility API is unavailable while locked)
@@ -784,7 +820,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if wasScreenLocked || isLoginWindow {
             wasScreenLocked = true
-            print("[Axis] 画面ロック中のため、ロック解除を待ちます")
             // Keep isWaking true → onScreenUnlocked will run the wake-recovery logic
             return
         }
@@ -803,7 +838,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // If the screen is still locked, wait a bit longer
             // (a safety net for when this is called almost simultaneously with unlock)
             if self.wasScreenLocked {
-                print("[Axis] まだ画面ロック中、さらに待機します")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                     self?.executeWakeRecovery()
                 }
@@ -833,7 +867,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Resume window checking
         isWaking = false
-        print("[Axis] スリープ復帰処理完了、ウィンドウ追跡を再開（\(lastWindowCount) 個のウィンドウ）")
     }
 
     // MARK: - Monitor change handling
@@ -870,7 +903,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Handling for a disconnected monitor
         for removedID in removedScreenIDs {
-            print("[Axis] モニター切断を検知: displayID=\(removedID.displayID)")
             workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
         }
 
@@ -890,7 +922,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lastWindowCount = onScreenWindows.count
         lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
-        print("[Axis] モニター構成が変更されました: \(NSScreen.screens.count) 台")
     }
 
     /// Show the workspace number in the menu bar
