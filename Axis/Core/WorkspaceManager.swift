@@ -341,18 +341,23 @@ class WorkspaceManager: ObservableObject {
 
 		// Handle non-negative spaces (compact down to 0, 1, 2, ...)
 		var nextID = 0
+		// Check whether even a single non-negative space has a window (used to keep space 0 around when everything is empty)
+		let hasAnyWindowsInNonNegative = nonNegativeIDs.contains { (workspaces[$0]?.count ?? 0) > 0 }
+
 		for oldID in nonNegativeIDs {
 			let windowCount = workspaces[oldID]?.count ?? 0
 
-			// Keep condition: it's index 0, OR it has windows in it
-			if oldID == 0 || windowCount > 0 {
+			// Conditions to keep it:
+			// - It has windows in it
+			// - OR: it's space 0, and there isn't a single window across all non-negative spaces (at least one space is required)
+			if windowCount > 0 || (oldID == 0 && !hasAnyWindowsInNonNegative) {
 				if oldID != nextID {
 					hasChanges = true
 				}
 				mapping[oldID] = nextID
 				nextID += 1
 			} else {
-				// To be removed
+				// Marked for deletion (empty space)
 				hasChanges = true
 			}
 		}
@@ -482,10 +487,6 @@ class WorkspaceManager: ObservableObject {
 		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
-		for (i, screen) in NSScreen.screens.enumerated() {
-			let sid = screenIdentifier(for: screen)
-		}
-
 		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 
 		for screen in NSScreen.screens {
@@ -498,6 +499,7 @@ class WorkspaceManager: ObservableObject {
 			workspaceWindows[id]?[0] = []
 
 			for window in allWindows {
+
 				let managed = window.shouldBeManaged()
 				let floating = window.shouldFloat()
 				let onScreen = onScreenIDs.contains(window.id)
@@ -518,7 +520,34 @@ class WorkspaceManager: ObservableObject {
 				}
 			}
 
-			let count = workspaceWindows[id]?[0]?.count ?? 0
+		}
+
+		// Fallback for off-screen windows:
+		// Managed windows that weren't assigned to any screen
+		// Register it to workspace 0 of the nearest screen
+		// (Handles the case where rescueOffScreenWindows()'s AX update lands at the wrong time)
+		let assignedWindowIDs = NSScreen.screens.reduce(into: Set<CGWindowID>()) { result, scr in
+			let scid = screenIdentifier(for: scr)
+			if let ws0 = workspaceWindows[scid]?[0] {
+				result.formUnion(ws0)
+			}
+		}
+		for window in allWindows {
+			guard window.shouldBeManaged() && !window.shouldFloat() else { continue }
+			guard onScreenIDs.contains(window.id) else { continue }
+			guard !assignedWindowIDs.contains(window.id) else { continue }
+
+			let centerX = window.frame.midX
+			let centerY = mainScreenHeight - window.frame.midY
+			let center = CGPoint(x: centerX, y: centerY)
+
+			if let nearest = NSScreen.screens.min(by: { s1, s2 in
+				hypot(center.x - s1.frame.midX, center.y - s1.frame.midY) <
+				hypot(center.x - s2.frame.midX, center.y - s2.frame.midY)
+			}) {
+				let nearestID = screenIdentifier(for: nearest)
+				workspaceWindows[nearestID]?[0]?.insert(window.id)
+			}
 		}
 	}
 
@@ -683,18 +712,24 @@ class WorkspaceManager: ObservableObject {
 		tilingEngine.tile(on: screen)
 
         // Clean up once the original workspace becomes empty
+        let prevActiveWS = activeWorkspace[id] ?? 0
         cleanupEmptyWorkspaces(on: screen)
 
         // Re-fetch it, since cleanup may have changed activeWorkspace
         let updatedCurrentWS = activeWorkspace[id] ?? 0
 
 		// If cleanup automatically switched to the destination workspace,
+		// Or if the active space changed because cleanup compacted the spaces,
 		// Restore and tile windows that had been stashed off screen
-		if updatedCurrentWS == workspace {
-			showWindowsForWorkspace(workspace, on: id)
+		if updatedCurrentWS == workspace || updatedCurrentWS != prevActiveWS {
+			showWindowsForWorkspace(updatedCurrentWS, on: id)
 			tilingEngine.tile(on: screen)
-			// Focus the window that was moved
-			focusWindow(windowID, in: workspace, on: id)
+			// If the moved window is on the new active space, focus it
+			if workspaceWindows[id]?[updatedCurrentWS]?.contains(windowID) == true {
+				focusWindow(windowID, in: updatedCurrentWS, on: id)
+			} else {
+				focusFirstWindow(in: updatedCurrentWS, on: id)
+			}
 		} else {
 			// Focus a window remaining in the original workspace
 			focusFirstWindow(in: updatedCurrentWS, on: id)
@@ -1105,6 +1140,9 @@ class WorkspaceManager: ObservableObject {
 			nextNewWS += 1
 		}
 
+		// Since disconnecting a monitor is a deliberate action, clear closedWindowsCache (used for sleep/lock)
+		resetClosedWindowsCache()
+
 		// Delete the migrated window's savedFrames (unusable since it's the disconnected monitor's coordinates)
 		for windowID in allMigratedWindowIDs {
 			savedFrames.removeValue(forKey: windowID)
@@ -1117,6 +1155,9 @@ class WorkspaceManager: ObservableObject {
 
 		for window in allWindows {
 			if allMigratedWindowIDs.contains(window.id) {
+				// Save the current position to savedFrames before moving to the corner
+				// (This gets restored correctly later via showWindowsForWorkspace -> tile when the space is switched)
+				savedFrames[window.id] = window.frame
 				if let hidePos = hidePosition(for: window, corner: corner, on: targetScreenID) {
 					window.setPosition(hidePos)
 				}
@@ -1193,7 +1234,7 @@ class WorkspaceManager: ObservableObject {
 					}
 
 					// Step 1: exact match on bundleID + title
-					let exactKey = cached.bundleID + "||" + cached.title
+					let exactKey = cached.bundleID + "||" + cached.title
 					if var candidates = exactPool[exactKey],
 					   let idx = candidates.firstIndex(where: { !usedNewIDs.contains($0.id) }) {
 						let newWindow = candidates[idx]
@@ -1307,7 +1348,6 @@ class WorkspaceManager: ObservableObject {
 			}
 		}
 
-		let totalRemapped = idMapping.filter { $0.key != $0.value }.count
 	}
 
 	// MARK: - Persisting workspace state
