@@ -80,7 +80,6 @@ class WindowPaletteManager {
 		}
 		panel?.showWithDisplays(displays, displayIndex: 0, spaceIndex: 0, itemIndex: 0)
 
-		let totalWindows = displays.flatMap { $0.spaces }.flatMap { $0.items }.count
 	}
 
 	/// End palette mode (cancel)
@@ -311,6 +310,8 @@ class WindowPaletteManager {
 	}
 
 	/// Stash an on-screen window off screen (the corner approach)
+	/// By shrinking the window down to a tiny size before stashing it in the corner,
+	/// Prevents the shadow or corner areas from being visible
 	private func hideOnScreenWindows() {
 		hiddenWindowFrames.removeAll()
 
@@ -322,19 +323,22 @@ class WindowPaletteManager {
 			guard onScreenIDs.contains(window.id) else { continue }
 			guard window.shouldBeManaged() else { continue }
 
-			// Save the original position
+			// Save the original position and size
 			hiddenWindowFrames[window.id] = window.frame
 
 			// Get the screen the window belongs to and stash it in the corner
 			if let screen = screenForWindow(window) {
 				let corner = optimalHideCorner(for: screen)
 				let hidePos = hidePosition(for: window, corner: corner, on: screen)
+				// First shrink the window to be tiny to minimize its shadow, then move it to the corner
+				window.setSize(CGSize(width: 1, height: 1))
 				window.setPosition(hidePos)
 			} else {
 				// Fall back to the main screen's corner if the screen can't be determined
 				if let mainScreen = NSScreen.main {
 					let corner = optimalHideCorner(for: mainScreen)
 					let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
+					window.setSize(CGSize(width: 1, height: 1))
 					window.setPosition(hidePos)
 				}
 			}
@@ -352,7 +356,6 @@ class WindowPaletteManager {
 			}
 		}
 
-		let count = hiddenWindowFrames.count
 		hiddenWindowFrames.removeAll()
 	}
 

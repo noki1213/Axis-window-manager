@@ -335,9 +335,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
-        for (i, screen) in NSScreen.screens.enumerated() {
-            let sid = ScreenIdentifier(from: screen)
-        }
 
         // Rescue off-screen windows right after launch (a fallback for when the previous quit couldn't restore them)
         rescueOffScreenWindows()
@@ -506,10 +503,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentWindowIDs = Set(currentWindows.map { $0.id })
 
         if currentCount != lastWindowCount {
-            // Only log details when something changed
-            for window in currentWindows {
-            }
-
             // When a window was closed
             if currentCount < lastWindowCount {
                 let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
@@ -566,7 +559,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                             var assigned = false
                             for screen in NSScreen.screens {
-                                let sid = ScreenIdentifier(from: screen)
                                 if screen.frame.contains(center) {
                                     workspaceManager.registerWindow(newID, on: screen)
                                     assigned = true
@@ -575,7 +567,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             }
                             if !assigned {
                                 if let nearest = self.closestScreen(to: center) {
-                                    let sid = ScreenIdentifier(from: nearest)
                                     workspaceManager.registerWindow(newID, on: nearest)
                                 } else {
                                 }
@@ -610,7 +601,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                         var assigned = false
                         for screen in NSScreen.screens {
-                            let sid = ScreenIdentifier(from: screen)
                             if screen.frame.contains(center) {
                                 workspaceManager.registerWindow(newID, on: screen)
                                 assigned = true
@@ -620,7 +610,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         if !assigned {
                             // If it doesn't fall inside any monitor, register it to the nearest one
                             if let nearest = self.closestScreen(to: center) {
-                                let sid = ScreenIdentifier(from: nearest)
                                 workspaceManager.registerWindow(newID, on: nearest)
                             } else {
                             }
