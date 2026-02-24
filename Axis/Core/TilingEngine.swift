@@ -52,9 +52,6 @@ class TilingEngine: ObservableObject {
             window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isHovering(window.id)
         }
 
-        for w in managedWindows {
-        }
-
         // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
             tiledWindows[screenID] = []
@@ -823,9 +820,6 @@ class TilingEngine: ObservableObject {
         let windowCenterInNSScreen = CGPoint(x: windowCenterX, y: windowCenterY)
 
 
-        for screen in NSScreen.screens {
-        }
-
         return NSScreen.screens.first { screen in
             screen.frame.contains(windowCenterInNSScreen)
         }
@@ -867,12 +861,6 @@ class TilingEngine: ObservableObject {
     /// Get the neighboring screen
     private func getAdjacentScreen(from screen: NSScreen, direction: Direction) -> NSScreen? {
         let currentFrame = screen.frame
-
-
-        for otherScreen in NSScreen.screens {
-            guard otherScreen != screen else { continue }
-            let otherFrame = otherScreen.frame
-        }
 
         return NSScreen.screens.first { otherScreen in
             guard otherScreen != screen else { return false }
