@@ -55,15 +55,21 @@ class WindowPaletteManager {
 	/// Start palette mode
 	/// - Parameter inheritedHiddenFrames: the original positions of windows carried over from Zen mode etc.
 	func startPalette(inheritedHiddenFrames: [CGWindowID: CGRect] = [:]) {
+		// Get the currently focused window's ID before opening the palette
+		let focusedWindowID = accessibilityManager.getFocusedWindow()?.id
+
 		displays = collectDisplays()
 
 		guard !displays.isEmpty else {
 			return
 		}
 
-		selectedDisplayIndex = 0
-		selectedSpaceIndex = 0
-		selectedItemIndex = 0
+		// Find where the focused window is within displays
+		let initialSelection = focusedWindowID.flatMap { findWindowPosition(windowID: $0) }
+
+		selectedDisplayIndex = initialSelection?.displayIndex ?? 0
+		selectedSpaceIndex = initialSelection?.spaceIndex ?? 0
+		selectedItemIndex = initialSelection?.itemIndex ?? 0
 
 		// Temporarily hide the on-screen window (for visibility)
 		hideOnScreenWindows()
@@ -78,7 +84,12 @@ class WindowPaletteManager {
 		if panel == nil {
 			panel = WindowPalettePanel()
 		}
-		panel?.showWithDisplays(displays, displayIndex: 0, spaceIndex: 0, itemIndex: 0)
+		panel?.showWithDisplays(
+			displays,
+			displayIndex: selectedDisplayIndex,
+			spaceIndex: selectedSpaceIndex,
+			itemIndex: selectedItemIndex
+		)
 
 	}
 
@@ -229,6 +240,20 @@ class WindowPaletteManager {
 
 	// MARK: - Private Methods
 
+	/// Return the position within displays where the given window ID is found
+	private func findWindowPosition(windowID: CGWindowID) -> (displayIndex: Int, spaceIndex: Int, itemIndex: Int)? {
+		for (dIndex, display) in displays.enumerated() {
+			for (sIndex, space) in display.spaces.enumerated() {
+				for (iIndex, item) in space.items.enumerated() {
+					if item.windowID == windowID {
+						return (dIndex, sIndex, iIndex)
+					}
+				}
+			}
+		}
+		return nil
+	}
+
 	/// Update the panel's selection display
 	private func notifyPanel() {
 		panel?.updateSelection(
@@ -363,8 +388,8 @@ class WindowPaletteManager {
 
 	/// Collect window info for every workspace, grouped by Display
 	private func collectDisplays() -> [WindowPaletteDisplay] {
-		// Get the window IDs across all workspaces
-		let allWorkspaces = workspaceManager.allWindowsByWorkspace()
+		// Get every workspace's window IDs in tiling order (left-to-right, top-to-bottom)
+		let allWorkspaces = workspaceManager.windowIDsInTilingOrder()
 
 		// Get info for every current window (via the AX API)
 		let allWindows = accessibilityManager.getAllWindows()
@@ -419,7 +444,6 @@ class WindowPaletteManager {
 
 				// Only add Spaces that have windows
 				if !items.isEmpty {
-					items.sort { $0.appName < $1.appName }
 					let section = WindowPaletteSection(workspace: workspace, items: items)
 					displayMap[screenID]?.spaces.append(section)
 				}
