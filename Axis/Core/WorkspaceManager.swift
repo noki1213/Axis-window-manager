@@ -300,7 +300,38 @@ class WorkspaceManager: ObservableObject {
 
 	    }
 
-	    
+	    /// Returns window IDs across every monitor and workspace in tiling order (used by the window palette)
+	    /// Columns go left-to-right, and within each column, top-to-bottom
+	    func windowIDsInTilingOrder() -> [ScreenIdentifier: [Int: [CGWindowID]]] {
+	    	var result: [ScreenIdentifier: [Int: [CGWindowID]]] = [:]
+
+	    	for (screenID, workspaces) in workspaceWindows {
+	    		result[screenID] = [:]
+	    		for (workspace, windowIDs) in workspaces {
+	    			if let snapshot = tilingSnapshots[screenID]?[workspace] {
+	    				// Lay out windows in the snapshot's column order (left-to-right, top-to-bottom)
+	    				let orderedByTiling = snapshot.columns.flatMap { $0 }
+	    				var ordered: [CGWindowID] = []
+	    				var remaining = windowIDs
+	    				for id in orderedByTiling {
+	    					if remaining.contains(id) {
+	    						ordered.append(id)
+	    						remaining.remove(id)
+	    					}
+	    				}
+	    				// Append windows not included in the snapshot (e.g. Hover windows) to the end
+	    				ordered.append(contentsOf: remaining)
+	    				result[screenID]?[workspace] = ordered
+	    			} else {
+	    				result[screenID]?[workspace] = Array(windowIDs)
+	    			}
+	    		}
+	    	}
+
+	    	return result
+	    }
+
+
 
 	    // MARK: - Workspace Cleanup
 
