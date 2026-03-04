@@ -895,6 +895,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
         }
 
+        // Handling for a reconnected monitor
+        for addedID in addedScreenIDs {
+            workspaceManager.handleScreenReconnected(reconnectedScreenID: addedID)
+        }
+
         // Refresh the monitor list
         knownScreenIDs = currentScreenIDs
 
@@ -904,10 +909,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tilingEngine.tileAllScreens()
         borderManager.updateBorder()
 
-        // Update window tracking
+        // Update window tracking (filtered by shouldBeManaged() to stay consistent with checkForWindowChanges)
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
-        let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+        let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         lastWindowCount = onScreenWindows.count
         lastWindowIDs = Set(onScreenWindows.map { $0.id })
 

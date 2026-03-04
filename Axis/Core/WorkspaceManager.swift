@@ -86,6 +86,18 @@ struct ClosedWindowsSnapshot {
 	let windowIdentityCache: [CGWindowID: (bundleID: String, title: String)]
 }
 
+// MARK: - DisconnectedScreenData (for restoring on monitor reconnect)
+
+/// A struct for temporarily storing a disconnected monitor's data
+/// Used to restore the original state on reconnect
+private struct DisconnectedScreenData {
+	let workspaces: [Int: Set<CGWindowID>]
+	let tilingSnapshots: [Int: PerScreenSnapshot]
+	let activeWorkspace: Int
+	let migratedToScreenID: ScreenIdentifier
+	let migratedWorkspaceNumbers: [Int]  // MacBook 側に新たに作られたワークスペース番号
+}
+
 // MARK: - WorkspaceManager
 
 /// The central class for the workspace feature
@@ -123,6 +135,9 @@ class WorkspaceManager: ObservableObject {
 	/// The AeroSpace approach: a full snapshot taken when a window is detected as "closed"
 	/// In case windows appear to vanish during the lock screen or sleep
 	private var closedWindowsCache: ClosedWindowsSnapshot?
+
+	/// Temporarily save the disconnected monitor's data (for restoring on reconnect)
+	private var disconnectedScreenData: [ScreenIdentifier: DisconnectedScreenData] = [:]
 
 	private let accessibilityManager = AccessibilityManager.shared
 	private let tilingEngine = TilingEngine.shared
@@ -594,6 +609,7 @@ class WorkspaceManager: ObservableObject {
 		activeWorkspace.removeAll()
 		hoverWindowIDs.removeAll()
 		closedWindowsCache = nil
+		disconnectedScreenData.removeAll()
 
 		// Re-register every window to workspace 0
 		initializeWithCurrentWindows()
@@ -1145,6 +1161,9 @@ class WorkspaceManager: ObservableObject {
 		// Collect all the window IDs to migrate
 		var allMigratedWindowIDs = Set<CGWindowID>()
 
+		// Record the destination workspace number, for use restoring on reconnect
+		var migratedWSNumbers: [Int] = []
+
 		for oldWS in removedWSNumbers {
 			let windowIDs = workspaceWindows[removedScreenID]?[oldWS] ?? []
 			allMigratedWindowIDs.formUnion(windowIDs)
@@ -1165,9 +1184,18 @@ class WorkspaceManager: ObservableObject {
 				tilingSnapshots[targetScreenID]?[nextNewWS] = snapshot
 			}
 
-
+			migratedWSNumbers.append(nextNewWS)
 			nextNewWS += 1
 		}
+
+		// Save the pre-disconnect data so the original state can be restored on reconnect
+		disconnectedScreenData[removedScreenID] = DisconnectedScreenData(
+			workspaces: workspaceWindows[removedScreenID] ?? [:],
+			tilingSnapshots: tilingSnapshots[removedScreenID] ?? [:],
+			activeWorkspace: activeWorkspace[removedScreenID] ?? 0,
+			migratedToScreenID: targetScreenID,
+			migratedWorkspaceNumbers: migratedWSNumbers
+		)
 
 		// Since disconnecting a monitor is a deliberate action, clear closedWindowsCache (used for sleep/lock)
 		resetClosedWindowsCache()
@@ -1214,6 +1242,59 @@ class WorkspaceManager: ObservableObject {
 			self?.isSwitching = false
 		}
 
+	}
+
+	/// Handling for when a monitor is reconnected
+	/// Restore the data saved at disconnect time, and delete the workspace that was migrated to the MacBook side
+	func handleScreenReconnected(reconnectedScreenID: ScreenIdentifier) {
+		if let savedData = disconnectedScreenData[reconnectedScreenID] {
+			// Restore data for a previously disconnected monitor
+			workspaceWindows[reconnectedScreenID] = savedData.workspaces
+			tilingSnapshots[reconnectedScreenID] = savedData.tilingSnapshots
+			activeWorkspace[reconnectedScreenID] = savedData.activeWorkspace
+
+			// Delete the migrated workspace on the MacBook side
+			let migTargetID = savedData.migratedToScreenID
+			for wsNum in savedData.migratedWorkspaceNumbers {
+				workspaceWindows[migTargetID]?.removeValue(forKey: wsNum)
+				tilingSnapshots[migTargetID]?.removeValue(forKey: wsNum)
+			}
+
+			// If the workspace that was active on the MacBook is being removed, fall back to 0
+			let currentActiveWS = activeWorkspace[migTargetID] ?? 0
+			if savedData.migratedWorkspaceNumbers.contains(currentActiveWS) {
+				activeWorkspace[migTargetID] = 0
+			}
+
+			disconnectedScreenData.removeValue(forKey: reconnectedScreenID)
+
+			NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+		} else {
+			// A new monitor (no prior connection data) - initialize workspace 0
+			workspaceWindows[reconnectedScreenID] = [0: []]
+			activeWorkspace[reconnectedScreenID] = 0
+
+			// Register managed windows that are physically on this monitor
+			let allWindows = accessibilityManager.getAllWindows()
+			let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+
+			if let newScreen = screen(for: reconnectedScreenID) {
+				for window in allWindows {
+					guard window.shouldBeManaged() && !window.shouldFloat() else { continue }
+					guard onScreenIDs.contains(window.id) else { continue }
+					guard !isWindowInAnyWorkspace(window.id) else { continue }
+
+					let center = CGPoint(
+						x: window.frame.midX,
+						y: mainScreenHeight - window.frame.midY
+					)
+					if newScreen.frame.contains(center) {
+						workspaceWindows[reconnectedScreenID]?[0]?.insert(window.id)
+					}
+				}
+			}
+		}
 	}
 
 	// MARK: - Re-matching window IDs after waking from sleep
