@@ -920,8 +920,6 @@ class WorkspaceManager: ObservableObject {
 				// Move to the corner (position only, size unchanged)
 				if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
 					window.setPosition(hidePos)
-					// Because some apps don't redraw after a position change unless the size is set again too
-					window.setSize(window.frame.size)
 				}
 			}
 		}
