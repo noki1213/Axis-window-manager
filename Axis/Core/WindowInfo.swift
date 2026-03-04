@@ -23,6 +23,9 @@ struct WindowInfo: Identifiable, Equatable {
     // For determining floating status
     var subrole: String?
     var role: String?
+
+    /// Whether it has a close button (used to supplement standard-window detection)
+    var hasCloseButton: Bool
     
     init?(axElement: AXUIElement, app: NSRunningApplication) {
         self.axElement = axElement
@@ -54,6 +57,11 @@ struct WindowInfo: Identifiable, Equatable {
         // Role / Subrole
         self.role = Self.getString(from: axElement, attribute: kAXRoleAttribute)
         self.subrole = Self.getString(from: axElement, attribute: kAXSubroleAttribute)
+
+        // Whether it has a close button (used to detect windows like PowerPoint's with a non-standard subrole)
+        var closeButtonRef: CFTypeRef?
+        let closeResult = AXUIElementCopyAttributeValue(axElement, kAXCloseButtonAttribute as CFString, &closeButtonRef)
+        self.hasCloseButton = (closeResult == .success && closeButtonRef != nil)
     }
     
     // MARK: - Equatable
@@ -163,13 +171,19 @@ struct WindowInfo: Identifiable, Equatable {
             return false
         }
         
-        // Only standard windows are tiled
-        // Based on AeroSpace's isWindowHeuristic
-        guard subrole == kAXStandardWindowSubrole as String else {
-            return false
+        // A standard-window subrole → managed
+        if subrole == kAXStandardWindowSubrole as String {
+            return true
         }
-        
-        return true
+
+        // Even with a non-standard subrole, treat it as a genuine window if it has a close button
+        // (PowerPoint's document window etc. falls into this case)
+        // Implementation modeled on AeroSpace's isWindowHeuristicOld()
+        if hasCloseButton {
+            return true
+        }
+
+        return false
     }
     
     /// Whether it should float (e.g. dialogs)
