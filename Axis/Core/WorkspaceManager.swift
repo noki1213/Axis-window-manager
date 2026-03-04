@@ -315,6 +315,12 @@ class WorkspaceManager: ObservableObject {
 
 	    }
 
+	    /// Returns whether the given window is currently stashed off screen (used to control border display)
+	    /// An entry existing in savedFrames means WorkspaceManager has hidden it in another workspace
+	    func isWindowHidden(_ windowID: CGWindowID) -> Bool {
+	    	return savedFrames[windowID] != nil
+	    }
+
 	    /// Returns window IDs across every monitor and workspace in tiling order (used by the window palette)
 	    /// Columns go left-to-right, and within each column, top-to-bottom
 	    func windowIDsInTilingOrder() -> [ScreenIdentifier: [Int: [CGWindowID]]] {

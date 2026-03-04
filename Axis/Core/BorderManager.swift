@@ -152,6 +152,13 @@ class BorderManager: ObservableObject {
             hideBorder()
             return
         }
+
+        // Don't show the border on windows evacuated to another workspace or while the palette is showing
+        if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
+           WindowPaletteManager.shared.isWindowHidden(focusedWindow.id) {
+            hideBorder()
+            return
+        }
         
         let windowChanged = (currentWindowID != focusedWindow.id)
         let targetRect = calculateBorderRect(for: focusedWindow.frame)

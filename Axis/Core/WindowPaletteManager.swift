@@ -50,6 +50,11 @@ class WindowPaletteManager {
 
 	private init() {}
 
+	/// Returns whether the given window is stashed off screen while the palette is showing (used to control border display)
+	func isWindowHidden(_ windowID: CGWindowID) -> Bool {
+		return hiddenWindowFrames[windowID] != nil
+	}
+
 	// MARK: - Public Methods
 
 	/// Start palette mode
