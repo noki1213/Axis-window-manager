@@ -632,6 +632,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Save state whenever a window change occurs
             // (don't rely solely on the save-on-shutdown path)
             workspaceManager.saveStateToDisk()
+
+        } else if currentWindowIDs != lastWindowIDs {
+            // Same window count, but the IDs changed
+            // (e.g. when opening a file from the Excel/PowerPoint start screen,
+            //   a case where a window gets swapped for a different window)
+            let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
+            let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
+
+            // Unregister the closed window from the workspace
+            workspaceManager.cacheCurrentStateOnWindowClose()
+            for closedID in closedWindowIDs {
+                workspaceManager.unregisterWindow(closedID)
+            }
+
+            // Register the new window to the workspace
+            for newID in newWindowIDs {
+                if workspaceManager.isWindowInAnyWorkspace(newID) { continue }
+                if let window = currentWindows.first(where: { $0.id == newID }) {
+                    let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+                    let centerX = window.frame.midX
+                    let centerY = mainScreenHeight - window.frame.midY
+                    let center = CGPoint(x: centerX, y: centerY)
+                    var assigned = false
+                    for screen in NSScreen.screens {
+                        if screen.frame.contains(center) {
+                            workspaceManager.registerWindow(newID, on: screen)
+                            assigned = true
+                            break
+                        }
+                    }
+                    if !assigned {
+                        if let nearest = closestScreen(to: center) {
+                            workspaceManager.registerWindow(newID, on: nearest)
+                        }
+                    }
+                }
+            }
+
+            lastWindowIDs = currentWindowIDs
+            tilingEngine.tileAllScreens()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.borderManager.updateBorder()
+            }
         }
     }
     

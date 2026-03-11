@@ -165,12 +165,12 @@ struct WindowInfo: Identifiable, Equatable {
         if isMinimized {
             return false
         }
-        
+
         // Exclude fullscreen windows
         if isFullscreen {
             return false
         }
-        
+
         // A standard-window subrole → managed
         if subrole == kAXStandardWindowSubrole as String {
             return true
