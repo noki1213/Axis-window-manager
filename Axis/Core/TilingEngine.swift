@@ -90,8 +90,15 @@ class TilingEngine: ObservableObject {
         // Add new windows (ones not already in a column)
         for window in managedWindows {
             if !existingWindowIDs.contains(window.id) {
-                // Add the new window as its own separate column
-                columns.append([window])
+                // Insert at the right position based on X coordinate (always appending to the right end would scramble the order)
+                var insertIndex = columns.count
+                for (i, col) in columns.enumerated() {
+                    if let first = col.first, window.frame.midX < first.frame.midX {
+                        insertIndex = i
+                        break
+                    }
+                }
+                columns.insert([window], at: insertIndex)
             }
         }
 

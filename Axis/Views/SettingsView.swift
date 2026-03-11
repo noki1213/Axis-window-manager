@@ -11,6 +11,7 @@
 //
 
 import SwiftUI
+import ServiceManagement
 
 struct SettingsView: View {
     @ObservedObject private var tilingEngine = TilingEngine.shared
@@ -51,6 +52,7 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @ObservedObject private var accessibilityManager = AccessibilityManager.shared
+    @State private var launchAtLogin = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -76,8 +78,10 @@ struct GeneralSettingsView: View {
 
             GroupBox {
                 HStack {
-                    Toggle("Launch at Login", isOn: .constant(false))
-                        .disabled(true) // 後で実装
+                    Toggle("Launch at Login", isOn: $launchAtLogin)
+                        .onChange(of: launchAtLogin) { _, newValue in
+                            updateLaunchAtLogin(newValue)
+                        }
                     Spacer()
                 }
                 .padding(.vertical, 4)
@@ -86,6 +90,24 @@ struct GeneralSettingsView: View {
             Spacer()
         }
         .padding()
+        .onAppear {
+            // Fetch the current registration state and reflect it in the toggle
+            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+        }
+    }
+
+    /// Register or unregister launch-at-login
+    private func updateLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            // Revert the toggle to its original state on failure
+            launchAtLogin = !enabled
+        }
     }
 }
 
