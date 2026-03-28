@@ -137,6 +137,21 @@ class BorderManager: ObservableObject {
         return false
     }
 
+    /// After a focus move, retry until focus actually reaches the target window, then update the border
+    /// Works around macOS sometimes taking a while to update focus state
+    func updateBorderExpecting(windowID: CGWindowID, retryCount: Int = 0) {
+        let focused = AccessibilityManager.shared.getFocusedWindow()
+
+        if focused?.id != windowID, retryCount < 6 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self.updateBorderExpecting(windowID: windowID, retryCount: retryCount + 1)
+            }
+            return
+        }
+
+        scheduleUpdateBorder()
+    }
+
     func updateBorder() {
         // Don't show the border while Mission Control is active
         if isInMissionControl {
