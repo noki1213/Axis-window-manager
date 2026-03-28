@@ -922,6 +922,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func processScreenChange() {
         let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+        let previousScreenCount = knownScreenIDs.count
+        let currentScreenCount = currentScreenIDs.count
 
         let removedScreenIDs = knownScreenIDs.subtracting(currentScreenIDs)
         let addedScreenIDs = currentScreenIDs.subtracting(knownScreenIDs)
@@ -930,6 +932,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
             knownScreenIDs = currentScreenIDs
             tilingEngine.tileAllScreens()
+            return
+        }
+
+        // Approach change:
+        // When a monitor is added, do an internal reset equivalent to a restart.
+        // (doesn't actually restart the app — just resets and rebuilds internal state)
+        // So it doesn't get added by mistake even when a displayID glitch during removal produces a spurious "added" event,
+        // Limited to the case where the monitor count actually increased.
+        if !addedScreenIDs.isEmpty && currentScreenCount > previousScreenCount {
+            workspaceManager.forceReinitialize()
+            knownScreenIDs = currentScreenIDs
+            tilingEngine.cleanupDisconnectedScreens()
+            tilingEngine.tileAllScreens()
+            borderManager.updateBorder()
+
+            // Refresh window tracking
+            let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+            let allWindows = accessibilityManager.getAllWindows()
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
+            lastWindowCount = onScreenWindows.count
+            lastWindowIDs = Set(onScreenWindows.map { $0.id })
+
+            // Save the state after the reset
+            workspaceManager.saveStateToDisk()
             return
         }
 
