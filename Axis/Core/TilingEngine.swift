@@ -116,16 +116,17 @@ class TilingEngine: ObservableObject {
         }
     }
     
-    /// Move window focus in the given direction
-    func moveFocus(direction: Direction) {
+    /// Move window focus in the given direction (returns the destination window's ID)
+    @discardableResult
+    func moveFocus(direction: Direction) -> CGWindowID? {
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow() else {
-            return
+            return nil
         }
 
 
         guard let screen = getScreen(for: focusedWindow) else {
-            return
+            return nil
         }
         let screenID = ScreenIdentifier(from: screen)
 
@@ -157,7 +158,7 @@ class TilingEngine: ObservableObject {
         }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
-            return
+            return nil
         }
 
         var targetWindow: WindowInfo?
@@ -204,8 +205,9 @@ class TilingEngine: ObservableObject {
         if let target = targetWindow {
             target.focus()
             moveCursorToWindow(target)
-        } else {
+            return target.id
         }
+        return nil
     }
 
     /// Move the mouse cursor to the window's center
