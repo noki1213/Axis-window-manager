@@ -263,30 +263,34 @@ class HotkeyManager: ObservableObject {
 		// MARK: Focus movement
 		case .focusLeft:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveFocus(direction: .left)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
+				if let targetID = self?.tilingEngine.moveFocus(direction: .left) {
+					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+						BorderManager.shared.updateBorderExpecting(windowID: targetID)
+					}
 				}
 			}
 		case .focusRight:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveFocus(direction: .right)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
+				if let targetID = self?.tilingEngine.moveFocus(direction: .right) {
+					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+						BorderManager.shared.updateBorderExpecting(windowID: targetID)
+					}
 				}
 			}
 		case .focusUp:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveFocus(direction: .up)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
+				if let targetID = self?.tilingEngine.moveFocus(direction: .up) {
+					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+						BorderManager.shared.updateBorderExpecting(windowID: targetID)
+					}
 				}
 			}
 		case .focusDown:
 			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveFocus(direction: .down)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
+				if let targetID = self?.tilingEngine.moveFocus(direction: .down) {
+					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+						BorderManager.shared.updateBorderExpecting(windowID: targetID)
+					}
 				}
 			}
 
