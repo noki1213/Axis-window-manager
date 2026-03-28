@@ -1253,26 +1253,66 @@ class WorkspaceManager: ObservableObject {
 	/// Handling for when a monitor is reconnected
 	/// Restore the data saved at disconnect time, and delete the workspace that was migrated to the MacBook side
 	func handleScreenReconnected(reconnectedScreenID: ScreenIdentifier) {
-		if let savedData = disconnectedScreenData[reconnectedScreenID] {
+		// Look for an exact displayID match first.
+		// Since macOS can change the displayID when a monitor is reconnected,
+		// If there's no exact match, use the sole remaining entry in disconnectedScreenData
+		// Treat it as the same physical monitor and use it as a fallback.
+		let exactMatch = disconnectedScreenData[reconnectedScreenID]
+		let fallback: (key: ScreenIdentifier, data: DisconnectedScreenData)? = {
+			guard exactMatch == nil, disconnectedScreenData.count == 1,
+			      let entry = disconnectedScreenData.first else { return nil }
+			return (key: entry.key, data: entry.value)
+		}()
+		let savedDataOldKey: ScreenIdentifier? = exactMatch != nil ? reconnectedScreenID : fallback?.key
+		let resolvedSavedData: DisconnectedScreenData? = exactMatch ?? fallback?.data
+
+		if let savedData = resolvedSavedData, let oldKey = savedDataOldKey {
 			// Restore data for a previously disconnected monitor
 			workspaceWindows[reconnectedScreenID] = savedData.workspaces
 			tilingSnapshots[reconnectedScreenID] = savedData.tilingSnapshots
 			activeWorkspace[reconnectedScreenID] = savedData.activeWorkspace
 
+			// Restore TilingEngine's column structure (Bug fix: column order getting scrambled after reconnecting)
+			// Since tiledWindows[E] has already been cleared by cleanupDisconnectedScreens(),
+			// Calling tile() as-is would treat every window as "new" and break the ordering.
+			// Rebuild TilingEngine's state from the restored tilingSnapshots.
+			if let reconnectedScreen = screen(for: reconnectedScreenID),
+			   let snapshot = tilingSnapshots[reconnectedScreenID]?[savedData.activeWorkspace] {
+				tilingEngine.restoreTilingStateForScreen(reconnectedScreen, snapshot: snapshot)
+			}
+
 			// Delete the migrated workspace on the MacBook side
 			let migTargetID = savedData.migratedToScreenID
+
+			// Bug fix: if the migrated workspace was active on the MacBook side,
+			// Fixes the issue where that workspace's windows stay visible.
+			// Hide the "currently shown windows" before deletion, then return to ws0.
+			let currentActiveMigWS = activeWorkspace[migTargetID] ?? 0
+			if savedData.migratedWorkspaceNumbers.contains(currentActiveMigWS) {
+				hideWindowsForWorkspace(currentActiveMigWS, on: migTargetID)
+				activeWorkspace[migTargetID] = 0
+			}
+
 			for wsNum in savedData.migratedWorkspaceNumbers {
 				workspaceWindows[migTargetID]?.removeValue(forKey: wsNum)
 				tilingSnapshots[migTargetID]?.removeValue(forKey: wsNum)
 			}
 
-			// If the workspace that was active on the MacBook is being removed, fall back to 0
-			let currentActiveWS = activeWorkspace[migTargetID] ?? 0
-			if savedData.migratedWorkspaceNumbers.contains(currentActiveWS) {
-				activeWorkspace[migTargetID] = 0
-			}
+			disconnectedScreenData.removeValue(forKey: oldKey)
 
-			disconnectedScreenData.removeValue(forKey: reconnectedScreenID)
+			// Bug fix: the border disappearing issue
+			// tile() places windows directly but doesn't clear savedFrames.
+			// If an entry remains in savedFrames, isWindowHidden() keeps returning true, and
+			// The focus border stops showing up.
+			// -> Clear savedFrames for windows belonging to each screen's active workspace.
+			let reconnectedActiveWS = savedData.activeWorkspace
+			for windowID in workspaceWindows[reconnectedScreenID]?[reconnectedActiveWS] ?? [] {
+				savedFrames.removeValue(forKey: windowID)
+			}
+			let macBookActiveWS = activeWorkspace[migTargetID] ?? 0
+			for windowID in workspaceWindows[migTargetID]?[macBookActiveWS] ?? [] {
+				savedFrames.removeValue(forKey: windowID)
+			}
 
 			NotificationCenter.default.post(name: .workspaceChanged, object: nil)
 		} else {
