@@ -520,12 +520,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Save the cache before unregistering, so we can restore later
                 workspaceManager.cacheCurrentStateOnWindowClose()
 
+                // Before unregistering, record which monitor the closed window was on
+                // (screenForWindow no longer works once the window is unregistered)
+                let preferredScreen = closedWindowIDs.compactMap {
+                    workspaceManager.screenForWindow($0)
+                }.first
+
                 // Also unregister from the workspace
                 for closedID in closedWindowIDs {
                     workspaceManager.unregisterWindow(closedID)
                 }
 
-                focusAdjacentWindowAfterClose()
+                focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
             }
 
             // When a window was added
@@ -584,6 +590,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 // The normal new-window registration path
+                // Prefer registering the monitor that holds the focused window
+                // (When a new window is opened, e.g. via Cmd+N, place it on the monitor that has focus rather than at its physical position)
+                let focusedScreen: NSScreen? = {
+                    guard let focused = accessibilityManager.getFocusedWindow() else { return nil }
+                    return workspaceManager.screenForWindow(focused.id)
+                }()
+
                 for newID in newWindowIDs {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
@@ -591,13 +604,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
+                    // Register with the monitor of the focused window, if there is one
+                    if let screen = focusedScreen {
+                        workspaceManager.registerWindow(newID, on: screen)
+                        continue
+                    }
+
                     if let window = currentWindows.first(where: { $0.id == newID }) {
-                        // Determine which screen a window belongs to
+                        // Fall back to physical position when there's no focus information
                         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
                         let centerX = window.frame.midX
                         let centerY = mainScreenHeight - window.frame.midY
                         let center = CGPoint(x: centerX, y: centerY)
-
 
                         var assigned = false
                         for screen in NSScreen.screens {
@@ -611,7 +629,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             // If it doesn't fall inside any monitor, register it to the nearest one
                             if let nearest = self.closestScreen(to: center) {
                                 workspaceManager.registerWindow(newID, on: nearest)
-                            } else {
                             }
                         }
                     }
@@ -692,14 +709,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// After a window closes, move focus to the window under the mouse cursor
-    private func focusAdjacentWindowAfterClose() {
+    private func focusAdjacentWindowAfterClose(preferringScreen: NSScreen? = nil) {
         // Move focus after a short delay (waiting for tiling to finish)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self = self else { return }
 
+            // Prefer focusing a window on the same monitor as the one that closed
+            // Works around macOS automatically shifting focus to another window of the same app on a different monitor
+            if let screen = preferringScreen {
+                let screenID = ScreenIdentifier(from: screen)
+                if let columns = self.tilingEngine.tiledWindows[screenID],
+                   let firstWindow = columns.compactMap({ $0.first }).first {
+                    firstWindow.focus()
+                    return
+                }
+            }
+
             // Get the current mouse position
             let mouseLocation = NSEvent.mouseLocation
-            
+
             // Find the window at the mouse position
             // Only move focus to windows registered in tiling (excludes unmanaged windows like Arc's)
             if let windowUnderMouse = self.accessibilityManager.getWindowAt(mouseLocation),
