@@ -189,6 +189,18 @@ class WorkspaceManager: ObservableObject {
 		return workspaceWindows[id]?[workspace] ?? []
 	}
 
+	/// Return the monitor the given window is registered to
+	func screenForWindow(_ windowID: CGWindowID) -> NSScreen? {
+		for (screenID, workspaces) in workspaceWindows {
+			for (_, windowSet) in workspaces {
+				if windowSet.contains(windowID) {
+					return screen(for: screenID)
+				}
+			}
+		}
+		return nil
+	}
+
 	/// Move the window to another monitor (for cross-monitor movement)
 	/// Remove it from the original monitor's workspace and register it to the destination monitor's current workspace
 	func moveWindowBetweenScreens(_ windowID: CGWindowID, from sourceScreen: NSScreen, to targetScreen: NSScreen) {
@@ -438,11 +450,11 @@ class WorkspaceManager: ObservableObject {
 
 		// Adjust the active workspace
 		if let currentActive = activeWorkspace[id] {
+			let previousActive = currentActive
+
 			if let newActive = mapping[currentActive] {
 				// When the spot this window was at has moved (or stayed the same)
 				activeWorkspace[id] = newActive
-				if currentActive != newActive {
-				}
 			} else {
 				// When the spot this window was at has been deleted
 				// If it was in a negative space and got deleted, reset it to 0
@@ -454,6 +466,14 @@ class WorkspaceManager: ObservableObject {
 					let newActive = min(currentActive, maxID)
 					activeWorkspace[id] = newActive
 				}
+			}
+
+			// If the active workspace changed, show the destination's windows
+			// (If we don't remove it from savedFrames, isWindowHidden stays true and the border never shows)
+			let resolvedActive = activeWorkspace[id]!
+			if previousActive != resolvedActive {
+				showWindowsForWorkspace(resolvedActive, on: id)
+				focusFirstWindow(in: resolvedActive, on: id)
 			}
 		}
 
