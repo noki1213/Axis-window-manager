@@ -25,6 +25,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowCheckTimer: Timer?
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
+    /// The monitor of the window that had focus on the previous timer cycle
+    /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
+    private var lastFocusedScreen: NSScreen?
     private var wasScreenLocked = false
     private var isWaking = false
 
@@ -469,6 +472,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         let currentCount = currentWindows.count
 
+        // Record "the focus monitor at this moment" for registering the new window
+        // By the time a new window is detected, macOS has already moved focus to it, so
+        // Using the value recorded one cycle ago lets us correctly determine which monitor had focus
+        if let focused = accessibilityManager.getFocusedWindow(),
+           workspaceManager.isWindowInAnyWorkspace(focused.id) {
+            lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
+        }
+
         // Watchdog: even though no window is registered to the workspace,
         // If the window is visibly on screen, the state is broken, so restore it
         if currentCount > 0 {
@@ -590,13 +601,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 // The normal new-window registration path
-                // Prefer registering the monitor that holds the focused window
-                // (When a new window is opened, e.g. via Cmd+N, place it on the monitor that has focus rather than at its physical position)
-                let focusedScreen: NSScreen? = {
-                    guard let focused = accessibilityManager.getFocusedWindow() else { return nil }
-                    return workspaceManager.screenForWindow(focused.id)
-                }()
-
+                // Prefer registering to the focus monitor recorded one cycle ago
+                // (when opening a new window via Cmd+N etc., place it on the monitor that had focus rather than by physical position)
                 for newID in newWindowIDs {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
@@ -604,8 +610,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
-                    // Register with the monitor of the focused window, if there is one
-                    if let screen = focusedScreen {
+                    // Register to the monitor that had focus one cycle ago, if there is one
+                    if let screen = lastFocusedScreen {
                         workspaceManager.registerWindow(newID, on: screen)
                         continue
                     }
