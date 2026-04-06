@@ -52,22 +52,20 @@ class ZenModeManager: ObservableObject {
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
             return
         }
-        
-        // Get the primary (main) monitor
-        // Don't use NSScreen.main since it returns the monitor with the focused window
-        guard let screen = NSScreen.screens.first else {
+
+        // Get the monitor the focused window is on
+        guard let screen = screenContaining(focusedWindow) else {
             return
         }
-        
-        
+
         // Save the state
         focusedWindowID = focusedWindow.id
         isActive = true
-        
+
         // Hide the border
         BorderManager.shared.hideBorder()
-        
-        // Move the other windows on all monitors off-screen
+
+        // Move only the other windows on the same monitor off-screen
         hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
 
         // Also save the focused window's original position (before centering it)
@@ -75,7 +73,7 @@ class ZenModeManager: ObservableObject {
 
         // Move the focused window to the center
         centerWindow(focusedWindow, on: screen)
-        
+
         // Focus the window
         focusedWindow.focus()
     }
@@ -100,6 +98,37 @@ class ZenModeManager: ObservableObject {
         }
     }
     
+    // MARK: - Screen Detection
+
+    /// Return the monitor the window belongs to
+    /// Find the NSScreen containing the window's center point. Returns the primary monitor if none is found
+    private func screenContaining(_ window: WindowInfo) -> NSScreen? {
+        // The window's center point in the AX coordinate system
+        let windowCenter = CGPoint(
+            x: window.frame.midX,
+            y: window.frame.midY
+        )
+
+        // Convert from the AX coordinate system to NSScreen's Cocoa coordinate system before deciding
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+
+        for screen in NSScreen.screens {
+            // Convert NSScreen's frame into the AX coordinate system
+            let axFrame = CGRect(
+                x: screen.frame.minX,
+                y: mainScreenHeight - screen.frame.maxY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
+            if axFrame.contains(windowCenter) {
+                return screen
+            }
+        }
+
+        // Return the primary monitor if none is found
+        return NSScreen.screens.first
+    }
+
     // MARK: - Hide Corner (the AeroSpace approach)
 
     /// The corner used to hide a window
@@ -155,19 +184,15 @@ class ZenModeManager: ObservableObject {
         }
     }
 
-    private func hideOtherWindows(exceptWindowID: CGWindowID, on mainScreen: NSScreen) {
+    private func hideOtherWindows(exceptWindowID: CGWindowID, on screen: NSScreen) {
         hiddenWindowFrames.removeAll()
         hiddenWindowList.removeAll()
 
-        // Gather the window IDs belonging to the current workspace across all monitors
-        var allWorkspaceIDs = Set<CGWindowID>()
-        for screen in NSScreen.screens {
-            let ids = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
-            allWorkspaceIDs.formUnion(ids)
-        }
+        // Collect only the window IDs belonging to the workspace of the monitor that started Zen mode
+        let workspaceIDs = Set(WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen))
 
-        // Decide which corner of the main screen to hide it in
-        let corner = optimalHideCorner(for: mainScreen)
+        // Determine the hidden corner
+        let corner = optimalHideCorner(for: screen)
 
         // Get all windows
         let allWindows = AccessibilityManager.shared.getAllWindows()
@@ -183,8 +208,9 @@ class ZenModeManager: ObservableObject {
                 continue
             }
 
-            // Skip windows that don't belong to the current workspace
-            if !allWorkspaceIDs.contains(window.id) {
+            // Skip windows outside the workspace of the monitor that started Zen mode
+            // (don't touch windows on other monitors)
+            if !workspaceIDs.contains(window.id) {
                 continue
             }
 
@@ -192,12 +218,10 @@ class ZenModeManager: ObservableObject {
             hiddenWindowFrames[window.id] = window.frame
             hiddenWindowList.append(window)
 
-            // Move to a corner of the main screen (position only, size unchanged)
-            let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
+            // Move to the corner (position only, size unchanged)
+            let hidePos = hidePosition(for: window, corner: corner, on: screen)
             window.setPosition(hidePos)
-
         }
-
     }
     
     private func restoreHiddenWindows() {
@@ -263,7 +287,7 @@ class ZenModeManager: ObservableObject {
     func adjustWidth(increase: Bool) {
         guard isActive else { return }
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-        guard let screen = NSScreen.screens.first else { return }
+        guard let screen = screenContaining(focusedWindow) else { return }
 
         let step: CGFloat = 0.05
         widthRatio = max(0.1, min(1.0, widthRatio + (increase ? step : -step)))
