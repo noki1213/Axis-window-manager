@@ -201,6 +201,18 @@ class WorkspaceManager: ObservableObject {
 		return nil
 	}
 
+	/// Return the monitor and workspace number the given window belongs to
+	func workspaceLocation(for windowID: CGWindowID) -> (screen: NSScreen, workspace: Int)? {
+		for (screenID, workspaces) in workspaceWindows {
+			for (workspace, windowSet) in workspaces {
+				if windowSet.contains(windowID), let screen = screen(for: screenID) {
+					return (screen, workspace)
+				}
+			}
+		}
+		return nil
+	}
+
 	/// Move the window to another monitor (for cross-monitor movement)
 	/// Remove it from the original monitor's workspace and register it to the destination monitor's current workspace
 	func moveWindowBetweenScreens(_ windowID: CGWindowID, from sourceScreen: NSScreen, to targetScreen: NSScreen) {
@@ -1222,7 +1234,8 @@ class WorkspaceManager: ObservableObject {
 				snapshot.rowHeightRatios = nil
 				if tilingSnapshots[targetScreenID] == nil {
 					tilingSnapshots[targetScreenID] = [:]
-				}
+
+                }
 				tilingSnapshots[targetScreenID]?[nextNewWS] = snapshot
 			}
 
