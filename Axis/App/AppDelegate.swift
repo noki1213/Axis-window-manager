@@ -796,7 +796,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func onActiveAppChanged(_ notification: Notification) {
-        // Handling for when the active app changes (as needed)
+        // Don't interfere while a workspace switch is in progress
+        guard !workspaceManager.isSwitching else { return }
+        guard let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+
+        // Ignore Axis's own activation notifications
+        if activatedApp.bundleIdentifier == Bundle.main.bundleIdentifier {
+            return
+        }
+
+        // The focused window can be undetermined right after an app switch, so wait a bit before deciding
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self else { return }
+
+            let focusedWindow = self.accessibilityManager.getFocusedWindow()
+            let targetWindow: WindowInfo?
+
+            // Prefer the frontmost focused window first
+            if let focusedWindow = focusedWindow,
+               focusedWindow.app.processIdentifier == activatedApp.processIdentifier,
+               self.workspaceManager.isWindowInAnyWorkspace(focusedWindow.id) {
+                targetWindow = focusedWindow
+            } else {
+                // If focus can't be determined, pick one of this app's managed windows
+                targetWindow = self.accessibilityManager.getWindows(for: activatedApp)
+                    .first { window in
+                        window.shouldBeManaged() && self.workspaceManager.isWindowInAnyWorkspace(window.id)
+                    }
+            }
+
+            guard let targetWindow = targetWindow,
+                  let location = self.workspaceManager.workspaceLocation(for: targetWindow.id) else {
+                return
+            }
+
+            let currentWorkspace = self.workspaceManager.currentWorkspace(on: location.screen)
+            guard location.workspace != currentWorkspace else { return }
+
+            self.workspaceManager.switchWorkspace(
+                to: location.workspace,
+                on: location.screen,
+                focusWindowID: targetWindow.id
+            )
+        }
     }
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
