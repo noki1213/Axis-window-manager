@@ -177,11 +177,13 @@ class BorderManager: ObservableObject {
         
         let windowChanged = (currentWindowID != focusedWindow.id)
         let targetRect = calculateBorderRect(for: focusedWindow.frame)
-        
+
         self.currentWindow = focusedWindow
         self.currentWindowID = focusedWindow.id
-        
+
         if windowChanged {
+            // The focused window changed = it left the empty monitor
+            TilingEngine.shared.cursorScreen = nil
             // If the window changed: make sure to remove the old one before creating a new one!
             if let oldWindow = borderWindow {
                 oldWindow.close()
@@ -196,9 +198,18 @@ class BorderManager: ObservableObject {
             // Show it synchronously (doing it async causes a race condition where two get shown)
             newWindow.orderFront(nil)
         } else {
-            // If it's the same window: update position only (don't recreate it, to avoid flicker)
-            borderWindow?.setFrame(targetRect, display: true)
-            borderWindow?.orderFront(nil)
+            // If it's the same window
+            if borderWindow == nil {
+                // Recreate it if we return to the same window after hideBorder() removed it
+                let (newWindow, newView) = createBorderWindow(for: targetRect)
+                self.borderWindow = newWindow
+                self.borderView = newView
+                newWindow.orderFront(nil)
+            } else {
+                // Update position only (don't recreate it, to avoid flicker)
+                borderWindow?.setFrame(targetRect, display: true)
+                borderWindow?.orderFront(nil)
+            }
         }
     }
     
