@@ -351,8 +351,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Run the initial tiling
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.tilingEngine.tileAllScreens()
-            self?.borderManager.updateBorder()
+            guard let self = self else { return }
+            self.tilingEngine.tileAllScreens()
+            self.borderManager.updateBorder()
+        }
+
+        // Focus the first window right after launch
+        // (runs with a short delay after tiling finishes)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            guard let self = self else { return }
+            // Prefer the main screen, otherwise search the other screens
+            let screens = [NSScreen.main].compactMap { $0 } + NSScreen.screens.filter { $0 != NSScreen.main }
+            for screen in screens {
+                let screenID = ScreenIdentifier(from: screen)
+                if let columns = self.tilingEngine.tiledWindows[screenID],
+                   let firstWindow = columns.compactMap({ $0.first }).first {
+                    firstWindow.focus()
+                    break
+                }
+            }
         }
 
         // Watch for window changes
