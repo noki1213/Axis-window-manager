@@ -844,9 +844,11 @@ class TilingEngine: ObservableObject {
 
         // Target only the current workspace's windows
         let workspaceIDs = getWorkspaceWindowIDs(on: targetScreen)
+        // Also exclude windows off-screen because Zen mode hid them
+        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
         let allColumns = tiledWindows[targetID] ?? []
         let columns = allColumns.map { column in
-            column.filter { workspaceIDs.contains($0.id) }
+            column.filter { workspaceIDs.contains($0.id) && !zenHiddenIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
         guard !columns.isEmpty else { return nil }
 

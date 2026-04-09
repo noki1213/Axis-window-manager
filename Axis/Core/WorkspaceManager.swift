@@ -678,8 +678,10 @@ class WorkspaceManager: ObservableObject {
 		// Reset the cache since this is a user action
 		resetClosedWindowsCache()
 
-		// Disable Zen Mode first if it's active
-		if ZenModeManager.shared.isActive {
+		// Clear it if Zen Mode is active and this is a space switch on the same monitor
+		// (Not cleared by a space switch on a different monitor)
+		if ZenModeManager.shared.isActive,
+		   ZenModeManager.shared.activeScreen == screen {
 			ZenModeManager.shared.toggle()
 		}
 
