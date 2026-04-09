@@ -14,13 +14,26 @@ class ZenModeManager: ObservableObject {
 
     @Published var isActive: Bool = false
     
-    private var focusedWindowID: CGWindowID?
+    private(set) var focusedWindowID: CGWindowID?
+
+    /// The screen Zen mode is active on (used so a Space switch on another monitor doesn't cancel it)
+    private(set) var activeScreen: NSScreen?
 
     /// The window width fraction while in Zen mode (default 75%)
     private var widthRatio: CGFloat = 0.75
 
     /// Save the original position of a window moved off-screen
     private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
+
+    /// The set of window IDs hidden off-screen by Zen mode (used by TilingEngine to exclude them from focus candidates)
+    /// Doesn't include the focused window itself (it's saved in hiddenWindowFrames for restoration, but is actually visible)
+    var hiddenWindowIDs: Set<CGWindowID> {
+        var ids = Set(hiddenWindowFrames.keys)
+        if let focusedID = focusedWindowID {
+            ids.remove(focusedID)
+        }
+        return ids
+    }
 
     /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on getAllWindows)
     private var hiddenWindowList: [WindowInfo] = []
@@ -41,6 +54,7 @@ class ZenModeManager: ObservableObject {
         guard isActive else { return [:] }
         isActive = false
         focusedWindowID = nil
+        activeScreen = nil
         widthRatio = 0.75
         let frames = hiddenWindowFrames
         hiddenWindowFrames.removeAll()
@@ -60,10 +74,8 @@ class ZenModeManager: ObservableObject {
 
         // Save the state
         focusedWindowID = focusedWindow.id
+        activeScreen = screen
         isActive = true
-
-        // Hide the border
-        BorderManager.shared.hideBorder()
 
         // Move only the other windows on the same monitor off-screen
         hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
@@ -76,6 +88,11 @@ class ZenModeManager: ObservableObject {
 
         // Focus the window
         focusedWindow.focus()
+
+        // Update the border after centering finishes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            BorderManager.shared.updateBorder()
+        }
     }
     
     func exit() {
@@ -83,6 +100,7 @@ class ZenModeManager: ObservableObject {
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
         focusedWindowID = nil
+        activeScreen = nil
         widthRatio = 0.75
         
         // Move a window that ended up off-screen back to its original position
