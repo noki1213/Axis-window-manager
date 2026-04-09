@@ -472,13 +472,14 @@ class HotkeyManager: ObservableObject {
 		// MARK: Workspace
 		case .workspaceNext:
 			DispatchQueue.main.async {
-				guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
+				// If cursorScreen is set (we're on an empty monitor), prefer that
+				guard let screen = TilingEngine.shared.cursorScreen ?? WorkspaceManager.shared.focusedScreen() else { return }
 				WorkspaceManager.shared.switchToNextWorkspace(on: screen)
 			}
 
 		case .workspacePrev:
 			DispatchQueue.main.async {
-				guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
+				guard let screen = TilingEngine.shared.cursorScreen ?? WorkspaceManager.shared.focusedScreen() else { return }
 				WorkspaceManager.shared.switchToPreviousWorkspace(on: screen)
 			}
 
