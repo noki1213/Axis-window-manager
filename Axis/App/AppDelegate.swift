@@ -482,11 +482,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Watchdog: even though no window is registered to the workspace,
         // If the window is visibly on screen, the state is broken, so restore it
+        // Note: while moving to an empty Space, the current Space may be empty but other Spaces still have windows, so
+        //       Treat it as fine if there's at least one registration across all Spaces
         if currentCount > 0 {
-            let hasRegisteredWindows = NSScreen.screens.contains { screen in
-                let ids = workspaceManager.windowIDsForCurrentWorkspace(on: screen)
-                return !ids.isEmpty
-            }
+            let hasRegisteredWindows = workspaceManager.hasAnyRegisteredWindows()
             if !hasRegisteredWindows {
                 // First try restoring from closedWindowsCache
                 var restoredFromCache = false

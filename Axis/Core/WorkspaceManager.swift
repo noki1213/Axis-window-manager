@@ -237,6 +237,14 @@ class WorkspaceManager: ObservableObject {
 		workspaceWindows[id]?[workspace]?.insert(windowID)
 	}
 
+	/// Check whether even a single window is registered across all spaces
+	/// - Returns: true if any space has a window
+	func hasAnyRegisteredWindows() -> Bool {
+		return workspaceWindows.values.contains { workspaces in
+			workspaces.values.contains { !$0.isEmpty }
+		}
+	}
+
 	/// Check whether the window is already registered to any workspace
 	/// - Parameter windowID: the window ID being checked
 	/// - Returns: true if it's already registered
@@ -451,6 +459,7 @@ class WorkspaceManager: ObservableObject {
 		// Adjust the active workspace
 		if let currentActive = activeWorkspace[id] {
 			let previousActive = currentActive
+			var activeWasDeleted = false
 
 			if let newActive = mapping[currentActive] {
 				// When the spot this window was at has moved (or stayed the same)
@@ -459,6 +468,7 @@ class WorkspaceManager: ObservableObject {
 				// When the spot this window was at has been deleted
 				// If it was in a negative space and got deleted, reset it to 0
 				// If it was in a positive space and got deleted, clamp it to the max value
+				activeWasDeleted = true
 				if currentActive < 0 {
 					activeWorkspace[id] = 0
 				} else {
@@ -468,10 +478,14 @@ class WorkspaceManager: ObservableObject {
 				}
 			}
 
-			// If the active workspace changed, show the destination's windows
+			// If the active workspace changed, or if the original space was deleted,
+			// Show the destination window
 			// (If we don't remove it from savedFrames, isWindowHidden stays true and the border never shows)
+			// Note: even if the number stays the same, the content can be swapped out by a delete-then-renumber
+			//       e.g. if space 1 is empty and gets deleted, and space 2 shifts down to 1,
+			//           the number stays 1 but the content changes to Xcode, so show/focus is needed
 			let resolvedActive = activeWorkspace[id]!
-			if previousActive != resolvedActive {
+			if previousActive != resolvedActive || activeWasDeleted {
 				showWindowsForWorkspace(resolvedActive, on: id)
 				focusFirstWindow(in: resolvedActive, on: id)
 			}
