@@ -52,3 +52,5 @@ Carthage/Build
 # Swift Package Manager
 .swiftpm/
 .build/
+reference/
+ref/
