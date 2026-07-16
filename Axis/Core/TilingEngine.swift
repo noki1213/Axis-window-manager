@@ -312,7 +312,7 @@ class TilingEngine: ObservableObject {
     }
 
     /// Move the mouse cursor to the window's center
-    private func moveCursorToWindow(_ window: WindowInfo) {
+    func moveCursorToWindow(_ window: WindowInfo) {
         // Move after a short delay (waiting for the window's position change to take effect)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             // Get the window's current position
