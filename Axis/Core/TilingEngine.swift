@@ -141,6 +141,11 @@ class TilingEngine: ObservableObject {
             guard !zenHiddenIDs.contains(window.id) else { continue }
             // Floating windows only (hover-designated or float targets)
             guard WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat() else { continue }
+            // Only raise genuine windows (standard windows or dialogs)
+            // (so we don't raise invisible helper windows, like Arc's, on every pass)
+            guard window.shouldBeManaged()
+                || window.subrole == kAXDialogSubrole as String
+                || window.subrole == kAXSystemDialogSubrole as String else { continue }
             // Only the ones on this screen (judged by window center)
             let center = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
             guard screen.frame.contains(center) else { continue }
