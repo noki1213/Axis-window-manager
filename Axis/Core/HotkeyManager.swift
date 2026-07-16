@@ -401,6 +401,14 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
+		case .raiseFloatingWindows:
+			DispatchQueue.main.async {
+				// Bring floating windows on every screen to the front (without stealing focus)
+				for screen in NSScreen.screens {
+					TilingEngine.shared.raiseFloatingWindows(on: screen)
+				}
+			}
+
 		// MARK: Zen mode
 		case .zenToggle:
 			DispatchQueue.main.async {

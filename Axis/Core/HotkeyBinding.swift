@@ -30,6 +30,7 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	// Hover (floating)
 	case hoverToggle
 	case hoverFocusCycle
+	case raiseFloatingWindows
 	// Zen mode
 	case zenToggle
 	// Mode switching
@@ -173,6 +174,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.quickGapDown: "下のギャップを操作",
 		.hoverToggle: "ホバー ON/OFF",
 		.hoverFocusCycle: "ホバーウィンドウにフォーカス",
+		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
 		.zenToggle: "Zen モード ON/OFF",
 		.windowSelectMode: "Window Select モード",
 		.gapSelectMode: "Gap Select モード",
@@ -204,6 +206,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.quickGapDown: .quickGapResize,
 		.hoverToggle: .hover,
 		.hoverFocusCycle: .hover,
+		.raiseFloatingWindows: .hover,
 		.zenToggle: .modeSwitching,
 		.windowSelectMode: .modeSwitching,
 		.gapSelectMode: .modeSwitching,
@@ -279,6 +282,7 @@ struct HotkeyBinding: Codable, Identifiable {
 			// Hover
 			HotkeyBinding(action: .hoverToggle,     keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
 			HotkeyBinding(action: .hoverFocusCycle, keyCode: kVK_ANSI_H, modifiers: ctrlOptShift),
+			HotkeyBinding(action: .raiseFloatingWindows, keyCode: kVK_ANSI_B, modifiers: ctrlOpt),
 			// Zen mode
 			HotkeyBinding(action: .zenToggle, keyCode: kVK_ANSI_Z, modifiers: ctrlOpt),
 			// Mode switching

@@ -112,8 +112,43 @@ class TilingEngine: ObservableObject {
 
         // Compute and apply the tiling layout
         applyColumnTiling(columns: columns, on: screen)
+
+        // Re-raise floating windows to the front on every tiling pass (keeps them from getting hidden behind tiles)
+        raiseFloatingWindows(on: screen)
     }
-    
+
+    /// Raise floating windows (hover-designated or shouldFloat) on the given screen to the front
+    /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
+    /// Doesn't steal focus.
+    func raiseFloatingWindows(on screen: NSScreen) {
+        let accessibilityManager = AccessibilityManager.shared
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+        let allWindows = accessibilityManager.getAllWindows()
+        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
+        let myPID = ProcessInfo.processInfo.processIdentifier
+
+        // For converting AX coordinates (top-left origin) to NSScreen coordinates (bottom-left origin)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+
+        for window in allWindows {
+            // Axis's own windows are excluded
+            guard window.app.processIdentifier != myPID else { continue }
+            // Windows not showing on screen are excluded
+            guard onScreenIDs.contains(window.id) else { continue }
+            // Windows currently evacuated (another workspace, the palette, Zen) are excluded
+            guard !WorkspaceManager.shared.isWindowHidden(window.id) else { continue }
+            guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { continue }
+            guard !zenHiddenIDs.contains(window.id) else { continue }
+            // Floating windows only (hover-designated or float targets)
+            guard WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat() else { continue }
+            // Only the ones on this screen (judged by window center)
+            let center = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
+            guard screen.frame.contains(center) else { continue }
+
+            window.raise()
+        }
+    }
+
     /// Run tiling across all screens
     func tileAllScreens() {
         for screen in NSScreen.screens {
