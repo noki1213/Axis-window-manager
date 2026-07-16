@@ -477,6 +477,11 @@ class WindowPaletteManager {
 			guard !workspaceManager.isWindowInAnyWorkspace(window.id) else { continue }
 			// Minimized and fullscreen windows are excluded
 			guard !window.isMinimized && !window.isFullscreen else { continue }
+			// Only targets real windows (standard windows or dialogs)
+			// (So invisible helper windows, like the ones Arc has, don't show up in the list)
+			guard window.shouldBeManaged()
+				|| window.subrole == kAXDialogSubrole as String
+				|| window.subrole == kAXSystemDialogSubrole as String else { continue }
 
 			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
 			let screen = screenForWindow(window) ?? NSScreen.screens.first
