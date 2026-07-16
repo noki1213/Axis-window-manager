@@ -10,6 +10,8 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Keyboard Navigation: Move focus between windows.
 - Window Movement: Reorganize windows with keyboard shortcuts.
 - Hover Mode: Float a window above the tiling layout and position it freely.
+- Focus Follows Mouse: Automatically focus and raise the window under the mouse pointer (delay adjustable in Settings, can be turned off).
+- Floating Windows on Top: Dialogs and floating windows are automatically kept above tiled windows. A rescue shortcut brings them all to the front at once.
 - Zen Mode: Focus on a single window by centering it and hiding others (distraction-free).
 - Gap Selection Mode: Resize windows by selecting and moving gaps between them.
 - Window Selection Mode: Select and merge multiple windows into columns.
@@ -53,6 +55,7 @@ If the key combination is already used by another action, a conflict warning wil
 ### Window Palette
 - Lists all windows across all workspaces
 - Navigate up/down (across workspaces) and left/right (between windows)
+- Floating windows not assigned to any workspace (e.g. System Settings, dialogs) appear in a "Float" section at the bottom of each display column
 - Press Return to switch to the selected window
 
 ### Window Selection Mode
@@ -111,6 +114,8 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - キーボード操作：ウィンドウ間のフォーカス移動
 - ウィンドウ移動：キーボードショートカットでウィンドウを再配置
 - ホバーモード：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
+- Focus Follows Mouse：マウスを乗せたウィンドウを自動でフォーカス＆前面化します（遅延は設定で変更可能、オフにもできます）
+- 浮遊ウィンドウの前面キープ：ダイアログなどの浮遊ウィンドウがタイルの裏に隠れないよう常に前面に保ちます。全部をまとめて前面に出す救出キーもあります
 - Zen モード：一つのウィンドウに集中するため、中央に配置して他のウィンドウを非表示にします
 - ギャップ選択モード：ウィンドウ間のギャップを選択して移動することでリサイズ
 - ウィンドウ選択モード：複数のウィンドウを選択してまとめて列に統合
@@ -155,6 +160,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 ### ウィンドウパレット
 - 全ワークスペースのウィンドウを一覧表示
 - 上下に移動（ワークスペース間）、左右に移動（ウィンドウ間）
+- ワークスペースに属さない浮遊ウィンドウ（システム設定・ダイアログ等）は、各モニター列の一番下に「Float」セクションとして表示
 - Return で選択したウィンドウに切り替え
 
 ### ウィンドウ選択モード
