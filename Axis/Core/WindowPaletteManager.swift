@@ -461,6 +461,45 @@ class WindowPaletteManager {
 			result[i].spaces.sort { $0.workspace < $1.workspace }
 		}
 
+		// --- Append the Float section (floating windows not registered to any workspace) to the end of each Display ---
+		// Floating windows like settings apps or dialogs aren't registered to a workspace, so
+		// Doesn't show up in the normal collection. Pick it up here and add it as the "Float" section (workspace = -1).
+		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+		let myPID = ProcessInfo.processInfo.processIdentifier
+		var floatingItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+
+		for window in allWindows {
+			// Excludes Axis's own windows (palette, border, etc.)
+			guard window.app.processIdentifier != myPID else { continue }
+			// Only windows currently shown on screen
+			guard onScreenIDs.contains(window.id) else { continue }
+			// Excluded if it's already registered to some workspace, since it already shows up in the normal section
+			guard !workspaceManager.isWindowInAnyWorkspace(window.id) else { continue }
+			// Minimized and fullscreen windows are excluded
+			guard !window.isMinimized && !window.isFullscreen else { continue }
+
+			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
+			let screen = screenForWindow(window) ?? NSScreen.screens.first
+			guard let targetScreen = screen else { continue }
+			let screenID = ScreenIdentifier(from: targetScreen)
+
+			let item = WindowPaletteItem(
+				windowID: window.id,
+				appName: window.app.localizedName ?? "不明なアプリ",
+				windowTitle: window.title,
+				appIcon: window.app.icon,
+				workspace: -1,
+				screenID: screenID
+			)
+			floatingItemsByScreen[screenID, default: []].append(item)
+		}
+
+		for i in result.indices {
+			if let floatingItems = floatingItemsByScreen[result[i].screenID], !floatingItems.isEmpty {
+				result[i].spaces.append(WindowPaletteSection(workspace: -1, items: floatingItems))
+			}
+		}
+
 		return result
 	}
 
@@ -473,7 +512,8 @@ class WindowPaletteManager {
 		let currentWS = workspaceManager.currentWorkspace(on: screen)
 
 		// Switch if it's on a different workspace
-		if item.workspace != currentWS {
+		// (Windows in the Float section (workspace == -1) don't belong to any workspace, so don't switch them)
+		if item.workspace != -1 && item.workspace != currentWS {
 			workspaceManager.switchWorkspace(to: item.workspace, on: screen)
 		}
 
