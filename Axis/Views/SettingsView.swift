@@ -52,6 +52,7 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @ObservedObject private var accessibilityManager = AccessibilityManager.shared
+    @ObservedObject private var ffm = FocusFollowsMouseManager.shared
     @State private var launchAtLogin = false
 
     var body: some View {
@@ -85,6 +86,23 @@ struct GeneralSettingsView: View {
                     Spacer()
                 }
                 .padding(.vertical, 4)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Focus follows mouse", isOn: $ffm.isEnabled)
+                    Text("Automatically focus and raise the window under the mouse pointer.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if ffm.isEnabled {
+                        HStack {
+                            Text("Delay: \(Int(ffm.delayMs)) ms")
+                            Slider(value: $ffm.delayMs, in: 0...500, step: 10)
+                        }
+                    }
+                }
+                .padding(8)
             }
 
             Spacer()

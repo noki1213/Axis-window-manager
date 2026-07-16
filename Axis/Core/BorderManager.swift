@@ -20,7 +20,7 @@ class BorderManager: ObservableObject {
 
     private var isUpdating = false // 競合状態防止フラグ
     private var pendingUpdate = false // 更新中に新しいリクエストが来たかどうか
-    private var isInMissionControl = false // ミッションコントロール表示中フラグ
+    private(set) var isInMissionControl = false // ミッションコントロール表示中フラグ（外部からは読み取りのみ）
 
     // Settings
     private let padding: CGFloat = 10.0 // WindowSelectManagerと同じパディング
