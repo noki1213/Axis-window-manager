@@ -529,6 +529,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let currentWindowIDs = Set(currentWindows.map { $0.id })
 
+        // Exited fullscreen and returned to the screen, but to a workspace that isn't currently active
+        // If it belongs to one, evacuate it to the hidden corner (do nothing if there's nothing to act on)
+        let strayHiddenIDs = workspaceManager.hideStrayVisibleWindows(currentWindows: currentWindows)
+
         if currentCount != lastWindowCount {
             // When a window was closed
             if currentCount < lastWindowCount {
@@ -544,21 +548,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
 
-                // Save the cache before unregistering, so we can restore later
-                workspaceManager.cacheCurrentStateOnWindowClose()
-
-                // Before unregistering, record which monitor the closed window was on
-                // (screenForWindow no longer works once the window is unregistered)
-                let preferredScreen = closedWindowIDs.compactMap {
-                    workspaceManager.screenForWindow($0)
-                }.first
-
-                // Also unregister from the workspace
-                for closedID in closedWindowIDs {
-                    workspaceManager.unregisterWindow(closedID)
+                // Among windows that "disappeared from the screen," ones that merely entered native fullscreen
+                // distinguishes this case from windows that are genuinely closed (or whose app quit entirely).
+                // allWindows fetches every window per app via AX, so
+                // Windows that went fullscreen and moved to another Space are also marked isFullscreen=true
+                // is still included there. A window that's genuinely closed disappears from allWindows too.
+                var allWindowsByID: [CGWindowID: WindowInfo] = [:]
+                for w in allWindows {
+                    allWindowsByID[w.id] = w
                 }
+                let fullscreenWindowIDs = closedWindowIDs.filter { allWindowsByID[$0]?.isFullscreen == true }
+                let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs)
 
-                focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
+                // Only do the cache save, unregister, and focus handling if a window was genuinely closed
+                if !reallyClosedWindowIDs.isEmpty {
+                    // Save the cache before unregistering, so we can restore later
+                    workspaceManager.cacheCurrentStateOnWindowClose()
+
+                    // Before unregistering, record which monitor the closed window was on
+                    // (screenForWindow no longer works once the window is unregistered)
+                    let preferredScreen = reallyClosedWindowIDs.compactMap {
+                        workspaceManager.screenForWindow($0)
+                    }.first
+
+                    // Also unregister from the workspace
+                    for closedID in reallyClosedWindowIDs {
+                        workspaceManager.unregisterWindow(closedID)
+                    }
+
+                    focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
+                }
+                // fullscreenWindowIDs (windows that merely entered fullscreen) are
+                // Do nothing, keeping the workspace registration as is.
+                // Once fullscreen is exited, hideStrayVisibleWindows and normal tiling will
+                // It automatically returns to its original workspace/monitor assignment.
             }
 
             // When a window was added
@@ -567,8 +590,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Try to restore from the cache
                 // Restore a vanished window if it comes back after unlock or wake from sleep
+                // A window that's still registered in a workspace (one that, on exiting fullscreen,
+                // a window that came back) doesn't need restoring, so skip it.
+                // Without this skip, the stale cache would roll back the current state.
                 var restoredFromCache = false
                 for newID in newWindowIDs {
+                    if workspaceManager.isWindowInAnyWorkspace(newID) {
+                        continue
+                    }
                     if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: newID) {
                         restoredFromCache = true
                         break
@@ -656,7 +685,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
-                focusNewWindow(newWindowIDs: newWindowIDs, allWindows: currentWindows)
+                // windows re-hidden by hideStrayVisibleWindows (whose original workspace
+                // don't move focus to a fullscreen-returned window that isn't currently active
+                focusNewWindow(newWindowIDs: newWindowIDs.subtracting(strayHiddenIDs), allWindows: currentWindows)
             }
 
             lastWindowCount = currentCount
@@ -864,15 +895,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
 
             // Update lastWindowIDs with the current Space's on-screen windows
+            // Match the same criteria as checkForWindowChanges (on-screen + shouldBeManaged).
+            // Including it in lastWindowIDs without filtering would, for a window returning from fullscreen,
+            // The window would stop being caught by checkForWindowChanges' "new window detected" path
             let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
             let allWindows = self.accessibilityManager.getAllWindows()
-            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
-            // Reinitialize the workspace's window registrations
-            // (The window set may change during a macOS Space switch)
+            // Initialize the workspace's window registration
+            // (runs only the first time; the isInitialized guard makes subsequent calls no-ops)
             self.workspaceManager.initializeWithCurrentWindows()
+
+            // Register on-screen windows that aren't registered to any workspace
+            // (when actually switching real macOS Spaces, that Space's windows
+            //   to make sure it doesn't get left behind unregistered)
+            let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+            for window in onScreenWindows {
+                if self.workspaceManager.isWindowInAnyWorkspace(window.id) {
+                    continue
+                }
+                let centerX = window.frame.midX
+                let centerY = mainScreenHeight - window.frame.midY
+                let center = CGPoint(x: centerX, y: centerY)
+                var assigned = false
+                for screen in NSScreen.screens {
+                    if screen.frame.contains(center) {
+                        self.workspaceManager.registerWindow(window.id, on: screen)
+                        assigned = true
+                        break
+                    }
+                }
+                if !assigned, let nearest = self.closestScreen(to: center) {
+                    self.workspaceManager.registerWindow(window.id, on: nearest)
+                }
+            }
+
+            // Exited fullscreen and returned, but to a workspace that's not currently active
+            // If it belongs to one, evacuate it to the hidden corner
+            self.workspaceManager.hideStrayVisibleWindows(currentWindows: onScreenWindows)
 
             // Reapply tiling
             self.tilingEngine.tileAllScreens()
