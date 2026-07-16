@@ -336,6 +336,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start hotkey monitoring
         hotkeyManager.start()
 
+        // Start watching for Focus Follows Mouse (auto-focus the window under the cursor)
+        FocusFollowsMouseManager.shared.start()
+
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
 
@@ -449,8 +452,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkForWindowChanges() {
-        // Skip while a Space switch, workspace switch, monitor-change handling, or wake-from-sleep is in progress
-        guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange && !isWaking else {
+        // While a Space switch, workspace switch, monitor-change handling, or wake from sleep is in progress,
+        // Skip while Mission Control is showing
+        // (during Mission Control, getOnScreenWindowIDs() becomes unreliable, causing false-positive close detection and
+        //   because the watchdog's tileAllScreens() would move real windows while Mission Control is showing.
+        //   lastWindowIDs isn't updated, so actual additions/removals during Mission Control are detected on the next cycle after it ends)
+        guard !isSpaceSwitching && !workspaceManager.isSwitching && !isHandlingScreenChange && !isWaking && !borderManager.isInMissionControl else {
             return
         }
 

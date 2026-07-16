@@ -20,7 +20,7 @@ class BorderManager: ObservableObject {
 
     private var isUpdating = false // Flag to prevent race conditions
     private var pendingUpdate = false // Whether a new request arrived while updating
-    private var isInMissionControl = false // Flag for when Mission Control is showing
+    private(set) var isInMissionControl = false // Flag for when Mission Control is showing (read-only from outside)
 
     // Settings
     private let padding: CGFloat = 10.0 // Same padding as WindowSelectManager
