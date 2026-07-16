@@ -123,6 +123,14 @@ class WorkspaceManager: ObservableObject {
 	/// Whether it was restored from saved data at launch
 	private(set) var didRestoreStateFromDisk: Bool = false
 
+	/// Whether the initial workspace setup (initializeWithCurrentWindows) has completed
+	/// Once it becomes true, calling it again (e.g. from a Space switch) does nothing.
+	/// Reason: initializeWithCurrentWindows() only handles "windows currently visible on screen"
+	/// Re-register to workspace 0, and forcibly reset activeWorkspace to 0 as well.
+	/// Running this every time fullscreen is entered or exited (which fires a Space-switch notification) would
+	/// The workspace assignments the user made would be lost.
+	private(set) var isInitialized: Bool = false
+
 	/// A cache of window identity info (used when it's off screen and getAllWindows can't retrieve it)
 	private var windowIdentityCache: [CGWindowID: (bundleID: String, title: String)] = [:]
 
@@ -575,9 +583,9 @@ class WorkspaceManager: ObservableObject {
 
 	
 	func initializeWithCurrentWindows() {
-		// Skip reinitializing on Space change if we already restored from saved data
-		// (So we don't overwrite the restore result right after launch)
-		if didRestoreStateFromDisk {
+		// Skip if it's already been restored from saved data, or if the initial setup is already complete
+		// (So being called on every Space switch doesn't corrupt the workspace assignments)
+		if didRestoreStateFromDisk || isInitialized {
 			return
 		}
 
@@ -647,6 +655,9 @@ class WorkspaceManager: ObservableObject {
 				workspaceWindows[nearestID]?[0]?.insert(window.id)
 			}
 		}
+
+		// Initial setup complete. From here on, this function does nothing thanks to the guard at the top
+		isInitialized = true
 	}
 
 	/// Force re-initialization if the state is broken (for the watchdog)
@@ -655,6 +666,7 @@ class WorkspaceManager: ObservableObject {
 
 		// Clear the state
 		didRestoreStateFromDisk = false
+		isInitialized = false
 		workspaceWindows.removeAll()
 		savedFrames.removeAll()
 		tilingSnapshots.removeAll()
@@ -718,11 +730,12 @@ class WorkspaceManager: ObservableObject {
 		showWindowsForWorkspace(workspace, on: id)
 		tilingEngine.tile(on: screen)
 
-		// 6. Focus a window in the workspace
+		// 6. Focus a window in the workspace (note down the ID actually focused)
+		let focusedID: CGWindowID?
 		if let windowID = focusWindowID {
-			focusWindow(windowID, in: workspace, on: id)
+			focusedID = focusWindow(windowID, in: workspace, on: id)
 		} else {
-			focusFirstWindow(in: workspace, on: id)
+			focusedID = focusFirstWindow(in: workspace, on: id)
 		}
 
 		// 7. Hide the old windows after a short delay (once the new windows have rendered on screen)
@@ -730,10 +743,8 @@ class WorkspaceManager: ObservableObject {
 			self?.hideWindowsForWorkspace(currentWS, on: id)
 		}
 
-		// 8. Update the border
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-			BorderManager.shared.updateBorder()
-		}
+		// 8. Update the border and move the cursor to the center of the focused window
+		syncBorderAndCursor(to: focusedID)
 
 		// 9. Update the workspace number in the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
@@ -822,24 +833,23 @@ class WorkspaceManager: ObservableObject {
 		// If cleanup automatically switched to the destination workspace,
 		// Or if the active space changed because cleanup compacted the spaces,
 		// Restore and tile windows that had been stashed off screen
+		let focusedID: CGWindowID?
 		if updatedCurrentWS == workspace || updatedCurrentWS != prevActiveWS {
 			showWindowsForWorkspace(updatedCurrentWS, on: id)
 			tilingEngine.tile(on: screen)
 			// If the moved window is on the new active space, focus it
 			if workspaceWindows[id]?[updatedCurrentWS]?.contains(windowID) == true {
-				focusWindow(windowID, in: updatedCurrentWS, on: id)
+				focusedID = focusWindow(windowID, in: updatedCurrentWS, on: id)
 			} else {
-				focusFirstWindow(in: updatedCurrentWS, on: id)
+				focusedID = focusFirstWindow(in: updatedCurrentWS, on: id)
 			}
 		} else {
 			// Focus a window remaining in the original workspace
-			focusFirstWindow(in: updatedCurrentWS, on: id)
+			focusedID = focusFirstWindow(in: updatedCurrentWS, on: id)
 		}
 
-		// Update the border
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-			BorderManager.shared.updateBorder()
-		}
+		// Update the border and move the cursor to the center of the focused window
+		syncBorderAndCursor(to: focusedID)
 
 		// Update the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
@@ -977,7 +987,8 @@ class WorkspaceManager: ObservableObject {
 		let allWindows = accessibilityManager.getAllWindows()
 
 		for window in allWindows {
-			if windowIDs.contains(window.id) {
+			// Don't physically move windows that are in fullscreen (avoid polluting savedFrames)
+			if windowIDs.contains(window.id) && !window.isFullscreen {
 				// Save the original position and size
 				savedFrames[window.id] = window.frame
 
@@ -1012,13 +1023,52 @@ class WorkspaceManager: ObservableObject {
 		savedFrames.removeAll()
 	}
 
+	/// Of the managed windows currently on screen,
+	/// "The registered workspace differs from the monitor's currently active workspace"
+	/// Detect ones that are "different" and stash them in the hidden corner.
+	///
+	/// A window that exited native fullscreen isn't unregistered, and instead
+	/// Keeps the original workspace registration (after this document's revision). Axis's workspaces are
+	/// Since this is implemented by stashing the window in a corner within the same real Space, after exiting fullscreen
+	/// The window always returns to the same real Space, and if the original workspace is inactive
+	/// It ends up appearing overlapped with the currently shown workspace. This reclaims it.
+	///
+	/// - Parameter currentWindows: the list of currently on-screen, managed windows
+	/// - Returns: the set of window IDs that were actually hidden (used by the caller to exclude them from focus targets)
+	@discardableResult
+	func hideStrayVisibleWindows(currentWindows: [WindowInfo]) -> Set<CGWindowID> {
+		var hiddenIDs: Set<CGWindowID> = []
+
+		for window in currentWindows {
+			// Excludes hovering (floating) windows
+			guard !isHovering(window.id) else { continue }
+
+			// Windows not registered anywhere are excluded (left to the new-window registration process)
+			guard let location = workspaceLocation(for: window.id) else { continue }
+
+			// Do nothing if the target workspace is already the active one, since it's showing normally
+			let activeWS = currentWorkspace(on: location.screen)
+			guard location.workspace != activeWS else { continue }
+
+			// Skip it if it's already stashed in the hidden corner (an entry exists in savedFrames)
+			// (Required guard, since hidden windows on inactive workspaces are still visible on-screen by 1px)
+			guard !isWindowHidden(window.id) else { continue }
+
+			hideWindow(window.id)
+			hiddenIDs.insert(window.id)
+		}
+
+		return hiddenIDs
+	}
+
 	/// Restore the given workspace's windows to their original positions
 	private func showWindowsForWorkspace(_ workspace: Int, on screenID: ScreenIdentifier) {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace] else { return }
 
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
-			if windowIDs.contains(window.id) {
+			// Don't physically move windows that are in fullscreen
+			if windowIDs.contains(window.id) && !window.isFullscreen {
 				// Restore the saved position and size
 				if let savedFrame = savedFrames[window.id] {
 					window.setFrame(savedFrame)
@@ -1033,6 +1083,9 @@ class WorkspaceManager: ObservableObject {
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
 			if window.id == windowID {
+				// Skip the physical move while in fullscreen
+				// (The workspace move in the data has already been done by the caller)
+				guard !window.isFullscreen else { break }
 				savedFrames[window.id] = window.frame
 
 				// Cache the window's identity info
@@ -1063,32 +1116,65 @@ class WorkspaceManager: ObservableObject {
 	}
 
 	/// Focus the first window of the given workspace
-	private func focusFirstWindow(in workspace: Int, on screenID: ScreenIdentifier) {
+	/// - Returns: the ID of the window that was actually focused (nil if there was no target)
+	@discardableResult
+	private func focusFirstWindow(in workspace: Int, on screenID: ScreenIdentifier) -> CGWindowID? {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace],
 			  !windowIDs.isEmpty else {
-			return
+			return nil
 		}
 
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
 			if windowIDs.contains(window.id) {
 				window.focus()
-				return
+				return window.id
 			}
 		}
+		return nil
 	}
 
 	/// Focus the window with the given window ID
-	private func focusWindow(_ windowID: CGWindowID, in workspace: Int, on screenID: ScreenIdentifier) {
+	/// - Returns: the ID of the window that was actually focused (nil if there was no target)
+	@discardableResult
+	private func focusWindow(_ windowID: CGWindowID, in workspace: Int, on screenID: ScreenIdentifier) -> CGWindowID? {
 		let allWindows = accessibilityManager.getAllWindows()
 		for window in allWindows {
 			if window.id == windowID {
 				window.focus()
-				return
+				return window.id
 			}
 		}
 		// If the specified window can't be found, focus the first window instead
-		focusFirstWindow(in: workspace, on: screenID)
+		return focusFirstWindow(in: workspace, on: screenID)
+	}
+
+	/// Handle the post-focus-move border update and cursor movement together
+	/// - Border: retries until focus actually moves to the target window before updating
+	///   (Prevents the border from landing on the wrong window when macOS is slow to reflect focus. Same mechanism as log 001)
+	/// - Cursor: moves to the center of the window, same as JKLI focus movement
+	/// - Parameter windowID: the ID of the window that was focused (nil just updates the border once, as before)
+	private func syncBorderAndCursor(to windowID: CGWindowID?) {
+		guard let windowID = windowID else {
+			// If there's nothing to focus (e.g. an empty workspace), fall back to the previous behavior
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+				BorderManager.shared.updateBorder()
+			}
+			return
+		}
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+			guard let self = self else { return }
+
+			// Retry until focus actually moves to the target window before updating the border
+			BorderManager.shared.updateBorderExpecting(windowID: windowID)
+
+			// Move the mouse cursor to the center of the focused window
+			let allWindows = self.accessibilityManager.getAllWindows()
+			if let window = allWindows.first(where: { $0.id == windowID }) {
+				self.tilingEngine.moveCursorToWindow(window)
+			}
+		}
 	}
 
 	// MARK: - Tiling State Management
@@ -1266,7 +1352,8 @@ class WorkspaceManager: ObservableObject {
 		let corner = optimalHideCorner(for: targetScreenID)
 
 		for window in allWindows {
-			if allMigratedWindowIDs.contains(window.id) {
+			// Don't physically move windows that are in fullscreen (the data-level migration is already done above)
+			if allMigratedWindowIDs.contains(window.id) && !window.isFullscreen {
 				// Save the current position to savedFrames before moving to the corner
 				// (This gets restored correctly later via showWindowsForWorkspace -> tile when the space is switched)
 				savedFrames[window.id] = window.frame
