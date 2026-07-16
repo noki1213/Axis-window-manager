@@ -151,7 +151,13 @@ struct WindowInfo: Identifiable, Equatable {
         // Raise the window to bring it to the front
         AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
     }
-    
+
+    /// Raise the window to the front (without moving focus)
+    /// Used to keep floating windows from getting hidden behind the tiles
+    func raise() {
+        AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
+    }
+
     /// Update (re-fetch) the current frame
     mutating func refreshFrame() {
         self.frame = Self.getFrame(from: axElement) ?? .zero
