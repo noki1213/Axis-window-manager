@@ -113,6 +113,17 @@ class FocusFollowsMouseManager: ObservableObject {
 		// focus() bundles together activating the app, setting AXFocused, and raising the window
 		window.focus()
 
+		// If what got focused is a tiled window (not floating),
+		// Because raise buries the floating window behind the tiles,
+		// Re-raise that screen's floating windows to the front (without stealing focus).
+		// Without this, a floating window gets buried just from the mouse passing over a tile, and
+		// After this, hovering can no longer reach the floating window
+		let isFloatingTarget = WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat()
+		if !isFloatingTarget,
+		   let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
+			TilingEngine.shared.raiseFloatingWindows(on: screen)
+		}
+
 		// Update the border only after focus has actually taken effect (same mechanism as JKLI movement)
 		BorderManager.shared.updateBorderExpecting(windowID: window.id)
 	}
