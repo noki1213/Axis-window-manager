@@ -198,7 +198,8 @@ class WindowPalettePanel: NSPanel {
 			// Each Space section
 			for space in display.spaces {
 				// Space label
-				let spaceLabel = NSTextField(labelWithString: "Space \(space.workspace)")
+				// Show the Float section (workspace == -1) as "Float"
+				let spaceLabel = NSTextField(labelWithString: space.workspace == -1 ? "Float" : "Space \(space.workspace)")
 				spaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
 				spaceLabel.textColor = NSColor.white.withAlphaComponent(0.4)
 				spaceLabel.translatesAutoresizingMaskIntoConstraints = false
