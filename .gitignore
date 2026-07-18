@@ -55,3 +55,7 @@ Carthage/Build
 .build/
 reference/
 ref/
+
+# ローカル設定（署名用の Team ID など）
+.env
+dist/

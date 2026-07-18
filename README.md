@@ -79,15 +79,42 @@ If the key combination is already used by another action, a conflict warning wil
 
 ## Installation
 
-1. Clone this repository
-2. Open `Axis.xcodeproj` in Xcode
-3. Build and run the project
-4. Grant Accessibility permissions when prompted
+### Download the app
+
+1. Download the `.zip` from the [Releases](https://github.com/noki1213/Axis-window-manager/releases) page.
+2. Unzip it and move `Axis.app` into your Applications folder.
+3. Open it. **macOS will refuse the first time** — see below.
+
+Axis is not notarized by Apple, because notarization requires a paid Apple Developer Program membership that I do not have. macOS therefore treats it as coming from an unidentified developer and blocks the first launch. This is expected, and you have two ways past it:
+
+- Open System Settings → Privacy & Security, scroll to the bottom, and click **Open Anyway** next to the Axis message. Then open the app again.
+- Or clear the quarantine flag from the terminal, then open it normally:
+
+  ```sh
+  xattr -cr /Applications/Axis.app
+  ```
+
+Only the first launch is affected. If you would rather not rely on a binary from a stranger, build it yourself instead.
+
+### Build from source
+
+Requires Xcode. No Apple Developer account needed.
+
+```sh
+git clone https://github.com/noki1213/Axis-window-manager.git
+cd Axis-window-manager
+./install.sh
+```
+
+`install.sh` builds an unsigned Release build and installs it to `/Applications`. Because you built it locally, macOS does not quarantine it and there is no first-launch prompt.
+
+Either way, grant Accessibility permission when prompted — see Setup below.
 
 ## Requirements
 
-- macOS 14.0 or later
-- Xcode 15.0 or later (for building)
+- macOS 14.0 or later. Developed and tested on macOS 26; earlier versions should work but have not been verified.
+- Apple Silicon or Intel (the released build is universal)
+- Xcode 15.0 or later (only if building from source)
 - Accessibility permissions (required for window management)
 
 ## Setup
@@ -184,15 +211,42 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 ## インストール
 
-1. このリポジトリをクローン
-2. Xcode で Axis.xcodeproj を開く
-3. プロジェクトをビルドして実行
-4. アクセシビリティ権限を求められたら許可する
+### アプリをダウンロードする
+
+1. [Releases](https://github.com/noki1213/Axis-window-manager/releases) から `.zip` をダウンロードします。
+2. 展開して、`Axis.app` をアプリケーションフォルダに入れます。
+3. 開きます。**初回は macOS に拒否されます**（下記参照）。
+
+Axis は Apple の公証（notarization）を受けていません。公証には有料の Apple Developer Program のメンバーシップが必要で、私が持っていないためです。そのため macOS は「開発元が未確認のアプリ」として初回起動をブロックします。これは想定どおりの動作で、通す方法が2つあります。
+
+- システム設定 → プライバシーとセキュリティ を開き、一番下までスクロールして、Axis についてのメッセージの横にある **このまま開く** をクリックします。そのあともう一度アプリを開いてください。
+- またはターミナルで隔離属性を外してから、普通に開きます。
+
+  ```sh
+  xattr -cr /Applications/Axis.app
+  ```
+
+影響があるのは初回だけです。知らない人が作ったバイナリを実行したくない場合は、自分でビルドしてください。
+
+### ソースからビルドする
+
+Xcode が必要です。Apple Developer アカウントは不要です。
+
+```sh
+git clone https://github.com/noki1213/Axis-window-manager.git
+cd Axis-window-manager
+./install.sh
+```
+
+`install.sh` は未署名の Release ビルドを作成して `/Applications` にインストールします。自分でビルドしたアプリは macOS に隔離されないため、初回起動の確認は出ません。
+
+どちらの方法でも、アクセシビリティ権限を求められたら許可してください（下のセットアップを参照）。
 
 ## 動作環境
 
-- macOS 14.0 以降
-- Xcode 15.0 以降（ビルド用）
+- macOS 14.0 以降。開発と動作確認は macOS 26 で行っています。それより古いバージョンでも動作するはずですが、検証はしていません。
+- Apple Silicon / Intel（配布しているアプリは両対応）
+- Xcode 15.0 以降（ソースからビルドする場合のみ）
 - アクセシビリティ権限（ウィンドウ管理に必要）
 
 ## セットアップ
