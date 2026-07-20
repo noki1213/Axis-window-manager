@@ -128,24 +128,47 @@ class FocusFollowsMouseManager: ObservableObject {
 		BorderManager.shared.updateBorderExpecting(windowID: window.id)
 	}
 
+	/// The upper bound on window layers subject to hit testing (anything at or above this is ignored)
+	/// Windows the user actually focuses fall roughly within 0 to 103
+	/// (normal 0 / floating panel 3 / status 25 / popup 103, etc.)
+	/// 1000 and above is the layer for screen savers, shields, and desktop widgets, and
+	/// In particular, while showing a screenshot preview CleanShot X uses a layer-2147483628
+	/// Place an overlay covering the whole screen. Letting this get hit means anywhere on screen
+	/// That overlay becomes frontmost, and focus-follows-mouse stops responding entirely
+	private static let maxHitTestLayer = 1000
+
 	/// Return the frontmost window at the given coordinates (screen coordinates, bottom-left origin)
 	/// Since AccessibilityManager.getWindowAt returns the first hit in app order,
 	/// The correct frontmost window can't be picked when a floating window overlaps a tile.
 	/// Here, after identifying the window ID via CGWindowList (Z-order: front to back),
 	/// Mapping it to WindowInfo ensures it always picks the visible window directly under the mouse.
+	///
+	/// A "genuine floating window" like a CleanShot X screenshot preview
+	/// It appears as a floating-level NSPanel rather than the normal layer (layer == 0).
+	/// If only the normal layer is considered, hits pass straight through that panel and land on the tile behind it, and
+	/// Focus jumps to the tile underneath even while touching the panel. So a negative layer
+	/// Everything except things like the desktop is subject to hit testing.
 	private func topmostWindowAt(_ point: CGPoint) -> WindowInfo? {
 		// CGWindowList uses a top-left origin, so convert it
 		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 		let cgPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
 
 		let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+		let ownPID = ProcessInfo.processInfo.processIdentifier
 
-		// Hit-test normal-layer (layer == 0) windows front to back
+		// Hit-test from front to back
 		var hitWindowID: CGWindowID? = nil
 		for entry in windowList {
-			guard let layer = entry[kCGWindowLayer as String] as? Int, layer == 0,
+			guard let layer = entry[kCGWindowLayer as String] as? Int,
+				  layer >= 0, layer < Self.maxHitTestLayer,
 				  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
 				  let windowID = entry[kCGWindowNumber as String] as? CGWindowID else { continue }
+
+			// Let Axis's own windows (border overlay, palette, settings screen) pass through.
+			// The border overlay always sits in front of the focused window, so
+			// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
+			if let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
+
 			let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
 								width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
 			if bounds.contains(cgPoint) {
@@ -155,7 +178,10 @@ class FocusFollowsMouseManager: ObservableObject {
 		}
 		guard let windowID = hitWindowID else { return nil }
 
-		// Map to AX's WindowInfo
+		// Map it to the AX WindowInfo.
+		// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
+		// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
+		// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
 		let allWindows = AccessibilityManager.shared.getAllWindows()
 		return allWindows.first { $0.id == windowID }
 	}
