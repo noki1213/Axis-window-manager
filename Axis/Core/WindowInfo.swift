@@ -178,20 +178,105 @@ struct WindowInfo: Identifiable, Equatable {
     }
 
     /// Set focus to the window
+    /// Sometimes only the app activation takes effect and the window designation doesn't, in which case
+    /// Focus falls back to another window that same app had just prior.
+    /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
-        // First activate the app
+        applyFocusOnce(useAppActivate: false)
+        verifyFocus(attempt: 0)
+    }
+
+    /// The actual implementation of setting focus (a single attempt)
+    /// - Parameter useAppActivate: whether to focus via the conventional activate() instead of the private API.
+    ///   Set to true on retry, as a fallback for environments where the private API doesn't work
+    private func applyFocusOnce(useAppActivate: Bool) {
+        // Normally this raises the process and designates the window at the same time.
+        // If this succeeds, the app never gets a chance to pick a different window of its own
+        if !useAppActivate, setFrontProcessWithThisWindow() {
+            AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            return
+        }
+
+        // A fallback: the conventional approach.
+        // NSRunningApplication.activate() only "brings the app to the front" — it doesn't control which window
+        // which window it shows is left up to the app, so for apps with multiple windows an unintended one
+        // Shows briefly. This path is only hit when the one above isn't usable
+        AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+
         if #available(macOS 14.0, *) {
             app.activate()
         } else {
             app.activate(options: [.activateIgnoringOtherApps])
         }
-        
-        // Bring the window to the front
-        AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        
-        // Raise the window to bring it to the front
+
         AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
+    }
+
+    /// Activates the app and, at the same time, designates this window as the frontmost one
+    /// - Returns: true on success. false if the private API is unavailable
+    private func setFrontProcessWithThisWindow() -> Bool {
+        guard let processForPID = FrontProcessAPI.processForPID,
+              let setFrontProcess = FrontProcessAPI.setFrontProcess,
+              FrontProcessAPI.postEventRecord != nil else {
+            return false
+        }
+
+        var psn = ProcessSerialNumber()
+        guard processForPID(app.processIdentifier, &psn) == noErr else { return false }
+
+        // kCPSUserGenerated = 0x200 (makes it count as a user-initiated raise)
+        guard setFrontProcess(&psn, id, 0x200) == .success else { return false }
+
+        // Send the signal designating the target window as the key window (a pair of calls)
+        postKeyWindowEvent(psn: &psn, marker: 0x01)
+        postKeyWindowEvent(psn: &psn, marker: 0x02)
+        return true
+    }
+
+    /// Send the signal to switch the key window
+    private func postKeyWindowEvent(psn: UnsafeMutablePointer<ProcessSerialNumber>, marker: UInt8) {
+        var bytes = [UInt8](repeating: 0, count: 0xf8)
+        bytes[0x04] = 0xf8
+        bytes[0x08] = marker
+        bytes[0x3a] = 0x10
+
+        // Fill 0x10 bytes starting at 0x20 with 0xff
+        for offset in 0..<0x10 {
+            bytes[0x20 + offset] = 0xff
+        }
+
+        // Embed the window ID at 0x3c
+        var windowID = id
+        withUnsafeBytes(of: &windowID) { raw in
+            for offset in 0..<4 {
+                bytes[0x3c + offset] = raw[offset]
+            }
+        }
+
+        _ = FrontProcessAPI.postEventRecord?(psn, &bytes)
+    }
+
+    /// The interval between focus retries (in seconds)
+    /// Right after activating an app, it tends to restore whichever window it remembers, so
+    /// Do the first check as early as possible. Too slow and the window becomes visible, causing a flicker
+    private static let focusRetryDelays: [TimeInterval] = [0.008, 0.016, 0.032, 0.064, 0.12]
+
+    /// Confirm whether focus actually moved, and retry if it didn't
+    private func verifyFocus(attempt: Int) {
+        guard attempt < Self.focusRetryDelays.count else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
+            // Do nothing if focus has already moved as intended
+            if AccessibilityManager.shared.getFocusedWindow()?.id == self.id {
+                return
+            }
+
+            // Some apps don't respond to raising via AX, so also call activate() from the second attempt onward
+            self.applyFocusOnce(useAppActivate: attempt >= 1)
+            self.verifyFocus(attempt: attempt + 1)
+        }
     }
 
     /// Raise the window to the front (without moving focus)
@@ -324,3 +409,34 @@ struct WindowInfo: Identifiable, Equatable {
 /// A private API for getting the Window ID
 @_silgen_name("_AXUIElementGetWindow")
 func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+
+/// A set of private APIs for raising a process and designating which window to bring to the front, at the same time.
+///
+/// With NSRunningApplication.activate(), the app itself decides which window to show, and
+/// For apps with multiple windows, an unintended one flashes on screen briefly. This is used to avoid that.
+/// yabai and AeroSpace use the same API for the same reason.
+///
+/// These live in a private framework (SkyLight) and won't link normally.
+/// So symbols are looked up at runtime instead. If a future macOS version stops exposing them,
+/// It simply becomes nil, and the caller automatically falls back to the conventional activate() approach.
+enum FrontProcessAPI {
+    typealias SetFrontProcess = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, CGWindowID, UInt32) -> CGError
+    typealias PostEventRecord = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> CGError
+    typealias ProcessForPID = @convention(c) (pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus
+
+    /// Look up the symbol across all already-loaded libraries
+    private static func lookup<T>(_ name: String, as type: T.Type) -> T? {
+        let allLoaded = UnsafeMutableRawPointer(bitPattern: -2)  // RTLD_DEFAULT
+        guard let symbol = dlsym(allLoaded, name) else { return nil }
+        return unsafeBitCast(symbol, to: type)
+    }
+
+    static let setFrontProcess = lookup("_SLPSSetFrontProcessWithOptions", as: SetFrontProcess.self)
+    static let postEventRecord = lookup("SLPSPostEventRecordTo", as: PostEventRecord.self)
+    static let processForPID = lookup("GetProcessForPID", as: ProcessForPID.self)
+
+    /// Whether all three are present (fall back to the conventional approach if even one is missing)
+    static var isAvailable: Bool {
+        setFrontProcess != nil && postEventRecord != nil && processForPID != nil
+    }
+}
