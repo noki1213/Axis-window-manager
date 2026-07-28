@@ -72,18 +72,60 @@ struct WindowInfo: Identifiable, Equatable {
     
     // MARK: - Window Operations
     
+    /// The tolerance (in px) when verifying that the frame took effect
+    private static let frameTolerance: CGFloat = 2.0
+
+    /// The maximum number of attempts for setting the frame
+    private static let frameMaxAttempts = 3
+
     /// Set the window's position and size
-    /// Based on AeroSpace's implementation: set size, then position, then size again
+    /// Modeled on AeroSpace's implementation: set size → position → size, in that order.
+    /// It also reads back the actual frame after setting it and re-applies if it drifted from the requested value.
+    /// (for apps like Ghostty that round sizes to cell units, setting it just once may not
+    /// because it ends up left smaller than its assigned area, not matching what was requested)
     func setFrame(_ newFrame: CGRect) {
         // Disable animation (the technique used by AeroSpace/yabai/Rectangle)
         disableAnimations {
-            // Set the size first (important: it won't be positioned correctly in any other order)
-            setSize(newFrame.size)
-            // Set the position
-            setPosition(newFrame.origin)
-            // Set the size again (needed for some apps)
-            setSize(newFrame.size)
+            var previousFrame: CGRect?
+
+            for attempt in 0..<Self.frameMaxAttempts {
+                // Set the size first (important: it won't be positioned correctly in any other order)
+                setSize(newFrame.size)
+                // Set the position
+                setPosition(newFrame.origin)
+                // Set the size again (needed for some apps)
+                setSize(newFrame.size)
+
+                // Read back the frame that was actually applied and verify it
+                guard let actual = Self.getFrame(from: axElement) else { return }
+                if Self.isCloseEnough(actual, newFrame) { return }
+
+                // If the requested size is below the minimum, give up since it can't shrink further
+                if newFrame.width < minSize.width - Self.frameTolerance
+                    || newFrame.height < minSize.height - Self.frameTolerance {
+                    return
+                }
+
+                // If nothing changed since the last attempt, retrying is pointless, so bail out
+                if let previous = previousFrame, Self.isCloseEnough(actual, previous) {
+                    return
+                }
+                previousFrame = actual
+
+                // Wait for the app to finish its own relayout before the next attempt
+                if attempt < Self.frameMaxAttempts - 1 {
+                    usleep(15_000)
+                }
+            }
         }
+    }
+
+    /// Whether two frames match within the allowed tolerance
+    private static func isCloseEnough(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) <= frameTolerance
+            && abs(lhs.origin.y - rhs.origin.y) <= frameTolerance
+            && abs(lhs.width - rhs.width) <= frameTolerance
+            && abs(lhs.height - rhs.height) <= frameTolerance
     }
     
     /// Perform the operation with animation disabled
