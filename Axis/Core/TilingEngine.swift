@@ -881,11 +881,27 @@ class TilingEngine: ObservableObject {
                 newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
 
                 window.setFrame(newFrame)
+                // Also update the frame held by the column structure (so stale coordinates don't linger)
+                updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
 
                 currentY += rowHeight + windowGap
             }
 
             currentX += columnWidth + windowGap
+        }
+    }
+
+    /// Update the frame held by the column structure with the frame that was actually applied
+    /// The column structure's WindowInfo holds the frame measured "before" tiling was applied, and
+    /// Without updating this, the stale coordinates would linger until the next window addition or removal.
+    /// causes the logic that inserts new or hovering windows into a column by X coordinate to pick the wrong spot
+    private func updateCachedFrame(windowID: CGWindowID, to frame: CGRect, on screenID: ScreenIdentifier) {
+        guard var columns = tiledWindows[screenID] else { return }
+        for (columnIndex, column) in columns.enumerated() {
+            guard let rowIndex = column.firstIndex(where: { $0.id == windowID }) else { continue }
+            columns[columnIndex][rowIndex].frame = frame
+            tiledWindows[screenID] = columns
+            return
         }
     }
 
@@ -1230,6 +1246,8 @@ class TilingEngine: ObservableObject {
                 newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
 
                 window.setFrame(newFrame)
+                // Also update the frame held by the column structure (so stale coordinates don't linger)
+                updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
 
                 currentY += rowHeight + windowGap
             }
