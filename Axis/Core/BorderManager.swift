@@ -15,6 +15,10 @@ class BorderManager: ObservableObject {
     private var borderView: SelectionBorderView?
     private var currentWindow: WindowInfo?
     private var currentWindowID: CGWindowID?
+
+    /// Temporary debugging: the window the border currently points to (remove once the investigation is done)
+    var debugCurrentWindowID: CGWindowID? { currentWindowID }
+    var debugCurrentWindowTitle: String { currentWindow?.title ?? "-" }
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
 

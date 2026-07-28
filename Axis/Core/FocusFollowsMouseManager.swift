@@ -13,6 +13,19 @@ import Combine
 class FocusFollowsMouseManager: ObservableObject {
 	static let shared = FocusFollowsMouseManager()
 
+	/// Temporary debugging: appends to /tmp/axis-debug.log (remove once the investigation is done)
+	static func dbg(_ message: String) {
+		let path = "/tmp/axis-debug.log"
+		guard let data = (message + "\n").data(using: .utf8) else { return }
+		if let handle = FileHandle(forWritingAtPath: path) {
+			handle.seekToEndOfFile()
+			handle.write(data)
+			try? handle.close()
+		} else {
+			FileManager.default.createFile(atPath: path, contents: data)
+		}
+	}
+
 	// MARK: - Settings (persisted to UserDefaults)
 
 	private static let enabledKey = "focusFollowsMouseEnabled"
@@ -112,6 +125,26 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		// focus() bundles together activating the app, setting AXFocused, and raising the window
 		window.focus()
+
+		// --- Temporary debug log (for investigating border/actual-focus mismatch; remove once done) ---
+		let ffmFormatter = DateFormatter()
+		ffmFormatter.dateFormat = "HH:mm:ss.SSS"
+		let ffmStamp = ffmFormatter.string(from: Date())
+		let ffmTargetID = window.id
+		let ffmTargetTitle = window.title
+		let ffmTargetApp = window.app.localizedName ?? "nil"
+		FocusFollowsMouseManager.dbg("[FFM] \(ffmStamp) focus() 実行 target=\(ffmTargetID) '\(ffmTargetTitle)' app=\(ffmTargetApp)")
+		// Wait briefly, then verify that AX focus actually moved to that window
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+			let actual = AccessibilityManager.shared.getFocusedWindow()
+			let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "nil"
+			if actual?.id == ffmTargetID {
+				FocusFollowsMouseManager.dbg("[FFM]   -> 成功: AXフォーカス=\(ffmTargetID) frontApp=\(frontApp)")
+			} else {
+				FocusFollowsMouseManager.dbg("[FFM]   -> ★失敗: 狙い=\(ffmTargetID) '\(ffmTargetTitle)' だが AXフォーカス=\(actual.map { "\($0.id) '\($0.title)'" } ?? "nil") frontApp=\(frontApp)")
+			}
+		}
+		// --- End of temporary debug log ---
 
 		// If what got focused is a tiled window (not floating),
 		// Because raise buries the floating window behind the tiles,
