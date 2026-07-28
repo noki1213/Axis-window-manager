@@ -161,9 +161,25 @@ class TilingEngine: ObservableObject {
         }
     }
     
+    /// Temporary debugging: appends to /tmp/axis-debug.log (remove once the investigation is done)
+    private func dbg(_ message: String) {
+        let path = "/tmp/axis-debug.log"
+        guard let data = (message + "\n").data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
     /// Move window focus in the given direction (returns the destination window's ID)
     @discardableResult
     func moveFocus(direction: Direction) -> CGWindowID? {
+        let dbgFormatter = DateFormatter()
+        dbgFormatter.dateFormat = "HH:mm:ss.SSS"
+        dbg("==== \(dbgFormatter.string(from: Date())) moveFocus(\(direction)) cursorScreen=\(cursorScreen?.localizedName ?? "nil") ====")
 
         // cursorScreen being set means the mouse is on an empty monitor
         // Use cursorScreen as the reference for finding the destination, instead of the focused window
@@ -231,8 +247,32 @@ class TilingEngine: ObservableObject {
         }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
+            dbg("失敗: フォーカスウィンドウが列に見つからない focused=\(focusedWindow.id) '\(focusedWindow.title)'")
             return nil
         }
+
+        // --- Temporary debug log (for investigating cross-monitor behavior) ---
+        dbg("focused: id=\(focusedWindow.id) '\(focusedWindow.title)' frameAX=\(focusedWindow.frame)")
+        dbg("screen: \(screen.localizedName) displayID=\(screenID.displayID) frame=\(screen.frame)")
+        dbg("現在位置: columnIndex=\(columnIndex) rowIndex=\(rowIndex) / 列数=\(columns.count)")
+        for (ci, col) in columns.enumerated() {
+            let desc = col.map { "id=\($0.id) midX=\(Int($0.frame.midX)) '\($0.title.prefix(20))'" }.joined(separator: " | ")
+            dbg("  col[\(ci)]: \(desc)")
+        }
+        for scr in NSScreen.screens {
+            let sid = ScreenIdentifier(from: scr)
+            let cols = tiledWindows[sid] ?? []
+            let desc = cols.map { c in "[" + c.map { "\($0.id)" }.joined(separator: ",") + "]" }.joined(separator: " ")
+            dbg("tiledWindows[\(scr.localizedName) displayID=\(sid.displayID)] = \(desc)")
+            let wsIDs = getWorkspaceWindowIDs(on: scr).map { String($0) }.sorted().joined(separator: ",")
+            dbg("  workspaceIDs = \(wsIDs)")
+            if let adj = getAdjacentScreen(from: scr, direction: .right) {
+                dbg("  右隣 = \(adj.localizedName) displayID=\(ScreenIdentifier(from: adj).displayID)")
+            } else {
+                dbg("  右隣 = なし")
+            }
+        }
+        // --- End of temporary debug log ---
 
         var targetWindow: WindowInfo?
 
@@ -289,10 +329,12 @@ class TilingEngine: ObservableObject {
         }
 
         if let target = targetWindow {
+            dbg("移動先: id=\(target.id) '\(target.title)' midX=\(Int(target.frame.midX))")
             target.focus()
             moveCursorToWindow(target)
             return target.id
         }
+        dbg("移動先なし（カーソルのみ移動 or 何もしない）")
         return nil
     }
 
