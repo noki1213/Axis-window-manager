@@ -161,25 +161,9 @@ class TilingEngine: ObservableObject {
         }
     }
     
-    /// Temporary debugging: appends to /tmp/axis-debug.log (remove once the investigation is done)
-    private func dbg(_ message: String) {
-        let path = "/tmp/axis-debug.log"
-        guard let data = (message + "\n").data(using: .utf8) else { return }
-        if let handle = FileHandle(forWritingAtPath: path) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            FileManager.default.createFile(atPath: path, contents: data)
-        }
-    }
-
     /// Move window focus in the given direction (returns the destination window's ID)
     @discardableResult
     func moveFocus(direction: Direction) -> CGWindowID? {
-        let dbgFormatter = DateFormatter()
-        dbgFormatter.dateFormat = "HH:mm:ss.SSS"
-        dbg("==== \(dbgFormatter.string(from: Date())) moveFocus(\(direction)) cursorScreen=\(cursorScreen?.localizedName ?? "nil") ====")
 
         // cursorScreen being set means the mouse is on an empty monitor
         // Use cursorScreen as the reference for finding the destination, instead of the focused window
@@ -247,39 +231,8 @@ class TilingEngine: ObservableObject {
         }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
-            dbg("失敗: フォーカスウィンドウが列に見つからない focused=\(focusedWindow.id) '\(focusedWindow.title)'")
             return nil
         }
-
-        // --- Temporary debug log (for investigating cross-monitor behavior) ---
-        let front = NSWorkspace.shared.frontmostApplication
-        dbg("最前面アプリ: \(front?.localizedName ?? "nil") pid=\(front?.processIdentifier ?? -1)")
-        dbg("枠線の対象: id=\(BorderManager.shared.debugCurrentWindowID.map(String.init) ?? "nil") '\(BorderManager.shared.debugCurrentWindowTitle)'")
-        if let borderID = BorderManager.shared.debugCurrentWindowID, borderID != focusedWindow.id {
-            dbg("★★ ズレ検出: 枠線=\(borderID) だが AXフォーカス=\(focusedWindow.id) ★★")
-        }
-        dbg("focused: id=\(focusedWindow.id) '\(focusedWindow.title)' frameAX=\(focusedWindow.frame)")
-        dbg("focused のアプリ: \(focusedWindow.app.localizedName ?? "nil") pid=\(focusedWindow.app.processIdentifier)")
-        dbg("screen: \(screen.localizedName) displayID=\(screenID.displayID) frame=\(screen.frame)")
-        dbg("現在位置: columnIndex=\(columnIndex) rowIndex=\(rowIndex) / 列数=\(columns.count)")
-        for (ci, col) in columns.enumerated() {
-            let desc = col.map { "id=\($0.id) midX=\(Int($0.frame.midX)) '\($0.title.prefix(20))'" }.joined(separator: " | ")
-            dbg("  col[\(ci)]: \(desc)")
-        }
-        for scr in NSScreen.screens {
-            let sid = ScreenIdentifier(from: scr)
-            let cols = tiledWindows[sid] ?? []
-            let desc = cols.map { c in "[" + c.map { "\($0.id)" }.joined(separator: ",") + "]" }.joined(separator: " ")
-            dbg("tiledWindows[\(scr.localizedName) displayID=\(sid.displayID)] = \(desc)")
-            let wsIDs = getWorkspaceWindowIDs(on: scr).map { String($0) }.sorted().joined(separator: ",")
-            dbg("  workspaceIDs = \(wsIDs)")
-            if let adj = getAdjacentScreen(from: scr, direction: .right) {
-                dbg("  右隣 = \(adj.localizedName) displayID=\(ScreenIdentifier(from: adj).displayID)")
-            } else {
-                dbg("  右隣 = なし")
-            }
-        }
-        // --- End of temporary debug log ---
 
         var targetWindow: WindowInfo?
 
@@ -336,13 +289,59 @@ class TilingEngine: ObservableObject {
         }
 
         if let target = targetWindow {
-            dbg("移動先: id=\(target.id) '\(target.title)' midX=\(Int(target.frame.midX))")
             target.focus()
+            debugTraceFocusTimeline(target: target)
             moveCursorToWindow(target)
             return target.id
         }
-        dbg("移動先なし（カーソルのみ移動 or 何もしない）")
         return nil
+    }
+
+    // MARK: - Temporary debugging (for investigating flicker; remove once done)
+
+    /// Append to /tmp/axis-debug.log
+    private func debugLog(_ message: String) {
+        let path = "/tmp/axis-debug.log"
+        guard let data = (message + "\n").data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: data)
+        }
+    }
+
+    /// After focus moves, track which window actually received it, polling every 5ms
+    private func debugTraceFocusTimeline(target: WindowInfo) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let start = Date()
+        debugLog("[TL] \(formatter.string(from: start)) 開始 狙い=\(target.id) '\(target.title)' app=\(target.app.localizedName ?? "-")")
+
+        var lastID: CGWindowID?
+        var isFirstSample = true
+
+        func sample() {
+            let elapsed = Date().timeIntervalSince(start)
+            guard elapsed < 0.8 else {
+                debugLog("[TL] 終了")
+                return
+            }
+
+            let focused = AccessibilityManager.shared.getFocusedWindow()
+            if isFirstSample || focused?.id != lastID {
+                isFirstSample = false
+                lastID = focused?.id
+                let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "-"
+                let mark = (focused?.id == target.id) ? "○" : "×"
+                let desc = focused.map { "\($0.id) '\($0.title.prefix(24))' app=\($0.app.localizedName ?? "-")" } ?? "nil"
+                debugLog("[TL] \(mark) +\(Int(elapsed * 1000))ms focus=\(desc) front=\(front)")
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) { sample() }
+        }
+        sample()
     }
 
     /// When the neighboring monitor is empty, move the mouse cursor to its center
@@ -930,11 +929,27 @@ class TilingEngine: ObservableObject {
                 newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
 
                 window.setFrame(newFrame)
+                // Also update the frame held by the column structure (so stale coordinates don't linger)
+                updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
 
                 currentY += rowHeight + windowGap
             }
 
             currentX += columnWidth + windowGap
+        }
+    }
+
+    /// Update the frame held by the column structure with the frame that was actually applied
+    /// The column structure's WindowInfo holds the frame measured "before" tiling was applied, and
+    /// Without updating this, the stale coordinates would linger until the next window addition or removal.
+    /// causes the logic that inserts new or hovering windows into a column by X coordinate to pick the wrong spot
+    private func updateCachedFrame(windowID: CGWindowID, to frame: CGRect, on screenID: ScreenIdentifier) {
+        guard var columns = tiledWindows[screenID] else { return }
+        for (columnIndex, column) in columns.enumerated() {
+            guard let rowIndex = column.firstIndex(where: { $0.id == windowID }) else { continue }
+            columns[columnIndex][rowIndex].frame = frame
+            tiledWindows[screenID] = columns
+            return
         }
     }
 
@@ -1279,6 +1294,8 @@ class TilingEngine: ObservableObject {
                 newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
 
                 window.setFrame(newFrame)
+                // Also update the frame held by the column structure (so stale coordinates don't linger)
+                updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
 
                 currentY += rowHeight + windowGap
             }
