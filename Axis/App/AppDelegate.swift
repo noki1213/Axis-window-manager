@@ -540,6 +540,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // If it belongs to one, evacuate it to the hidden corner (do nothing if there's nothing to act on)
         let strayHiddenIDs = workspaceManager.hideStrayVisibleWindows(currentWindows: currentWindows)
 
+        // Whether a new window appeared this cycle (used by the delayed-retile check later)
+        var windowsWereAdded = false
+
         if currentCount != lastWindowCount {
             // When a window was closed
             if currentCount < lastWindowCount {
@@ -649,6 +652,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                         self?.borderManager.updateBorder()
                     }
+                    retileAfterNewWindowSettles()
                     return
                 }
 
@@ -695,6 +699,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // windows re-hidden by hideStrayVisibleWindows (whose original workspace
                 // don't move focus to a fullscreen-returned window that isn't currently active
                 focusNewWindow(newWindowIDs: newWindowIDs.subtracting(strayHiddenIDs), allWindows: currentWindows)
+                windowsWereAdded = true
             }
 
             lastWindowCount = currentCount
@@ -704,6 +709,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Update the border and save state after tiling
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.borderManager.updateBorder()
+            }
+
+            // A newly created window may not have settled on a final size yet, so
+            // Retile once things have settled down
+            if windowsWereAdded {
+                retileAfterNewWindowSettles()
             }
 
             // Save state whenever a window change occurs
@@ -755,6 +766,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// Retile once a new window has settled down
+    /// With Ghostty's Cmd+N and similar, a window is still at its initial size right after detection, and
+    /// A single tiling pass can sometimes settle on a size smaller than the assigned area
+    private func retileAfterNewWindowSettles() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            self.tilingEngine.tileAllScreens()
+            self.borderManager.updateBorder()
+        }
+    }
+
     /// Move focus to the newly added window
     private func focusNewWindow(newWindowIDs: Set<CGWindowID>, allWindows: [WindowInfo]) {
         // Find and focus the new window
