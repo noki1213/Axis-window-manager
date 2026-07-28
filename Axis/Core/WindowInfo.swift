@@ -178,20 +178,55 @@ struct WindowInfo: Identifiable, Equatable {
     }
 
     /// Set focus to the window
+    /// Sometimes only the app activation takes effect and the window designation doesn't, in which case
+    /// Focus falls back to another window that same app had just prior.
+    /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
+        applyFocusOnce()
+        verifyFocus(attempt: 0)
+    }
+
+    /// The actual implementation of setting focus (a single attempt)
+    private func applyFocusOnce() {
         // First activate the app
         if #available(macOS 14.0, *) {
             app.activate()
         } else {
             app.activate(options: [.activateIgnoringOtherApps])
         }
-        
+
         // Bring the window to the front
         AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        
+
         // Raise the window to bring it to the front
         AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
+    }
+
+    /// Maximum number of focus retry attempts
+    private static let focusMaxAttempts = 4
+
+    /// Confirm whether focus actually moved, and retry if it didn't
+    private func verifyFocus(attempt: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            let actual = AccessibilityManager.shared.getFocusedWindow()
+            if actual?.id == self.id {
+                if attempt > 0 {
+                    FocusFollowsMouseManager.dbg("[FOCUS] 成功(やり直し\(attempt)回目): id=\(self.id) '\(self.title)'")
+                }
+                return
+            }
+
+            guard attempt < Self.focusMaxAttempts else {
+                FocusFollowsMouseManager.dbg("[FOCUS] ★あきらめ: 狙い=\(self.id) '\(self.title)' app=\(self.app.localizedName ?? "nil") / 実際=\(actual.map { "\($0.id) '\($0.title)' app=\($0.app.localizedName ?? "nil")" } ?? "nil")")
+                return
+            }
+
+            FocusFollowsMouseManager.dbg("[FOCUS] ズレ(\(attempt + 1)回目やり直す): 狙い=\(self.id) '\(self.title)' / 実際=\(actual.map { "\($0.id) '\($0.title)'" } ?? "nil")")
+            // The app should already be frontmost, so resetting AXFocused is more likely to take effect
+            self.applyFocusOnce()
+            self.verifyFocus(attempt: attempt + 1)
+        }
     }
 
     /// Raise the window to the front (without moving focus)
