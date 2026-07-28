@@ -252,7 +252,14 @@ class TilingEngine: ObservableObject {
         }
 
         // --- Temporary debug log (for investigating cross-monitor behavior) ---
+        let front = NSWorkspace.shared.frontmostApplication
+        dbg("最前面アプリ: \(front?.localizedName ?? "nil") pid=\(front?.processIdentifier ?? -1)")
+        dbg("枠線の対象: id=\(BorderManager.shared.debugCurrentWindowID.map(String.init) ?? "nil") '\(BorderManager.shared.debugCurrentWindowTitle)'")
+        if let borderID = BorderManager.shared.debugCurrentWindowID, borderID != focusedWindow.id {
+            dbg("★★ ズレ検出: 枠線=\(borderID) だが AXフォーカス=\(focusedWindow.id) ★★")
+        }
         dbg("focused: id=\(focusedWindow.id) '\(focusedWindow.title)' frameAX=\(focusedWindow.frame)")
+        dbg("focused のアプリ: \(focusedWindow.app.localizedName ?? "nil") pid=\(focusedWindow.app.processIdentifier)")
         dbg("screen: \(screen.localizedName) displayID=\(screenID.displayID) frame=\(screen.frame)")
         dbg("現在位置: columnIndex=\(columnIndex) rowIndex=\(rowIndex) / 列数=\(columns.count)")
         for (ci, col) in columns.enumerated() {
