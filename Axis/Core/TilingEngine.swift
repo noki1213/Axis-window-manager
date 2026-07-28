@@ -290,58 +290,10 @@ class TilingEngine: ObservableObject {
 
         if let target = targetWindow {
             target.focus()
-            debugTraceFocusTimeline(target: target)
             moveCursorToWindow(target)
             return target.id
         }
         return nil
-    }
-
-    // MARK: - Temporary debugging (for investigating flicker; remove once done)
-
-    /// Append to /tmp/axis-debug.log
-    private func debugLog(_ message: String) {
-        let path = "/tmp/axis-debug.log"
-        guard let data = (message + "\n").data(using: .utf8) else { return }
-        if let handle = FileHandle(forWritingAtPath: path) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            FileManager.default.createFile(atPath: path, contents: data)
-        }
-    }
-
-    /// After focus moves, track which window actually received it, polling every 5ms
-    private func debugTraceFocusTimeline(target: WindowInfo) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        let start = Date()
-        debugLog("[TL] \(formatter.string(from: start)) 開始 狙い=\(target.id) '\(target.title)' app=\(target.app.localizedName ?? "-")")
-
-        var lastID: CGWindowID?
-        var isFirstSample = true
-
-        func sample() {
-            let elapsed = Date().timeIntervalSince(start)
-            guard elapsed < 0.8 else {
-                debugLog("[TL] 終了")
-                return
-            }
-
-            let focused = AccessibilityManager.shared.getFocusedWindow()
-            if isFirstSample || focused?.id != lastID {
-                isFirstSample = false
-                lastID = focused?.id
-                let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "-"
-                let mark = (focused?.id == target.id) ? "○" : "×"
-                let desc = focused.map { "\($0.id) '\($0.title.prefix(24))' app=\($0.app.localizedName ?? "-")" } ?? "nil"
-                debugLog("[TL] \(mark) +\(Int(elapsed * 1000))ms focus=\(desc) front=\(front)")
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) { sample() }
-        }
-        sample()
     }
 
     /// When the neighboring monitor is empty, move the mouse cursor to its center
