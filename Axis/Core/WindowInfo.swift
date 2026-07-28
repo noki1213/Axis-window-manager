@@ -182,49 +182,55 @@ struct WindowInfo: Identifiable, Equatable {
     /// Focus falls back to another window that same app had just prior.
     /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
-        applyFocusOnce()
+        applyFocusOnce(useAppActivate: false)
         verifyFocus(attempt: 0)
     }
 
     /// The actual implementation of setting focus (a single attempt)
-    private func applyFocusOnce() {
-        // First activate the app
-        if #available(macOS 14.0, *) {
-            app.activate()
-        } else {
-            app.activate(options: [.activateIgnoringOtherApps])
-        }
-
-        // Bring the window to the front
+    /// - Parameter useAppActivate: whether to use NSRunningApplication.activate() to bring the app to the front.
+    ///   Normally false (goes through AX). Set to true on retry as a fallback for apps that AX can't bring to the front
+    private func applyFocusOnce(useAppActivate: Bool) {
+        // Designate the target window as that app's main / focused window
         AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+
+        // Bring the app to the front.
+        // NSRunningApplication.activate() only "brings the app to the front" — it doesn't control which window
+        // Whether it's shown is left up to the app; because of that, another window the app previously remembered may briefly
+        // appear and flicker before settling on the intended window.
+        // Setting AX's AXFrontmost brings the window specified above to the front as-is
+        if useAppActivate {
+            if #available(macOS 14.0, *) {
+                app.activate()
+            } else {
+                app.activate(options: [.activateIgnoringOtherApps])
+            }
+        } else {
+            let axApp = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        }
 
         // Raise the window to bring it to the front
         AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
     }
 
-    /// Maximum number of focus retry attempts
-    private static let focusMaxAttempts = 4
+    /// The interval between focus retries (in seconds)
+    /// Right after activating an app, it tends to restore whichever window it remembers, so
+    /// Do the first check as early as possible. Too slow and the window becomes visible, causing a flicker
+    private static let focusRetryDelays: [TimeInterval] = [0.008, 0.016, 0.032, 0.064, 0.12]
 
     /// Confirm whether focus actually moved, and retry if it didn't
     private func verifyFocus(attempt: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-            let actual = AccessibilityManager.shared.getFocusedWindow()
-            if actual?.id == self.id {
-                if attempt > 0 {
-                    FocusFollowsMouseManager.dbg("[FOCUS] 成功(やり直し\(attempt)回目): id=\(self.id) '\(self.title)'")
-                }
+        guard attempt < Self.focusRetryDelays.count else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
+            // Do nothing if focus has already moved as intended
+            if AccessibilityManager.shared.getFocusedWindow()?.id == self.id {
                 return
             }
 
-            guard attempt < Self.focusMaxAttempts else {
-                FocusFollowsMouseManager.dbg("[FOCUS] ★あきらめ: 狙い=\(self.id) '\(self.title)' app=\(self.app.localizedName ?? "nil") / 実際=\(actual.map { "\($0.id) '\($0.title)' app=\($0.app.localizedName ?? "nil")" } ?? "nil")")
-                return
-            }
-
-            FocusFollowsMouseManager.dbg("[FOCUS] ズレ(\(attempt + 1)回目やり直す): 狙い=\(self.id) '\(self.title)' / 実際=\(actual.map { "\($0.id) '\($0.title)'" } ?? "nil")")
-            // The app should already be frontmost, so resetting AXFocused is more likely to take effect
-            self.applyFocusOnce()
+            // Some apps don't respond to raising via AX, so also call activate() from the second attempt onward
+            self.applyFocusOnce(useAppActivate: attempt >= 1)
             self.verifyFocus(attempt: attempt + 1)
         }
     }
