@@ -30,6 +30,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var consecutiveScanSkips: Int = 0
     /// The cap on consecutive skips of the full scan (at a 0.3s interval, this guarantees a full scan roughly once every 3 seconds)
     private static let maxConsecutiveScanSkips = 10
+    /// The number of consecutive times it was skipped as a presumed transient miss
+    private var consecutiveGhostSkips: Int = 0
+    /// The cap on consecutive skips (about 1.5 seconds; beyond this it's treated as genuinely closed)
+    private static let maxConsecutiveGhostSkips = 5
     /// The monitor of the window that had focus on the previous timer cycle
     /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
     private var lastFocusedScreen: NSScreen?
@@ -556,6 +560,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         let currentWindowIDs = Set(currentWindows.map { $0.id })
+
+        // Gone from the accessibility list, but still showing up on screen (in CGWindowList)
+        // If the window is there, it wasn't really closed — it's just a transient miss.
+        // Measured: Arc's windows can briefly vanish from the AX list, and
+        // Misreading it as "closed" dropped the registration, and the one remaining window ended up assigned the whole screen
+        // (Arc comes back after this and ends up fullscreen instead).
+        // But cap the number of consecutive skips, so a misjudgment doesn't cause it to be skipped forever
+        let vanishedButStillOnScreen = lastWindowIDs.subtracting(currentWindowIDs).intersection(onScreenIDs)
+        if !vanishedButStillOnScreen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
+            consecutiveGhostSkips += 1
+            if PerfLog.enabled {
+                PerfLog.logf("一時的な取りこぼしとして見送り: %d件 (%d回目)",
+                             vanishedButStillOnScreen.count, consecutiveGhostSkips)
+            }
+            // Discard the cache and the previous window set so the next cycle is guaranteed to re-fetch
+            accessibilityManager.invalidateWindowCache()
+            lastOnScreenIDSignature = []
+            return
+        }
+        consecutiveGhostSkips = 0
 
         // Exited fullscreen and returned to the screen, but to a workspace that isn't currently active
         // If it belongs to one, evacuate it to the hidden corner (do nothing if there's nothing to act on)
