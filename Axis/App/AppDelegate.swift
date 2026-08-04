@@ -25,6 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowCheckTimer: Timer?
     private var lastWindowCount: Int = 0
     private var lastWindowIDs: Set<CGWindowID> = []
+    private var lastOnScreenIDSignature: Set<CGWindowID> = []
+    /// The number of consecutive times a full AX scan was skipped because the window set hadn't changed
+    private var consecutiveScanSkips: Int = 0
+    /// The cap on consecutive skips of the full scan (at a 0.3s interval, this guarantees a full scan roughly once every 3 seconds)
+    private static let maxConsecutiveScanSkips = 10
     /// The monitor of the window that had focus on the previous timer cycle
     /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
     private var lastFocusedScreen: NSScreen?
@@ -490,21 +495,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Target only on-screen windows (i.e. windows in the current Space)
-        // Filtering with shouldBeManaged() screens out transient windows during app launch, and
-        // Exclude internal windows, like Excel's, from the count
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-        let allWindows = accessibilityManager.getAllWindows()
-        let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
-        let currentCount = currentWindows.count
-
         // Record "the focus monitor at this moment" for registering the new window
         // By the time a new window is detected, macOS has already moved focus to it, so
         // Using the value recorded one cycle ago lets us correctly determine which monitor had focus
+        // (this needs to run every cycle, so it's placed before the full-scan skip below)
         if let focused = accessibilityManager.getFocusedWindow(),
            workspaceManager.isWindowInAnyWorkspace(focused.id) {
             lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
         }
+
+        // Target only on-screen windows (i.e. windows in the current Space)
+        // Filtering with shouldBeManaged() screens out transient windows during app launch, and
+        // Exclude internal windows, like Excel's, from the count
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+
+        // Skip the expensive full AX scan if the set of windows is unchanged from last time.
+        // Querying all apps via AX takes 25-390ms, and running it every 0.3 seconds
+        // because it kept the main thread constantly busy, making the whole app feel sluggish
+        // (but so the later watchdog's state-restore step isn't blocked,
+        //   even if skips keep happening, always do a full scan at a fixed interval)
+        if onScreenIDs == lastOnScreenIDSignature && consecutiveScanSkips < Self.maxConsecutiveScanSkips {
+            consecutiveScanSkips += 1
+            return
+        }
+        consecutiveScanSkips = 0
+        lastOnScreenIDSignature = onScreenIDs
+
+        let allWindows = accessibilityManager.getAllWindows()
+        let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
+        let currentCount = currentWindows.count
 
         // Watchdog: even though no window is registered to the workspace,
         // If the window is visibly on screen, the state is broken, so restore it
