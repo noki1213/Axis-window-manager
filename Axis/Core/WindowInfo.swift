@@ -28,6 +28,13 @@ struct WindowInfo: Identifiable, Equatable {
     var hasCloseButton: Bool
     
     init?(axElement: AXUIElement, app: NSRunningApplication) {
+        // Window elements don't inherit the application element's timeout, so
+        // Set a timeout so the main thread doesn't block on a slow-responding app.
+        // Too short and it cuts off slow-responding apps (measured: Arc at 100-135ms), and
+        // because that window would be treated as if it didn't exist, breaking the layout,
+        // Set with margin above the worst measured value
+        AXUIElementSetMessagingTimeout(axElement, 0.3)
+        
         self.axElement = axElement
         self.app = app
         
@@ -84,6 +91,9 @@ struct WindowInfo: Identifiable, Equatable {
     /// (for apps like Ghostty that round sizes to cell units, setting it just once may not
     /// because it ends up left smaller than its assigned area, not matching what was requested)
     func setFrame(_ newFrame: CGRect) {
+        // Moving a window makes the cached frame stale, so discard it
+        AccessibilityManager.shared.invalidateWindowCache()
+
         // Disable animation (the technique used by AeroSpace/yabai/Rectangle)
         disableAnimations {
             var previousFrame: CGRect?
@@ -182,6 +192,9 @@ struct WindowInfo: Identifiable, Equatable {
     /// Focus falls back to another window that same app had just prior.
     /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
+        // Discard the cache since focus and frontmost state are changing
+        AccessibilityManager.shared.invalidateWindowCache()
+
         let perfOverallStart = CFAbsoluteTimeGetCurrent()
 
         let perfSyncStart = perfOverallStart
