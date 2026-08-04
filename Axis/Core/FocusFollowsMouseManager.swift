@@ -229,6 +229,7 @@ class FocusFollowsMouseManager: ObservableObject {
 
 			// Hit-test from front to back
 			var hitWindowID: CGWindowID? = nil
+			var hitPID: pid_t? = nil
 			for entry in windowList {
 				guard let layer = entry[kCGWindowLayer as String] as? Int,
 					  layer >= 0, layer < Self.maxHitTestLayer,
@@ -238,25 +239,27 @@ class FocusFollowsMouseManager: ObservableObject {
 				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
 				// The border overlay always sits in front of the focused window, so
 				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
-				if let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
-
-				let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
-									width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
-				if bounds.contains(cgPoint) {
-					hitWindowID = windowID
-					break
+				if let pid = entry[kCGWindowOwnerPID as String] as? pid_t {
+					if pid == ownPID { continue }
+					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+					if bounds.contains(cgPoint) {
+						hitWindowID = windowID
+						hitPID = pid
+						break
+					}
 				}
 			}
-			guard let windowID = hitWindowID else { return nil }
+			guard let windowID = hitWindowID, let pid = hitPID else { return nil }
 
 			// Map it to the AX WindowInfo.
 			// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
 			// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
 			// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
-			let allWindows = PerfLog.measure("FFM.topmostWindowAt/getAllWindows", threshold: 0.005) {
-				AccessibilityManager.shared.getAllWindows()
+			let appWindows = PerfLog.measure("FFM.topmostWindowAt/getWindowsForPID", threshold: 0.005) {
+				AccessibilityManager.shared.getWindows(forPID: pid)
 			}
-			return allWindows.first { $0.id == windowID }
+			return appWindows.first { $0.id == windowID }
 		}
 	}
 }
