@@ -60,7 +60,17 @@ class AccessibilityManager: ObservableObject {
             return []
         }
 
-        let perfStart = CFAbsoluteTimeGetCurrent()
+        // A very short-lived cache.
+        // Within a single key press or hover, focus moves, tiling, border updates, and so on
+        // Since each one triggered a full scan independently, it was measured running 2-5 times per second (10-125ms each).
+        // Whenever Axis itself moves a window, invalidateWindowCache() always discards it, so
+        // It never gets placed using stale coordinates
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - cachedAllWindowsTime < Self.allWindowsCacheTTL {
+            return cachedAllWindows
+        }
+
+        let perfStart = now
 
         var windows: [WindowInfo] = []
         let runningApps = NSWorkspace.shared.runningApplications.filter {
@@ -72,12 +82,30 @@ class AccessibilityManager: ObservableObject {
             windows.append(contentsOf: appWindows)
         }
 
+        cachedAllWindows = windows
+        cachedAllWindowsTime = CFAbsoluteTimeGetCurrent()
+
         let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
         if PerfLog.enabled && perfElapsed >= 0.005 {
             PerfLog.logf("AX.getAllWindows: %.1fms (%d windows)", perfElapsed * 1000, windows.count)
         }
 
         return windows
+    }
+
+    // MARK: - Window list cache
+
+    /// The cache's lifetime (in seconds)
+    /// Short enough to feel like a single action to a person, yet long enough to batch together consecutive internal operations
+    private static let allWindowsCacheTTL: TimeInterval = 0.1
+
+    private var cachedAllWindows: [WindowInfo] = []
+    private var cachedAllWindowsTime: CFAbsoluteTime = 0
+
+    /// Discard the window list cache
+    /// Always call this right after Axis changes state — moving a window, shifting focus, etc.
+    func invalidateWindowCache() {
+        cachedAllWindowsTime = 0
     }
 
     /// Get the windows of a specific application
@@ -95,7 +123,8 @@ class AccessibilityManager: ObservableObject {
             return []
         }
         // Set a timeout so the main thread doesn't block on a slow-responding app
-        AXUIElementSetMessagingTimeout(axApp, 0.2)
+        // (too short and it misses slow apps' windows, breaking the layout)
+        AXUIElementSetMessagingTimeout(axApp, 0.3)
 
         var windowsRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
@@ -158,7 +187,8 @@ class AccessibilityManager: ObservableObject {
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         // Set a timeout so the main thread doesn't block on a slow-responding app
-        AXUIElementSetMessagingTimeout(axApp, 0.2)
+        // (too short and it misses slow apps' windows, breaking the layout)
+        AXUIElementSetMessagingTimeout(axApp, 0.3)
         var focusedWindowRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
 
