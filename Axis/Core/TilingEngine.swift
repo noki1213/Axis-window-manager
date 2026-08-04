@@ -123,14 +123,33 @@ class TilingEngine: ObservableObject {
     func raiseFloatingWindows(on screen: NSScreen) {
         let accessibilityManager = AccessibilityManager.shared
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-        let allWindows = accessibilityManager.getAllWindows()
         let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
         let myPID = ProcessInfo.processInfo.processIdentifier
 
         // For converting AX coordinates (top-left origin) to NSScreen coordinates (bottom-left origin)
         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 
-        for window in allWindows {
+        let targetWindows = PerfLog.measure("TilingEngine.raiseFloatingWindows/getWindowsForPIDs", threshold: 0.005) { () -> [WindowInfo] in
+            let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+            var targetPIDs = Set<pid_t>()
+            for entry in windowList {
+                guard let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid != myPID else { continue }
+                guard let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+                let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+                                    width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+                let center = CGPoint(x: bounds.midX, y: mainScreenHeight - bounds.midY)
+                if screen.frame.contains(center) {
+                    targetPIDs.insert(pid)
+                }
+            }
+            var windows: [WindowInfo] = []
+            for pid in targetPIDs {
+                windows.append(contentsOf: accessibilityManager.getWindows(forPID: pid))
+            }
+            return windows
+        }
+
+        for window in targetWindows {
             // Axis's own windows are excluded
             guard window.app.processIdentifier != myPID else { continue }
             // Windows not showing on screen are excluded
