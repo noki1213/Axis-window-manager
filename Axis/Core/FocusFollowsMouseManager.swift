@@ -38,6 +38,9 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// The delayed focus task (recreated every time the mouse moves)
 	private var pendingWork: DispatchWorkItem?
 
+	/// For measurement: the reason for the most recent early return (logging is suppressed while the reason stays the same)
+	private var lastSkipReason: String?
+
 	private init() {
 		// Default: enabled, 50ms (same as the AutoRaise setting)
 		if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
@@ -70,43 +73,106 @@ class FocusFollowsMouseManager: ObservableObject {
 		// Every time the mouse moves, cancel the previous delayed focus and schedule a new one
 		// (Only fires once the cursor has been still for delayMs = same debounce behavior as AutoRaise)
 		pendingWork?.cancel()
+
+		// For measurement: record the scheduled time and the configured delay, and check the drift against the actual measured delay until it fires
+		let perfScheduledAt = CFAbsoluteTimeGetCurrent()
+		let perfExpectedDelay = delayMs / 1000.0
+
 		let work = DispatchWorkItem { [weak self] in
+			if PerfLog.enabled {
+				let actualDelay = CFAbsoluteTimeGetCurrent() - perfScheduledAt
+				let drift = actualDelay - perfExpectedDelay
+				// A congested main thread should show up as a bigger drift, so just watch the drift
+				if drift >= 0.005 {
+					PerfLog.logf("FFM onMouseMoved遅延: 予定%.1fms 実測%.1fms (ズレ+%.1fms)",
+						  perfExpectedDelay * 1000, actualDelay * 1000, drift * 1000)
+				}
+			}
 			self?.focusWindowUnderMouse()
 		}
 		pendingWork = work
-		DispatchQueue.main.asyncAfter(deadline: .now() + delayMs / 1000.0, execute: work)
+		DispatchQueue.main.asyncAfter(deadline: .now() + perfExpectedDelay, execute: work)
+	}
+
+	/// For measurement: suppress logging while the early-return reason stays the same, and print one line only when the reason changes
+	private func logSkipReason(_ reason: String) {
+		guard PerfLog.enabled else { return }
+		guard lastSkipReason != reason else { return }
+		lastSkipReason = reason
+		PerfLog.logf("FFM skip: %@", reason)
 	}
 
 	private func focusWindowUnderMouse() {
+		let perfOverallStart = CFAbsoluteTimeGetCurrent()
+		defer {
+			if PerfLog.enabled {
+				let elapsed = CFAbsoluteTimeGetCurrent() - perfOverallStart
+				if elapsed >= 0.005 {
+					PerfLog.logf("FFM.focusWindowUnderMouse 全体: %.1fms", elapsed * 1000)
+				}
+			}
+		}
+
 		// --- Guard based on Axis's own state (prevents mis-focus specific to the built-in display) ---
 
 		// Do nothing while a space switch is in progress (the switch logic focuses the correct window)
-		guard !WorkspaceManager.shared.isSwitching else { return }
+		guard !WorkspaceManager.shared.isSwitching else {
+			logSkipReason("isSwitching")
+			return
+		}
 
 		// Do nothing while in window-selection mode or gap-selection mode
-		guard !WindowSelectManager.shared.isActive else { return }
-		guard !GapSelectManager.shared.isActive else { return }
+		guard !WindowSelectManager.shared.isActive else {
+			logSkipReason("windowSelectMode")
+			return
+		}
+		guard !GapSelectManager.shared.isActive else {
+			logSkipReason("gapSelectMode")
+			return
+		}
 
 		// Do nothing while Mission Control is showing
-		guard !BorderManager.shared.isInMissionControl else { return }
+		guard !BorderManager.shared.isInMissionControl else {
+			logSkipReason("missionControl")
+			return
+		}
 
 		// --- Identify the window directly under the mouse ---
 
 		let mouseLocation = NSEvent.mouseLocation
-		guard let window = topmostWindowAt(mouseLocation) else { return }
+		guard let window = topmostWindowAt(mouseLocation) else {
+			logSkipReason("ヒットなし")
+			return
+		}
 
 		// Excludes Axis's own windows (border overlay, palette, settings screen)
-		guard window.app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+		guard window.app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+			logSkipReason("Axis自身")
+			return
+		}
 
 		// Windows currently stashed in a hidden corner by the workspace or palette are excluded
 		// (Prevents focus from jumping when the mouse touches the 1px sliver of a hidden window)
-		guard !WorkspaceManager.shared.isWindowHidden(window.id) else { return }
-		guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { return }
-
-		// Do nothing if the window is already focused
-		if let focused = AccessibilityManager.shared.getFocusedWindow(), focused.id == window.id {
+		guard !WorkspaceManager.shared.isWindowHidden(window.id) else {
+			logSkipReason("隠しウィンドウ(workspace)")
 			return
 		}
+		guard !WindowPaletteManager.shared.isWindowHidden(window.id) else {
+			logSkipReason("隠しウィンドウ(palette)")
+			return
+		}
+
+		// Do nothing if the window is already focused
+		let focused = PerfLog.measure("FFM.getFocusedWindow", threshold: 0.005) {
+			AccessibilityManager.shared.getFocusedWindow()
+		}
+		if let focused, focused.id == window.id {
+			logSkipReason("すでにフォーカス済み")
+			return
+		}
+
+		// Since it proceeds to actual focus handling, it's fine to log a line again on the next early return
+		lastSkipReason = nil
 
 		// --- Focus + bring to front ---
 
@@ -121,7 +187,9 @@ class FocusFollowsMouseManager: ObservableObject {
 		let isFloatingTarget = WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat()
 		if !isFloatingTarget,
 		   let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
-			TilingEngine.shared.raiseFloatingWindows(on: screen)
+			PerfLog.measure("FFM.raiseFloatingWindows", threshold: 0.005) {
+				TilingEngine.shared.raiseFloatingWindows(on: screen)
+			}
 		}
 
 		// Update the border only after focus has actually taken effect (same mechanism as JKLI movement)
@@ -149,40 +217,46 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// Focus jumps to the tile underneath even while touching the panel. So a negative layer
 	/// Everything except things like the desktop is subject to hit testing.
 	private func topmostWindowAt(_ point: CGPoint) -> WindowInfo? {
-		// CGWindowList uses a top-left origin, so convert it
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let cgPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
+		return PerfLog.measure("FFM.topmostWindowAt", threshold: 0.005) {
+			// CGWindowList uses a top-left origin, so convert it
+			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+			let cgPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
 
-		let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-		let ownPID = ProcessInfo.processInfo.processIdentifier
-
-		// Hit-test from front to back
-		var hitWindowID: CGWindowID? = nil
-		for entry in windowList {
-			guard let layer = entry[kCGWindowLayer as String] as? Int,
-				  layer >= 0, layer < Self.maxHitTestLayer,
-				  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
-				  let windowID = entry[kCGWindowNumber as String] as? CGWindowID else { continue }
-
-			// Let Axis's own windows (border overlay, palette, settings screen) pass through.
-			// The border overlay always sits in front of the focused window, so
-			// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
-			if let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
-
-			let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
-								width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
-			if bounds.contains(cgPoint) {
-				hitWindowID = windowID
-				break
+			let windowList = PerfLog.measure("FFM.topmostWindowAt/CGWindowListCopyWindowInfo", threshold: 0.005) {
+				CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 			}
-		}
-		guard let windowID = hitWindowID else { return nil }
+			let ownPID = ProcessInfo.processInfo.processIdentifier
 
-		// Map it to the AX WindowInfo.
-		// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
-		// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
-		// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
-		let allWindows = AccessibilityManager.shared.getAllWindows()
-		return allWindows.first { $0.id == windowID }
+			// Hit-test from front to back
+			var hitWindowID: CGWindowID? = nil
+			for entry in windowList {
+				guard let layer = entry[kCGWindowLayer as String] as? Int,
+					  layer >= 0, layer < Self.maxHitTestLayer,
+					  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
+					  let windowID = entry[kCGWindowNumber as String] as? CGWindowID else { continue }
+
+				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
+				// The border overlay always sits in front of the focused window, so
+				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
+				if let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
+
+				let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+									width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+				if bounds.contains(cgPoint) {
+					hitWindowID = windowID
+					break
+				}
+			}
+			guard let windowID = hitWindowID else { return nil }
+
+			// Map it to the AX WindowInfo.
+			// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
+			// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
+			// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
+			let allWindows = PerfLog.measure("FFM.topmostWindowAt/getAllWindows", threshold: 0.005) {
+				AccessibilityManager.shared.getAllWindows()
+			}
+			return allWindows.first { $0.id == windowID }
+		}
 	}
 }
