@@ -94,6 +94,8 @@ class AccessibilityManager: ObservableObject {
         guard let axApp = AXUIElementCreateApplication(app.processIdentifier) as AXUIElement? else {
             return []
         }
+        // Set a timeout so the main thread doesn't block on a slow-responding app
+        AXUIElementSetMessagingTimeout(axApp, 0.2)
 
         var windowsRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
@@ -105,6 +107,17 @@ class AccessibilityManager: ObservableObject {
         return axWindows.compactMap { axWindow -> WindowInfo? in
             return WindowInfo(axElement: axWindow, app: app)
         }
+    }
+
+    /// Get the windows of the application with the given PID
+    func getWindows(forPID pid: pid_t) -> [WindowInfo] {
+        guard isAccessibilityEnabled else {
+            return []
+        }
+        guard let app = NSRunningApplication(processIdentifier: pid) else {
+            return []
+        }
+        return getWindows(for: app)
     }
     
     /// Get the set of window IDs currently showing in the current Space (on screen)
@@ -144,6 +157,8 @@ class AccessibilityManager: ObservableObject {
 
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+        // Set a timeout so the main thread doesn't block on a slow-responding app
+        AXUIElementSetMessagingTimeout(axApp, 0.2)
         var focusedWindowRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
 
