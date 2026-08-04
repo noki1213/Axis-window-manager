@@ -338,6 +338,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start watching for Focus Follows Mouse (auto-focus the window under the cursor)
         FocusFollowsMouseManager.shared.start()
+        // A startup marker to confirm the measurement logging is running
+        PerfLog.log("=== Axis 起動 / FFM有効=\(FocusFollowsMouseManager.shared.isEnabled) ===")
 
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })

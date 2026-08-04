@@ -60,6 +60,8 @@ class AccessibilityManager: ObservableObject {
             return []
         }
 
+        let perfStart = CFAbsoluteTimeGetCurrent()
+
         var windows: [WindowInfo] = []
         let runningApps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular
@@ -70,22 +72,36 @@ class AccessibilityManager: ObservableObject {
             windows.append(contentsOf: appWindows)
         }
 
+        let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
+        if PerfLog.enabled && perfElapsed >= 0.005 {
+            PerfLog.logf("AX.getAllWindows: %.1fms (%d windows)", perfElapsed * 1000, windows.count)
+        }
+
         return windows
     }
-    
+
     /// Get the windows of a specific application
     func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
+        let perfStart = CFAbsoluteTimeGetCurrent()
+        defer {
+            let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
+            // Only log entries over 10ms, to pin down which app is slow
+            if PerfLog.enabled && perfElapsed >= 0.010 {
+                PerfLog.logf("AX.getWindows(%@): %.1fms", app.localizedName ?? "?", perfElapsed * 1000)
+            }
+        }
+
         guard let axApp = AXUIElementCreateApplication(app.processIdentifier) as AXUIElement? else {
             return []
         }
-        
+
         var windowsRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
-        
+
         guard result == .success, let axWindows = windowsRef as? [AXUIElement] else {
             return []
         }
-        
+
         return axWindows.compactMap { axWindow -> WindowInfo? in
             return WindowInfo(axElement: axWindow, app: app)
         }
@@ -110,6 +126,14 @@ class AccessibilityManager: ObservableObject {
     
     /// Get the focused window
     func getFocusedWindow() -> WindowInfo? {
+        let perfStart = CFAbsoluteTimeGetCurrent()
+        defer {
+            let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
+            if PerfLog.enabled && perfElapsed >= 0.005 {
+                PerfLog.logf("AX.getFocusedWindow: %.1fms", perfElapsed * 1000)
+            }
+        }
+
         guard isAccessibilityEnabled else {
             return nil
         }
