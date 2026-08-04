@@ -829,6 +829,7 @@ class TilingEngine: ObservableObject {
     /// Use the existing ratio if there is one; otherwise split evenly
     private func applyColumnTiling(columns: [[WindowInfo]], on screen: NSScreen) {
         guard !columns.isEmpty else { return }
+        logIfSingleWindowLayout(columns: columns, on: screen, via: "applyColumnTiling")
         let screenID = ScreenIdentifier(from: screen)
 
         // Use the existing ratio if there is one
@@ -914,6 +915,17 @@ class TilingEngine: ObservableObject {
     /// The column structure's WindowInfo holds the frame measured "before" tiling was applied, and
     /// Without updating this, the stale coordinates would linger until the next window addition or removal.
     /// causes the logic that inserts new or hovering windows into a column by X coordinate to pick the wrong spot
+    /// Logs when tiling results in a layout where a single window occupies the whole screen.
+    /// Diagnostic logging to pin down when the "an unexpected window goes fullscreen" bug occurs.
+    /// Cross-referenced with the line above (a window miss/disappearance) to narrow down the cause
+    private func logIfSingleWindowLayout(columns: [[WindowInfo]], on screen: NSScreen, via caller: String) {
+        guard PerfLog.enabled else { return }
+        let total = columns.reduce(0) { $0 + $1.count }
+        guard total == 1, let window = columns.first?.first else { return }
+        PerfLog.logf("★全画面割当: %@ / %@ (経路: %@, 画面幅: %.0f)",
+                     window.app.localizedName ?? "?", window.title, caller, screen.visibleFrame.width)
+    }
+
     private func updateCachedFrame(windowID: CGWindowID, to frame: CGRect, on screenID: ScreenIdentifier) {
         guard var columns = tiledWindows[screenID] else { return }
         for (columnIndex, column) in columns.enumerated() {
@@ -1199,6 +1211,7 @@ class TilingEngine: ObservableObject {
     private func applyColumnTilingWithRatios(columns: [[WindowInfo]], ratios: [CGFloat], on screen: NSScreen) {
         let screenID = ScreenIdentifier(from: screen)
         guard !columns.isEmpty else { return }
+        logIfSingleWindowLayout(columns: columns, on: screen, via: "applyColumnTilingWithRatios")
         guard columns.count == ratios.count else {
             // Fall back to normal tiling if the ratios don't match
             columnWidthRatios[screenID] = nil

@@ -82,6 +82,21 @@ class AccessibilityManager: ObservableObject {
             windows.append(contentsOf: appWindows)
         }
 
+        // Record windows that disappeared since the last scan (for diagnostics).
+        // A genuine close also shows up here, but if it appears right before "assigned the whole screen,"
+        // Serves as evidence that a miss broke the layout
+        if PerfLog.enabled {
+            let currentIDs = Set(windows.map { $0.id })
+            let disappeared = previousScanWindows.filter { !currentIDs.contains($0.key) }
+            if !disappeared.isEmpty {
+                let names = disappeared.values.joined(separator: ", ")
+                PerfLog.logf("★ウィンドウ消失: %@ (%d件 → %d件)", names, previousScanWindows.count, windows.count)
+            }
+            previousScanWindows = Dictionary(uniqueKeysWithValues: windows.map {
+                ($0.id, "\($0.app.localizedName ?? "?")/\($0.title)")
+            })
+        }
+
         cachedAllWindows = windows
         cachedAllWindowsTime = CFAbsoluteTimeGetCurrent()
 
@@ -101,6 +116,9 @@ class AccessibilityManager: ObservableObject {
 
     private var cachedAllWindows: [WindowInfo] = []
     private var cachedAllWindowsTime: CFAbsoluteTime = 0
+
+    /// Windows visible on the previous scan (for diagnostics: ID → app name/title)
+    private var previousScanWindows: [CGWindowID: String] = [:]
 
     /// Discard the window list cache
     /// Always call this right after Axis changes state — moving a window, shifting focus, etc.
@@ -130,12 +148,26 @@ class AccessibilityManager: ObservableObject {
         let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
 
         guard result == .success, let axWindows = windowsRef as? [AXUIElement] else {
+            // The query failed (usually cut off by a timeout).
+            // This app's windows get reported downstream as "not existing," and
+            // This can break the layout, so always log when it happens
+            if PerfLog.enabled {
+                PerfLog.logf("★AX取りこぼし: %@ (result=%d)", app.localizedName ?? "?", result.rawValue)
+            }
             return []
         }
 
-        return axWindows.compactMap { axWindow -> WindowInfo? in
+        let windows = axWindows.compactMap { axWindow -> WindowInfo? in
             return WindowInfo(axElement: axWindow, app: app)
         }
+
+        // Also counts as a miss when AX returned a window but a WindowInfo couldn't be built for it
+        if PerfLog.enabled && windows.count < axWindows.count {
+            PerfLog.logf("★AX取りこぼし(情報取得失敗): %@ (%d件中 %d件のみ)",
+                         app.localizedName ?? "?", axWindows.count, windows.count)
+        }
+
+        return windows
     }
 
     /// Get the windows of the application with the given PID
