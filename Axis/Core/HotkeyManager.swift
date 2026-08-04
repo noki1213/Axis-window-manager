@@ -262,6 +262,7 @@ class HotkeyManager: ObservableObject {
 		switch action {
 		// MARK: Focus movement
 		case .focusLeft:
+			PerfLog.markKeyPressStart("focusLeft")
 			DispatchQueue.main.async { [weak self] in
 				if let targetID = self?.tilingEngine.moveFocus(direction: .left) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -270,6 +271,7 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 		case .focusRight:
+			PerfLog.markKeyPressStart("focusRight")
 			DispatchQueue.main.async { [weak self] in
 				if let targetID = self?.tilingEngine.moveFocus(direction: .right) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -278,6 +280,7 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 		case .focusUp:
+			PerfLog.markKeyPressStart("focusUp")
 			DispatchQueue.main.async { [weak self] in
 				if let targetID = self?.tilingEngine.moveFocus(direction: .up) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -286,6 +289,7 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 		case .focusDown:
+			PerfLog.markKeyPressStart("focusDown")
 			DispatchQueue.main.async { [weak self] in
 				if let targetID = self?.tilingEngine.moveFocus(direction: .down) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -573,6 +577,9 @@ class HotkeyManager: ObservableObject {
 		// JKLI handling (works with or without ctrl+option)
 		switch Int(event.keyCode) {
 		case kVK_ANSI_J: // 左
+			if !hasShift {
+				PerfLog.markKeyPressStart("JKLI:left")
+			}
 			DispatchQueue.main.async { [weak self] in
 				if hasShift || (hasModifier && hasShift) {
 					self?.windowSelectManager.moveSelectedWindows(direction: .left)
@@ -586,6 +593,9 @@ class HotkeyManager: ObservableObject {
 			return true
 
 		case kVK_ANSI_L: // 右
+			if !hasShift {
+				PerfLog.markKeyPressStart("JKLI:right")
+			}
 			DispatchQueue.main.async { [weak self] in
 				if hasShift || (hasModifier && hasShift) {
 					self?.windowSelectManager.moveSelectedWindows(direction: .right)
@@ -599,6 +609,9 @@ class HotkeyManager: ObservableObject {
 			return true
 
 		case kVK_ANSI_I: // 上
+			if !hasShift {
+				PerfLog.markKeyPressStart("JKLI:up")
+			}
 			DispatchQueue.main.async { [weak self] in
 				if hasShift || (hasModifier && hasShift) {
 					self?.windowSelectManager.moveSelectedWindows(direction: .up)
@@ -612,6 +625,9 @@ class HotkeyManager: ObservableObject {
 			return true
 
 		case kVK_ANSI_K: // 下
+			if !hasShift {
+				PerfLog.markKeyPressStart("JKLI:down")
+			}
 			DispatchQueue.main.async { [weak self] in
 				if hasShift || (hasModifier && hasShift) {
 					self?.windowSelectManager.moveSelectedWindows(direction: .down)

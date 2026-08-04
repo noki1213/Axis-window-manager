@@ -182,8 +182,16 @@ struct WindowInfo: Identifiable, Equatable {
     /// Focus falls back to another window that same app had just prior.
     /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
+        let perfOverallStart = CFAbsoluteTimeGetCurrent()
+
+        let perfSyncStart = perfOverallStart
         applyFocusOnce(useAppActivate: false)
-        verifyFocus(attempt: 0)
+        let perfSyncElapsed = CFAbsoluteTimeGetCurrent() - perfSyncStart
+        if PerfLog.enabled && perfSyncElapsed >= 0.005 {
+            PerfLog.logf("WindowInfo.focus()同期部分: %.1fms", perfSyncElapsed * 1000)
+        }
+
+        verifyFocus(attempt: 0, focusStart: perfOverallStart)
     }
 
     /// The actual implementation of setting focus (a single attempt)
@@ -214,9 +222,25 @@ struct WindowInfo: Identifiable, Equatable {
         AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
     }
 
+    /// The most recent result of setFrontProcessWithThisWindow() (recorded so we only log when it changes after launch)
+    private static var lastSetFrontProcessResult: Bool?
+
     /// Activates the app and, at the same time, designates this window as the frontmost one
     /// - Returns: true on success. false if the private API is unavailable
     private func setFrontProcessWithThisWindow() -> Bool {
+        let result = setFrontProcessWithThisWindowImpl()
+
+        // Only log when the result differs from last time (logging on every pass after startup would be noisy)
+        if PerfLog.enabled && Self.lastSetFrontProcessResult != result {
+            Self.lastSetFrontProcessResult = result
+            PerfLog.logf("setFrontProcessWithThisWindow: %@", result ? "成功（非公開API使用）" : "失敗（activate()にフォールバック）")
+        }
+
+        return result
+    }
+
+    /// The actual implementation of setFrontProcessWithThisWindow()
+    private func setFrontProcessWithThisWindowImpl() -> Bool {
         guard let processForPID = FrontProcessAPI.processForPID,
               let setFrontProcess = FrontProcessAPI.setFrontProcess,
               FrontProcessAPI.postEventRecord != nil else {
@@ -264,18 +288,32 @@ struct WindowInfo: Identifiable, Equatable {
     private static let focusRetryDelays: [TimeInterval] = [0.008, 0.016, 0.032, 0.064, 0.12]
 
     /// Confirm whether focus actually moved, and retry if it didn't
-    private func verifyFocus(attempt: Int) {
-        guard attempt < Self.focusRetryDelays.count else { return }
+    /// - Parameter focusStart: For measurement. The time of the first focus() call
+    private func verifyFocus(attempt: Int, focusStart: CFAbsoluteTime) {
+        guard attempt < Self.focusRetryDelays.count else {
+            if PerfLog.enabled {
+                let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
+                PerfLog.logf("WindowInfo.verifyFocus: 5回とも失敗 (%.1fms)", elapsed * 1000)
+            }
+            // Clear any lingering key-press-start measurement
+            PerfLog.reportKeyPressToFocusConfirmed()
+            return
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
             // Do nothing if focus has already moved as intended
             if AccessibilityManager.shared.getFocusedWindow()?.id == self.id {
+                if PerfLog.enabled {
+                    let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
+                    PerfLog.logf("WindowInfo.verifyFocus: %d回目の確認で成功 (%.1fms)", attempt + 1, elapsed * 1000)
+                }
+                PerfLog.reportKeyPressToFocusConfirmed()
                 return
             }
 
             // Some apps don't respond to raising via AX, so also call activate() from the second attempt onward
             self.applyFocusOnce(useAppActivate: attempt >= 1)
-            self.verifyFocus(attempt: attempt + 1)
+            self.verifyFocus(attempt: attempt + 1, focusStart: focusStart)
         }
     }
 
