@@ -575,6 +575,50 @@ class TilingEngine: ObservableObject {
         moveCursorToWindow(currentWindow)
     }
 
+    /// Insert a new window into the column structure at the position specified by the placement reservation (Ctrl+Opt+N)
+    /// Doesn't actually apply the frame (applyColumnTiling). Inserting it into the column structure here is enough, since
+    /// The normal tile() called right after this treats it as an "existing window," and
+    /// Skips the X-coordinate-based insertion logic and applies the layout as-is
+    func insertReservedWindow(_ window: WindowInfo, columnIndex: Int, kind: PlacementReservationKind, on screen: NSScreen) {
+        let screenID = ScreenIdentifier(from: screen)
+        var columns = tiledWindows[screenID] ?? []
+
+        // Just in case, remove it first if it's already in the column structure
+        for i in 0..<columns.count {
+            columns[i].removeAll { $0.id == window.id }
+        }
+        columns = columns.filter { !$0.isEmpty }
+
+        switch kind {
+        case .aboveInColumn, .belowInColumn:
+            guard !columns.isEmpty else {
+                columns = [[window]]
+                tiledWindows[screenID] = columns
+                return
+            }
+            let idx = min(max(columnIndex, 0), columns.count - 1)
+            if kind == .aboveInColumn {
+                columns[idx].insert(window, at: 0)
+            } else {
+                columns[idx].append(window)
+            }
+
+        case .newColumnLeft:
+            let idx = min(max(columnIndex, 0), columns.count)
+            columns.insert([window], at: idx)
+
+        case .newColumnRight:
+            let idx = min(max(columnIndex + 1, 0), columns.count)
+            columns.insert([window], at: idx)
+
+        case .float:
+            // Floats aren't placed into the column structure, so do nothing (the caller should already branch on this)
+            return
+        }
+
+        tiledWindows[screenID] = columns
+    }
+
     /// Move the window to another screen
     private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
         let sourceID = ScreenIdentifier(from: sourceScreen)

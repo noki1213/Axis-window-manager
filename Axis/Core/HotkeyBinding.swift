@@ -48,6 +48,8 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case workspacePrev
 	case moveWindowToNextWorkspace
 	case moveWindowToPrevWorkspace
+	// Placement reservation
+	case placementReserve
 }
 
 // MARK: - HotkeySection (UI section grouping)
@@ -61,6 +63,7 @@ enum HotkeySection: String, CaseIterable {
 	case layout = "レイアウト"
 	case monitor = "モニター"
 	case workspace = "ワークスペース"
+	case placementReserve = "Placement Reserve"
 }
 
 // MARK: - HotkeyModifiers (a combination of modifier keys)
@@ -186,6 +189,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.workspacePrev: "前のワークスペース",
 		.moveWindowToNextWorkspace: "ウィンドウを次のワークスペースへ",
 		.moveWindowToPrevWorkspace: "ウィンドウを前のワークスペースへ",
+		.placementReserve: "Placement Reserve (Await Next Key)",
 	]
 
 	// MARK: - Section classification dictionary
@@ -217,6 +221,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.workspacePrev: .workspace,
 		.moveWindowToNextWorkspace: .workspace,
 		.moveWindowToPrevWorkspace: .workspace,
+		.placementReserve: .placementReserve,
 	]
 
 	// MARK: - Key code -> display name
@@ -298,6 +303,8 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .workspacePrev, keyCode: kVK_ANSI_U, modifiers: ctrlOpt),
 			HotkeyBinding(action: .moveWindowToNextWorkspace, keyCode: kVK_ANSI_O, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowToPrevWorkspace, keyCode: kVK_ANSI_U, modifiers: ctrlOptShift),
+			// Placement reservation
+			HotkeyBinding(action: .placementReserve, keyCode: kVK_ANSI_N, modifiers: ctrlOpt),
 		]
 	}
 }

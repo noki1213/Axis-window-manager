@@ -23,6 +23,10 @@ class HotkeyManager: ObservableObject {
 
 	@Published var currentMode: Mode = .normal
 
+	/// Whether a placement reservation (Ctrl+Opt+N) is being waited on. Since this is a transient state that only looks at the next single key to confirm/cancel,
+	/// Kept as an independent flag rather than part of Mode (folding it into Mode would drag it into Escape's generic handling)
+	private var isAwaitingPlacementReservationKey: Bool = false
+
 	// MARK: - Lookup table (supports customization)
 
 	/// A lookup table from (keyCode, modifiers) to HotkeyAction
@@ -114,7 +118,8 @@ class HotkeyManager: ObservableObject {
 
 			// Filtering while in normal mode:
 			// Ignore it unless it includes one of the modifier keys registered in the lookup table
-			if hotkeyManager.currentMode == .normal {
+			// However, while waiting on a placement reservation, let every key through so the next single key can be evaluated
+			if hotkeyManager.currentMode == .normal && !hotkeyManager.isAwaitingPlacementReservationKey {
 				let flags = event.flags
 				let eventModifiers = HotkeyModifiers.from(flags)
 				// Check whether a modifier key matching a lookup table key is present
@@ -221,6 +226,13 @@ class HotkeyManager: ObservableObject {
 		// Another key was pressed, i.e. a normal shortcut, so don't show/hide the peek preview
 		DispatchQueue.main.async {
 			WorkspacePeekManager.shared.cancelDueToKeyPress()
+		}
+
+		// While waiting on a placement reservation, only look at the next single key to confirm or cancel.
+		// Since Mode wasn't changed (currentMode stays normal), the Escape handling below and
+		// Don't fall through to lookup table handling; finish it here
+		if isAwaitingPlacementReservationKey {
+			return handlePlacementReserveAwaitingKeyEvent(event)
 		}
 
 		// Return to normal mode with Escape
@@ -509,6 +521,20 @@ class HotkeyManager: ObservableObject {
 				guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
 				WorkspaceManager.shared.moveWindowToPreviousWorkspace(on: screen)
 			}
+
+		// MARK: Placement reservation
+		case .placementReserve:
+			DispatchQueue.main.async { [weak self] in
+				guard let self = self else { return }
+				if self.isAwaitingPlacementReservationKey || PlacementReservationManager.shared.hasActiveReservation {
+					// If pressed again while waiting or while a placement is already confirmed, cancel it
+					self.isAwaitingPlacementReservationKey = false
+					PlacementReservationManager.shared.cancel()
+				} else {
+					self.isAwaitingPlacementReservationKey = true
+					PlacementReservationManager.shared.beginAwaiting()
+				}
+			}
 		}
 	}
 
@@ -590,6 +616,40 @@ class HotkeyManager: ObservableObject {
 			// Block every key while in this mode (don't pass them to the app)
 			return true
 		}
+	}
+
+	// MARK: - Placement Reservation Awaiting Key Handling
+
+	/// Handle the next single key pressed while waiting on a placement reservation.
+	/// The wait is always cleared the moment this is called (since it's one-shot).
+	/// If a key other than I/K/J/L/F (with no modifiers) is pressed, don't confirm the reservation, and
+	/// Don't consume that key; pass it straight through to the app (return false)
+	private func handlePlacementReserveAwaitingKeyEvent(_ event: NSEvent) -> Bool {
+		isAwaitingPlacementReservationKey = false
+
+		// Excluded if a modifier key is held
+		guard HotkeyModifiers.from(event.modifierFlags).isEmpty else {
+			return false
+		}
+
+		let kind: PlacementReservationKind?
+		switch Int(event.keyCode) {
+		case kVK_ANSI_I: kind = .aboveInColumn
+		case kVK_ANSI_K: kind = .belowInColumn
+		case kVK_ANSI_J: kind = .newColumnLeft
+		case kVK_ANSI_L: kind = .newColumnRight
+		case kVK_ANSI_F: kind = .float
+		default: kind = nil
+		}
+
+		guard let kind = kind else {
+			return false
+		}
+
+		DispatchQueue.main.async {
+			PlacementReservationManager.shared.confirm(kind: kind)
+		}
+		return true
 	}
 
 	// MARK: - Window Palette Mode Key Handling
