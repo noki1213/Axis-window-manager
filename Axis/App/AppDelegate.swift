@@ -160,8 +160,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch mode {
         case .normal:
             iconName = "rectangle.split.3x1" // Normal tiling icon
-        case .windowSelect:
-            iconName = "rectangle.stack" // Window selection
         case .gapSelect:
             iconName = "arrow.left.and.right" // Gap selection
         case .windowPalette:
