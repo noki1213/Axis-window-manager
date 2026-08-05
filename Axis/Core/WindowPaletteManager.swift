@@ -226,8 +226,14 @@ class WindowPaletteManager {
 			needsRetileOnClose = false
 		}
 
-		// Switch to the selected window's workspace
-		switchToWindowWorkspace(selectedItem)
+		// Selecting from the Hidden section (windows hidden with Ctrl+Opt+X)
+		// Route it through the neighbor-memory restore logic instead of a normal workspace switch
+		if selectedItem.workspace == -3 {
+			HiddenWindowManager.shared.restore(windowID: selectedItem.windowID)
+		} else {
+			// Switch to the selected window's workspace
+			switchToWindowWorkspace(selectedItem)
+		}
 
 		// Clear the data
 		displays.removeAll()
@@ -435,6 +441,10 @@ class WindowPaletteManager {
 
 				var items: [WindowPaletteItem] = []
 				for windowID in windowIDs {
+					// Windows hidden (minimized) with Ctrl+Opt+X are excluded from the normal Space section, and
+					// Add them together later as the Hidden section
+					guard !HiddenWindowManager.shared.isHidden(windowID) else { continue }
+
 					guard let windowInfo = windowInfoMap[windowID] else { continue }
 
 					let item = WindowPaletteItem(
@@ -521,6 +531,28 @@ class WindowPaletteManager {
 		for i in result.indices {
 			if let systemFloatItems = systemFloatItemsByScreen[result[i].screenID], !systemFloatItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(workspace: -1, items: systemFloatItems))
+			}
+		}
+
+		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
+		// Use workspace = -3 as a dedicated section marker
+		var hiddenItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		for record in HiddenWindowManager.shared.hiddenStack {
+			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
+			let item = WindowPaletteItem(
+				windowID: record.windowID,
+				appName: windowInfo.app.localizedName ?? "不明なアプリ",
+				windowTitle: windowInfo.title,
+				appIcon: windowInfo.app.icon,
+				workspace: -3,
+				screenID: record.screenID
+			)
+			hiddenItemsByScreen[record.screenID, default: []].append(item)
+		}
+
+		for i in result.indices {
+			if let hiddenItems = hiddenItemsByScreen[result[i].screenID], !hiddenItems.isEmpty {
+				result[i].spaces.append(WindowPaletteSection(workspace: -3, items: hiddenItems))
 			}
 		}
 
