@@ -73,7 +73,16 @@ class HotkeyStore: ObservableObject {
 		let keyCode: Int
 		let modifiers: HotkeyModifiers
 
+		/// The set of old action names (before "hover" was renamed to "Float").
+		/// Since the key bindings change too, drop the old entries here and let defaults() supply the new defaults.
+		private static let renamedActions: Set<String> = ["hoverToggle", "hoverFocusCycle"]
+
 		func toHotkeyBinding() -> HotkeyBinding? {
+			if Self.renamedActions.contains(action) {
+				// Drop entries under the old name. Since loadFromDisk()'s "fill unsaved actions with defaults" step will
+				// floatToggle / floatFocusCycle are backfilled with the new default keys.
+				return nil
+			}
 			guard let knownAction = HotkeyAction(rawValue: action) else {
 				// A deprecated action (e.g. quickGapLeft). Ignore it and skip.
 				return nil

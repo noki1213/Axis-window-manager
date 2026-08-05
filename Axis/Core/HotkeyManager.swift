@@ -352,15 +352,15 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		// MARK: Hover (floating)
-		case .hoverToggle:
+		// MARK: Float (floating)
+		case .floatToggle:
 			DispatchQueue.main.async { [weak self] in
 				guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-				let wasHovering = WorkspaceManager.shared.isHovering(focusedWindow.id)
-				WorkspaceManager.shared.toggleHover(windowID: focusedWindow.id)
+				let wasFloating = WorkspaceManager.shared.isFloating(focusedWindow.id)
+				WorkspaceManager.shared.toggleFloat(windowID: focusedWindow.id)
 
-				// Move the window to the center of the monitor when hover is turned on
-				if !wasHovering, let screen = WorkspaceManager.shared.focusedScreen() {
+				// When turning Float on, move the window to the center of the monitor
+				if !wasFloating, let screen = WorkspaceManager.shared.focusedScreen() {
 					let visibleFrame = screen.visibleFrame
 					let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 					let centerX = visibleFrame.midX - focusedWindow.frame.width / 2
@@ -374,21 +374,21 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		case .hoverFocusCycle:
+		case .floatFocusCycle:
 			DispatchQueue.main.async {
-				let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
-				guard !hoverIDs.isEmpty else { return }
+				let floatIDs = WorkspaceManager.shared.floatWindowIDs
+				guard !floatIDs.isEmpty else { return }
 				let allWindows = AccessibilityManager.shared.getAllWindows()
-				let hoverWindows = allWindows.filter { hoverIDs.contains($0.id) }
+				let floatWindows = allWindows.filter { floatIDs.contains($0.id) }
 					.sorted { $0.frame.midX < $1.frame.midX }
-				guard !hoverWindows.isEmpty else { return }
+				guard !floatWindows.isEmpty else { return }
 
 				if let focused = AccessibilityManager.shared.getFocusedWindow(),
-				   let currentIdx = hoverWindows.firstIndex(where: { $0.id == focused.id }) {
-					let nextIdx = (currentIdx + 1) % hoverWindows.count
-					hoverWindows[nextIdx].focus()
+				   let currentIdx = floatWindows.firstIndex(where: { $0.id == focused.id }) {
+					let nextIdx = (currentIdx + 1) % floatWindows.count
+					floatWindows[nextIdx].focus()
 				} else {
-					hoverWindows[0].focus()
+					floatWindows[0].focus()
 				}
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
 					BorderManager.shared.updateBorder()
