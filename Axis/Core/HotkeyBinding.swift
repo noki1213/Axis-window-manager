@@ -29,6 +29,9 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case floatToggle
 	case floatFocusCycle
 	case raiseFloatingWindows
+	// Hide/restore
+	case hideWindow
+	case unhideLastWindow
 	// Zen mode
 	case zenToggle
 	// Mode switching
@@ -53,6 +56,7 @@ enum HotkeyAction: String, Codable, CaseIterable {
 enum HotkeySection: String, CaseIterable {
 	case focusAndMove = "フォーカス / ウィンドウ移動"
 	case float = "Float"
+	case hidden = "Hidden"
 	case modeSwitching = "モード切り替え"
 	case layout = "レイアウト"
 	case monitor = "モニター"
@@ -169,6 +173,8 @@ struct HotkeyBinding: Codable, Identifiable {
 		.floatToggle: "Float ON/OFF",
 		.floatFocusCycle: "Floatウィンドウにフォーカス",
 		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
+		.hideWindow: "ウィンドウを隠す",
+		.unhideLastWindow: "最後に隠したウィンドウを復元",
 		.zenToggle: "Zen モード ON/OFF",
 		.gapSelectMode: "Gap Select モード",
 		.windowPaletteMode: "Window Palette モード",
@@ -198,6 +204,8 @@ struct HotkeyBinding: Codable, Identifiable {
 		.floatToggle: .float,
 		.floatFocusCycle: .float,
 		.raiseFloatingWindows: .float,
+		.hideWindow: .hidden,
+		.unhideLastWindow: .hidden,
 		.zenToggle: .modeSwitching,
 		.gapSelectMode: .modeSwitching,
 		.windowPaletteMode: .modeSwitching,
@@ -271,6 +279,9 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .floatToggle,     keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
 			HotkeyBinding(action: .floatFocusCycle, keyCode: kVK_ANSI_F, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .raiseFloatingWindows, keyCode: kVK_ANSI_B, modifiers: ctrlOpt),
+			// Hide/restore
+			HotkeyBinding(action: .hideWindow,       keyCode: kVK_ANSI_X, modifiers: ctrlOpt),
+			HotkeyBinding(action: .unhideLastWindow, keyCode: kVK_ANSI_X, modifiers: ctrlOptShift),
 			// Zen mode
 			HotkeyBinding(action: .zenToggle, keyCode: kVK_ANSI_Z, modifiers: ctrlOpt),
 			// Mode switching

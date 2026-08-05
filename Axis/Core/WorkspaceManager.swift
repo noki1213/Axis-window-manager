@@ -1216,6 +1216,26 @@ class WorkspaceManager: ObservableObject {
 
 	}
 
+	/// Get the column structure (window IDs only) for the given monitor and workspace
+	/// For restoring a hidden window (the neighbor-memory approach), into an inactive workspace
+	/// Used to find the insertion point
+	func columnsSnapshot(on screenID: ScreenIdentifier, workspace: Int) -> [[CGWindowID]]? {
+		return tilingSnapshots[screenID]?[workspace]?.columns
+	}
+
+	/// Update the column structure (window IDs only) for the given monitor and workspace
+	/// Used for restoring a hidden window. If the target workspace is currently active,
+	/// Since TilingEngine.tiledWindows holds the actual state, not this side,
+	/// Operate directly on TilingEngine (only used when it's not active)
+	func updateColumnsSnapshot(_ columns: [[CGWindowID]], on screenID: ScreenIdentifier, workspace: Int) {
+		if tilingSnapshots[screenID] == nil {
+			tilingSnapshots[screenID] = [:]
+		}
+		var snapshot = tilingSnapshots[screenID]?[workspace] ?? PerScreenSnapshot(columns: [], columnWidthRatios: nil, rowHeightRatios: nil)
+		snapshot.columns = columns
+		tilingSnapshots[screenID]?[workspace] = snapshot
+	}
+
 	/// Restore the saved TilingEngine state
 	private func restoreTilingState(for screenID: ScreenIdentifier, workspace: Int, on screen: NSScreen) {
 		if let snapshot = tilingSnapshots[screenID]?[workspace] {
