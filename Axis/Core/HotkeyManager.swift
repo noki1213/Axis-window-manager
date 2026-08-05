@@ -352,40 +352,6 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		// MARK: Quick gap resize
-		case .quickGapLeft:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-		case .quickGapRight:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-		case .quickGapUp:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-		case .quickGapDown:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-
 		// MARK: Hover (floating)
 		case .hoverToggle:
 			DispatchQueue.main.async { [weak self] in
@@ -672,60 +638,46 @@ class HotkeyManager: ObservableObject {
 
 	// MARK: - Gap Select Mode Key Handling
 
-	/// Key handling in gap-selection mode
+	/// Key handling while in the new gap mode
+	/// Each key is responsible for one edge, directly moving that edge of the focused window.
+	/// There's no select-then-confirm step; the edge moves the instant the key is pressed.
 	private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
-		// Enter: select the gap / confirm the resize
+		// Enter: exit the mode (same as Escape)
 		if event.keyCode == kVK_Return {
 			DispatchQueue.main.async { [weak self] in
 				guard let self = self else { return }
-				if self.gapSelectManager.selectCurrentGap() {
-					self.gapSelectManager.endGapSelectMode()
-					self.currentMode = .normal
-					NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
-				}
+				self.gapSelectManager.endGapSelectMode()
+				self.currentMode = .normal
+				NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
 			}
 			return true
 		}
 
-		// JKLI handling (works with or without ctrl+option)
+		let hasShift = event.modifierFlags.contains(.shift)
+
+		// Specify the edge directly with JKLI (plain = grow, Shift = shrink)
 		switch Int(event.keyCode) {
-		case kVK_ANSI_J: // 左
+		case kVK_ANSI_J: // 左辺
 			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .left)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .left)
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.left, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_L: // 右
+		case kVK_ANSI_L: // 右辺
 			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .right)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .right)
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.right, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_I: // 上
+		case kVK_ANSI_I: // 上辺
 			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .up)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .up)
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.up, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_K: // 下
+		case kVK_ANSI_K: // 下辺
 			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .down)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .down)
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.down, widen: !hasShift)
 			}
 			return true
 
