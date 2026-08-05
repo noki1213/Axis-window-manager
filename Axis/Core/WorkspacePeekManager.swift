@@ -46,10 +46,16 @@ class WorkspacePeekManager {
 	}
 
 	/// Called when a normal key input (i.e. a shortcut operation) occurs
-	/// Cancel a pending peek preview, and dismiss it immediately if it's already showing
+	/// Cancel the scheduled peek preview, and dismiss it immediately if it's currently showing.
+	/// However, if Ctrl+Option is still held down, reset the delay timer and schedule it to show again
+	/// (While held down for continuous operation it stays hidden each time, and reappears once your hand stops)
 	func cancelDueToKeyPress() {
 		cancelPendingShow()
 		hide()
+
+		if isModifierHeld {
+			scheduleShow()
+		}
 	}
 
 	// MARK: - Display control
@@ -69,26 +75,41 @@ class WorkspacePeekManager {
 		pendingShowWorkItem = nil
 	}
 
-	/// Show the peek-preview overlay on every monitor
+	/// Show the peek-preview overlay only on the single monitor that has the focused window
 	private func show() {
 		// Do nothing if the modifier key was released while showing (a belt-and-suspenders double check)
 		guard isModifierHeld else { return }
 
 		hide()
 
-		for screen in NSScreen.screens {
-			let currentWS = WorkspaceManager.shared.currentWorkspace(on: screen)
+		guard let screen = targetScreen() else { return }
 
-			let leftIcons = appIcons(inWorkspace: currentWS - 1, on: screen)
-			let rightIcons = appIcons(inWorkspace: currentWS + 1, on: screen)
+		let currentWS = WorkspaceManager.shared.currentWorkspace(on: screen)
 
-			// Don't create the overlay at all if there's nothing to show on either side
-			guard !leftIcons.isEmpty || !rightIcons.isEmpty else { continue }
+		let leftIcons = appIcons(inWorkspace: currentWS - 1, on: screen)
+		let rightIcons = appIcons(inWorkspace: currentWS + 1, on: screen)
 
-			let overlay = WorkspacePeekOverlayWindow()
-			overlay.show(on: screen, leftIcons: leftIcons, rightIcons: rightIcons)
-			overlayWindows.append(overlay)
+		// Don't create the overlay at all if there's nothing to show on either side
+		guard !leftIcons.isEmpty || !rightIcons.isEmpty else { return }
+
+		let overlay = WorkspacePeekOverlayWindow()
+		overlay.show(on: screen, leftIcons: leftIcons, rightIcons: rightIcons)
+		overlayWindows.append(overlay)
+	}
+
+	/// Decide which monitor to show the peek preview on
+	/// Shown, as a rule, on the monitor the focused window is on.
+	/// cursorScreen (remembering that we're on an empty monitor) can keep lingering, and
+	/// Since preferring it as-is would make it show up on a different monitor,
+	/// Only use it when the mouse is actually on that monitor right now
+	private func targetScreen() -> NSScreen? {
+		if let cursorScreen = TilingEngine.shared.cursorScreen {
+			let mouseLocation = NSEvent.mouseLocation
+			if cursorScreen.frame.contains(mouseLocation) {
+				return cursorScreen
+			}
 		}
+		return WorkspaceManager.shared.focusedScreen()
 	}
 
 	/// Hide all overlays
