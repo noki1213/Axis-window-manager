@@ -9,13 +9,16 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Tiling Layout: Automatically arranges windows in a tiling layout.
 - Keyboard Navigation: Move focus between windows.
 - Window Movement: Reorganize windows with keyboard shortcuts.
-- Hover Mode: Float a window above the tiling layout and position it freely.
+- Step Move (Merge / Split): Move the focused window one step left/right — it splits out of a shared column into its own column, or merges into the neighboring column if it's already alone.
+- Float: Pull a window out of the tiling layout and position it freely.
 - Focus Follows Mouse: Automatically focus and raise the window under the mouse pointer (delay adjustable in Settings, can be turned off).
 - Floating Windows on Top: Dialogs and floating windows are automatically kept above tiled windows. A rescue shortcut brings them all to the front at once.
 - Zen Mode: Focus on a single window by centering it and hiding others (distraction-free).
-- Gap Selection Mode: Resize windows by selecting and moving gaps between them.
-- Window Selection Mode: Select and merge multiple windows into columns.
+- Gap Adjustment: Enter a mode where each key directly drives one edge of the focused window, growing or shrinking it on the spot.
+- Hide / Restore Windows: Hide the focused window out of the tiling layout, and restore it later next to where it used to sit.
+- Placement Reservation: Decide where the next new window will land — stacked in the current column, a new column to the side, or floating — before it even opens.
 - Window Palette: Quickly switch between windows across all workspaces.
+- Workspace Peek: Hold Ctrl+Option to preview the app icons of the adjacent workspaces at each monitor's edges.
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
 - Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
@@ -41,33 +44,51 @@ If the key combination is already used by another action, a conflict warning wil
 - Resize windows (shrink / expand)
 - Reset layout (single column per window)
 
-### Hover Mode
+### Step Move (Merge / Split)
+- Move the focused window one step left or right
+- If it shares a column with other windows, it splits out into its own single-window column next to it
+- If it is already alone in a column, it merges into the end of the neighboring column instead
+- Repeat the same key to keep walking the window across columns
+
+### Float
 - Removes the focused window from tiling and centers it on screen
 - The window can then be freely repositioned with the mouse
 - Other tiled windows rearrange to fill the gap
-- Cycle focus between hover windows
+- Cycle focus between floating windows
+- A rescue shortcut brings all floating windows to the front at once
 
 ### Zen Mode
 - Centers the focused window and hides all other windows on the primary monitor
 - If the window is on a secondary monitor, it will be moved to the primary monitor
 - When exiting Zen Mode, the window is restored to its original position
 
+### Gap Adjustment
+- Enters a mode where each key directly controls one edge (left / right / top / bottom) of the focused window
+- Pressing the key expands that edge outward; holding Shift shrinks it inward
+- No select-then-confirm step — each key press immediately moves the edge, and you can keep adjusting different edges in sequence
+- Press Return or Escape to exit
+
+### Hide / Restore Windows
+- Hides the focused window (native minimize) and removes it from the tiling layout; remaining windows fill the gap
+- Restoring brings it back next to where it used to sit: the same column if its neighbor is still there, otherwise a new column next to where that column used to be
+- The most recently hidden window can be restored with a dedicated shortcut, or picked individually from the Window Palette's "Hidden" section
+
+### Placement Reservation
+- Reserve where the next newly opened window should be placed before it even appears
+- After starting the reservation, press a key to choose: stack above/below in the focused column, open as a new column to the left/right, or open as a floating window
+- A translucent preview shows the reserved area; it is consumed as soon as the next new window opens
+- Pressing the reservation shortcut again cancels it, and it also expires automatically after a short timeout
+
 ### Window Palette
 - Lists all windows across all workspaces
 - Navigate up/down (across workspaces) and left/right (between windows)
-- Floating windows not assigned to any workspace (e.g. System Settings, dialogs) appear in a "Float" section at the bottom of each display column
-- Press Return to switch to the selected window
+- Floating windows toggled with Float appear in a "Float" section, windows not assigned to any workspace (e.g. System Settings, dialogs) appear in a "System" section, and windows hidden via Hide/Restore appear in a "Hidden" section — each at the bottom of its display column
+- Press Return to switch to (or restore) the selected window
 
-### Window Selection Mode
-- Navigate and select multiple windows
-- Merge selected windows vertically into a column
-- Split merged windows back apart
-- Press Escape to exit
-
-### Gap Selection & Resizing
-- Select a gap (left / right / top / bottom) around the focused window
-- Use directional keys to adjust the gap size
-- Press Return to confirm or Escape to cancel
+### Workspace Peek
+- Hold down Ctrl+Option (with no other key) to preview the adjacent workspaces
+- App icons for the left-neighbor and right-neighbor workspace appear at the left and right edges of each monitor
+- Releasing the modifiers, or pressing any other key, dismisses the preview immediately
 
 ### Workspace Management
 - Switch to next/previous workspace
@@ -140,13 +161,16 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - タイリングレイアウト：ウィンドウを自動的にタイル状に配置します
 - キーボード操作：ウィンドウ間のフォーカス移動
 - ウィンドウ移動：キーボードショートカットでウィンドウを再配置
-- ホバーモード：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
+- 合流/分離（ステップ移動）：フォーカス中のウィンドウを左右へ1ステップ移動。複数ウィンドウの列にいれば抜けて隣に単独列として出て、単独列にいれば隣の列の末尾に合流します
+- Float：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
 - Focus Follows Mouse：マウスを乗せたウィンドウを自動でフォーカス＆前面化します（遅延は設定で変更可能、オフにもできます）
 - 浮遊ウィンドウの前面キープ：ダイアログなどの浮遊ウィンドウがタイルの裏に隠れないよう常に前面に保ちます。全部をまとめて前面に出す救出キーもあります
 - Zen モード：一つのウィンドウに集中するため、中央に配置して他のウィンドウを非表示にします
-- ギャップ選択モード：ウィンドウ間のギャップを選択して移動することでリサイズ
-- ウィンドウ選択モード：複数のウィンドウを選択してまとめて列に統合
+- ギャップ操作：モードに入るとキーごとに上下左右いずれかの辺を直接担当し、その場で辺を動かしてサイズ調整します
+- ウィンドウを隠す/復元：フォーカス中のウィンドウをタイリングから隠し、あとで元にいた場所の近くへ復元します
+- 配置予約：次に開く新規ウィンドウの置き場所（列内の上/下、左右の新規列、Float）を先に決めておきます
 - ウィンドウパレット：全ワークスペースのウィンドウを一覧表示して素早く切り替え
+- 隣ワークスペースのチラ見せ：Ctrl+Option を押しっぱなしにすると、各モニター端に隣のワークスペースのアプリアイコンが表示されます
 - ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示。現在のモードに応じてメニューバーのアイコンが変化
 - スマートワークスペース：ワークスペース間の移動と、ウィンドウの移動を効率的に実行。空のワークスペースは自動削除されます
 - カスタムキーボードショートカット：設定画面からすべてのショートカットを自由に変更できます
@@ -172,11 +196,18 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - ウィンドウのリサイズ（縮小・拡大）
 - レイアウトのリセット（各ウィンドウを1列に）
 
-### ホバーモード
+### 合流/分離（ステップ移動）
+- フォーカス中のウィンドウを左右へ1ステップだけ移動
+- 複数ウィンドウの列にいる場合：その列から抜けて、移動方向の隣に単独の列として出る
+- 単独の列にいる場合：移動方向の隣の列の末尾に合流する
+- 同じキーを連打することで、列から列へとウィンドウを渡り歩ける
+
+### Float
 - フォーカス中のウィンドウをタイリングから外して、画面中央に表示
 - その後マウスで自由に位置を変更できる
 - 他のタイリングされたウィンドウは、空いたスペースを埋めるように再配置される
-- ホバー中のウィンドウ間でフォーカスを切り替え
+- Float 中のウィンドウ間でフォーカスを切り替え
+- 救出キーで、すべての浮遊ウィンドウをまとめて最前面に出せる
 
 ### Zen モード
 - フォーカス中のウィンドウをメインモニターの中央に表示
@@ -184,22 +215,33 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - サブモニターのウィンドウも Zen モードにするとメインモニターに移動
 - Zen モード解除時は、ウィンドウは元の位置に復元される
 
+### ギャップ操作
+- モードに入ると、キーごとにフォーカス中ウィンドウの辺（左右上下）を直接担当する
+- 素押しでその辺を外側へ広げ、Shift を押しながらだと内側へ縮める
+- 選択→確定という手順はなく、キーを押した瞬間に辺が動く。続けて別の辺を調整することもできる
+- Return または Escape でモードを終了
+
+### ウィンドウを隠す/復元する
+- フォーカス中のウィンドウをネイティブ最小化でタイリングから隠す。残りのウィンドウは詰めて再配置される
+- 復元すると、元にいた場所の近くに戻る：同じ列にいた隣人がまだいればその隣に、いなければ元その列があった位置の隣に新しい列として挿入される
+- 最後に隠したウィンドウは専用ショートカットで復元できるほか、ウィンドウパレットの「Hidden」セクションから個別に選んで復元することもできる
+
+### 配置予約
+- 次に新しく開くウィンドウの置き場所を、開く前に先に決めておく
+- 配置予約を開始した後、続けてキーを押して「フォーカス列の上/下に積む」「左/右に新規列として開く」「Float で開く」のいずれかを選ぶ
+- 予約された領域は半透明のプレビューで表示され、次の新規ウィンドウが開いた時点で消費される
+- もう一度配置予約のショートカットを押すと解除できるほか、一定時間で自動的に失効する
+
 ### ウィンドウパレット
 - 全ワークスペースのウィンドウを一覧表示
 - 上下に移動（ワークスペース間）、左右に移動（ウィンドウ間）
-- ワークスペースに属さない浮遊ウィンドウ（システム設定・ダイアログ等）は、各モニター列の一番下に「Float」セクションとして表示
-- Return で選択したウィンドウに切り替え
+- Float で浮遊化したウィンドウは「Float」セクションに、ワークスペースに属さない浮遊ウィンドウ（システム設定・ダイアログ等）は「System」セクションに、隠す/復元機能で隠したウィンドウは「Hidden」セクションに、それぞれ各モニター列の一番下にまとめて表示
+- Return で選択したウィンドウに切り替え（またはウィンドウを復元）
 
-### ウィンドウ選択モード
-- ウィンドウ間を移動して複数選択
-- 選択したウィンドウを縦に統合して列にまとめる
-- 統合したウィンドウを分割して元に戻す
-- Escape でモードを終了
-
-### ギャップ選択とリサイズ
-- フォーカス中のウィンドウの周りのギャップ（左右上下）を選択
-- 方向キーでギャップのサイズを調整
-- Return で確定、Escape でキャンセル
+### 隣ワークスペースのチラ見せ
+- Ctrl+Option（他の修飾キーなし）を押しっぱなしにすると、隣のワークスペースをプレビュー表示
+- 各モニターの左端に左隣ワークスペース、右端に右隣ワークスペースのアプリアイコンが表示される
+- 修飾キーを離す、または他のキーを押すと即座に消える
 
 ### ワークスペース管理
 - 次/前のワークスペースに切り替え
