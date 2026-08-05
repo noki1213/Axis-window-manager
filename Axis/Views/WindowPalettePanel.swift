@@ -161,11 +161,13 @@ class WindowPalettePanel: NSPanel {
 	// MARK: - Private Methods
 
 	/// Return the label string for a Space section
+	/// workspace == -3: Hidden (windows hidden with Ctrl+Opt+X, i.e. minimized)
 	/// workspace == -2: Float (windows the user deliberately floated)
 	/// workspace == -1: System (system-originated floating windows)
 	/// Otherwise: a normal workspace number
 	private static func sectionLabel(for workspace: Int) -> String {
 		switch workspace {
+		case -3: return "Hidden"
 		case -2: return "Float"
 		case -1: return "System"
 		default: return "Space \(workspace)"

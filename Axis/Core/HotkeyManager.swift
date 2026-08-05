@@ -412,6 +412,17 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
+		// MARK: Hide/restore
+		case .hideWindow:
+			DispatchQueue.main.async {
+				HiddenWindowManager.shared.hideFocusedWindow()
+			}
+
+		case .unhideLastWindow:
+			DispatchQueue.main.async {
+				HiddenWindowManager.shared.unhideLast()
+			}
+
 		// MARK: Zen mode
 		case .zenToggle:
 			DispatchQueue.main.async {
