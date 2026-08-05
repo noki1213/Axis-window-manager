@@ -121,11 +121,7 @@ class FocusFollowsMouseManager: ObservableObject {
 			return
 		}
 
-		// Do nothing while in window-selection mode or gap-selection mode
-		guard !WindowSelectManager.shared.isActive else {
-			logSkipReason("windowSelectMode")
-			return
-		}
+		// Do nothing while in gap selection mode
 		guard !GapSelectManager.shared.isActive else {
 			logSkipReason("gapSelectMode")
 			return
