@@ -32,6 +32,7 @@ class HotkeyStore: ObservableObject {
 
 	/// Load key settings from the JSON file. Falls back to default values if the file doesn't exist.
 	/// If new actions have been added, fill them in with their default values.
+	/// Even if a deprecated action is left over in the saved JSON, ignore just that entry rather than crashing.
 	func loadFromDisk() {
 		let defaults = HotkeyBinding.defaults()
 
@@ -42,7 +43,11 @@ class HotkeyStore: ObservableObject {
 
 		do {
 			let data = try Data(contentsOf: saveURL)
-			let decoded = try JSONDecoder().decode([HotkeyBinding].self, from: data)
+			// Since HotkeyAction is a String-rawValue enum, even a single deprecated action name
+			// If they're mixed in, decoding the whole [HotkeyBinding] array fails.
+			// So we first decode it as [DecodableHotkeyBinding] and keep only the known actions.
+			let rawDecoded = try JSONDecoder().decode([RawHotkeyBinding].self, from: data)
+			let decoded = rawDecoded.compactMap { $0.toHotkeyBinding() }
 
 			// The set of saved actions
 			let savedActions = Set(decoded.map { $0.action })
@@ -58,6 +63,31 @@ class HotkeyStore: ObservableObject {
 			bindings = merged
 		} catch {
 			bindings = defaults
+		}
+	}
+
+	/// An intermediate representation used to decode while tolerating deprecated action names.
+	/// Accepts action as a raw String and returns nil if it can't be converted to a known case.
+	private struct RawHotkeyBinding: Codable {
+		let action: String
+		let keyCode: Int
+		let modifiers: HotkeyModifiers
+
+		/// The set of old action names (before "hover" was renamed to "Float").
+		/// Since the key bindings change too, drop the old entries here and let defaults() supply the new defaults.
+		private static let renamedActions: Set<String> = ["hoverToggle", "hoverFocusCycle"]
+
+		func toHotkeyBinding() -> HotkeyBinding? {
+			if Self.renamedActions.contains(action) {
+				// Drop entries under the old name. Since loadFromDisk()'s "fill unsaved actions with defaults" step will
+				// floatToggle / floatFocusCycle are backfilled with the new default keys.
+				return nil
+			}
+			guard let knownAction = HotkeyAction(rawValue: action) else {
+				// A deprecated action (e.g. quickGapLeft). Ignore it and skip.
+				return nil
+			}
+			return HotkeyBinding(action: knownAction, keyCode: keyCode, modifiers: modifiers)
 		}
 	}
 

@@ -226,8 +226,14 @@ class WindowPaletteManager {
 			needsRetileOnClose = false
 		}
 
-		// Switch to the selected window's workspace
-		switchToWindowWorkspace(selectedItem)
+		// Selecting from the Hidden section (windows hidden with Ctrl+Opt+X)
+		// Route it through the neighbor-memory restore logic instead of a normal workspace switch
+		if selectedItem.workspace == -3 {
+			HiddenWindowManager.shared.restore(windowID: selectedItem.windowID)
+		} else {
+			// Switch to the selected window's workspace
+			switchToWindowWorkspace(selectedItem)
+		}
 
 		// Clear the data
 		displays.removeAll()
@@ -412,6 +418,10 @@ class WindowPaletteManager {
 		// Build the data per Display
 		var displayMap: [ScreenIdentifier: WindowPaletteDisplay] = [:]
 
+		// Windows the user deliberately floated with Ctrl+Option+F (per Display)
+		// It normally appears in its own workspace's section, but pull it out here and group it into a separate section
+		var userFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+
 		for (screenID, workspaces) in allWorkspaces {
 			let displayNumber = displayNumberMap[screenID] ?? 1
 
@@ -431,6 +441,10 @@ class WindowPaletteManager {
 
 				var items: [WindowPaletteItem] = []
 				for windowID in windowIDs {
+					// Windows hidden (minimized) with Ctrl+Opt+X are excluded from the normal Space section, and
+					// Add them together later as the Hidden section
+					guard !HiddenWindowManager.shared.isHidden(windowID) else { continue }
+
 					guard let windowInfo = windowInfoMap[windowID] else { continue }
 
 					let item = WindowPaletteItem(
@@ -441,7 +455,14 @@ class WindowPaletteManager {
 						workspace: workspace,
 						screenID: screenID
 					)
-					items.append(item)
+
+					// Windows the user has floated are excluded from the normal Space section, and
+					// Add them together later as the Float section
+					if workspaceManager.isFloating(windowID) {
+						userFloatItemsByScreen[screenID, default: []].append(item)
+					} else {
+						items.append(item)
+					}
 				}
 
 				// Only add Spaces that have windows
@@ -461,12 +482,20 @@ class WindowPaletteManager {
 			result[i].spaces.sort { $0.workspace < $1.workspace }
 		}
 
-		// --- Append the Float section (floating windows not registered to any workspace) to the end of each Display ---
-		// Floating windows like settings apps or dialogs aren't registered to a workspace, so
-		// Doesn't show up in the normal collection. Pick it up here and add it as the "Float" section (workspace = -1).
+		// --- Add the Float section (windows the user deliberately floated) to each Display ---
+		// Use workspace = -2 as a dedicated section marker (the real workspace number is kept on each item)
+		for i in result.indices {
+			if let floatItems = userFloatItemsByScreen[result[i].screenID], !floatItems.isEmpty {
+				result[i].spaces.append(WindowPaletteSection(workspace: -2, items: floatItems))
+			}
+		}
+
+		// --- Add the System section (floating windows not registered to any workspace) to the end of each Display ---
+		// Since system-originated floating windows like the Settings app or dialogs aren't registered to a workspace,
+		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section (workspace = -1).
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 		let myPID = ProcessInfo.processInfo.processIdentifier
-		var floatingItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		var systemFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
 
 		for window in allWindows {
 			// Excludes Axis's own windows (palette, border, etc.)
@@ -496,12 +525,34 @@ class WindowPaletteManager {
 				workspace: -1,
 				screenID: screenID
 			)
-			floatingItemsByScreen[screenID, default: []].append(item)
+			systemFloatItemsByScreen[screenID, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let floatingItems = floatingItemsByScreen[result[i].screenID], !floatingItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(workspace: -1, items: floatingItems))
+			if let systemFloatItems = systemFloatItemsByScreen[result[i].screenID], !systemFloatItems.isEmpty {
+				result[i].spaces.append(WindowPaletteSection(workspace: -1, items: systemFloatItems))
+			}
+		}
+
+		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
+		// Use workspace = -3 as a dedicated section marker
+		var hiddenItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		for record in HiddenWindowManager.shared.hiddenStack {
+			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
+			let item = WindowPaletteItem(
+				windowID: record.windowID,
+				appName: windowInfo.app.localizedName ?? "不明なアプリ",
+				windowTitle: windowInfo.title,
+				appIcon: windowInfo.app.icon,
+				workspace: -3,
+				screenID: record.screenID
+			)
+			hiddenItemsByScreen[record.screenID, default: []].append(item)
+		}
+
+		for i in result.indices {
+			if let hiddenItems = hiddenItemsByScreen[result[i].screenID], !hiddenItems.isEmpty {
+				result[i].spaces.append(WindowPaletteSection(workspace: -3, items: hiddenItems))
 			}
 		}
 
@@ -517,7 +568,7 @@ class WindowPaletteManager {
 		let currentWS = workspaceManager.currentWorkspace(on: screen)
 
 		// Switch if it's on a different workspace
-		// (Windows in the Float section (workspace == -1) don't belong to any workspace, so don't switch them)
+		// (System section windows (workspace == -1) don't belong to a workspace, so they aren't switched)
 		if item.workspace != -1 && item.workspace != currentWS {
 			workspaceManager.switchWorkspace(to: item.workspace, on: screen)
 		}

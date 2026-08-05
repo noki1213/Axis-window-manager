@@ -81,7 +81,7 @@ struct ClosedWindowsSnapshot {
 	let savedFrames: [CGWindowID: CGRect]
 	let tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]]
 	let activeWorkspace: [ScreenIdentifier: Int]
-	let hoverWindowIDs: Set<CGWindowID>
+	let floatWindowIDs: Set<CGWindowID>
 	let cachedWindowIDs: Set<CGWindowID>
 	let windowIdentityCache: [CGWindowID: (bundleID: String, title: String)]
 }
@@ -135,7 +135,7 @@ class WorkspaceManager: ObservableObject {
 	private var windowIdentityCache: [CGWindowID: (bundleID: String, title: String)] = [:]
 
 	/// The IDs of windows pulled out of tiling and left floating
-	private(set) var hoverWindowIDs: Set<CGWindowID> = []
+	private(set) var floatWindowIDs: Set<CGWindowID> = []
 
 	/// Storage of the column structure and ratios for each monitor x workspace pair
 	private var tilingSnapshots: [ScreenIdentifier: [Int: PerScreenSnapshot]] = [:]
@@ -152,21 +152,21 @@ class WorkspaceManager: ObservableObject {
 
 	private init() {}
 
-	// MARK: - Hover (floating)
+	// MARK: - Float (floating)
 
-	/// Toggle the window's hover state
-	/// Windows that are hovering are excluded from tiling and float in place
-	func toggleHover(windowID: CGWindowID) {
-		if hoverWindowIDs.contains(windowID) {
-			hoverWindowIDs.remove(windowID)
+	/// Toggle the window's Float state
+	/// A window that's Float is excluded from tiling and floats in place
+	func toggleFloat(windowID: CGWindowID) {
+		if floatWindowIDs.contains(windowID) {
+			floatWindowIDs.remove(windowID)
 		} else {
-			hoverWindowIDs.insert(windowID)
+			floatWindowIDs.insert(windowID)
 		}
 	}
 
-	/// Returns whether the window is currently hovering
-	func isHovering(_ windowID: CGWindowID) -> Bool {
-		return hoverWindowIDs.contains(windowID)
+	/// Returns whether the window is currently Float
+	func isFloating(_ windowID: CGWindowID) -> Bool {
+		return floatWindowIDs.contains(windowID)
 	}
 
 	// MARK: - Public Methods
@@ -308,8 +308,8 @@ class WorkspaceManager: ObservableObject {
 
 	            savedFrames.removeValue(forKey: windowID)
 
-	            // Also remove it from the hover state
-	            hoverWindowIDs.remove(windowID)
+	            // Also remove it from the Float state
+	            floatWindowIDs.remove(windowID)
 
 	            // Also remove it from the tiling snapshot
 
@@ -380,7 +380,7 @@ class WorkspaceManager: ObservableObject {
 	    						remaining.remove(id)
 	    					}
 	    				}
-	    				// Append windows not included in the snapshot (e.g. Hover windows) to the end
+	    				// Windows not included in the snapshot (e.g. Float) are appended at the end
 	    				ordered.append(contentsOf: remaining)
 	    				result[screenID]?[workspace] = ordered
 	    			} else {
@@ -390,6 +390,32 @@ class WorkspaceManager: ObservableObject {
 	    	}
 
 	    	return result
+	    }
+
+	    /// Returns the window IDs for the given monitor and workspace number in tiling order (used by the peek feature)
+	    /// Columns go left-to-right, and within each column, top-to-bottom. Returns an empty array if the workspace doesn't exist or is empty
+	    func windowIDsInTilingOrder(workspace: Int, on screen: NSScreen) -> [CGWindowID] {
+	    	let id = screenIdentifier(for: screen)
+	    	guard let windowIDs = workspaceWindows[id]?[workspace], !windowIDs.isEmpty else {
+	    		return []
+	    	}
+
+	    	guard let snapshot = tilingSnapshots[id]?[workspace] else {
+	    		return Array(windowIDs)
+	    	}
+
+	    	let orderedByTiling = snapshot.columns.flatMap { $0 }
+	    	var ordered: [CGWindowID] = []
+	    	var remaining = windowIDs
+	    	for wid in orderedByTiling {
+	    		if remaining.contains(wid) {
+	    			ordered.append(wid)
+	    			remaining.remove(wid)
+	    		}
+	    	}
+	    	// Windows not included in the snapshot (e.g. Float) are appended at the end
+	    	ordered.append(contentsOf: remaining)
+	    	return ordered
 	    }
 
 
@@ -537,7 +563,7 @@ class WorkspaceManager: ObservableObject {
 			savedFrames: savedFrames,
 			tilingSnapshots: tilingSnapshots,
 			activeWorkspace: activeWorkspace,
-			hoverWindowIDs: hoverWindowIDs,
+			floatWindowIDs: floatWindowIDs,
 			cachedWindowIDs: allCachedIDs,
 			windowIdentityCache: windowIdentityCache
 		)
@@ -562,7 +588,7 @@ class WorkspaceManager: ObservableObject {
 		savedFrames = cache.savedFrames
 		tilingSnapshots = cache.tilingSnapshots
 		activeWorkspace = cache.activeWorkspace
-		hoverWindowIDs = cache.hoverWindowIDs
+		floatWindowIDs = cache.floatWindowIDs
 		windowIdentityCache = cache.windowIdentityCache
 
 		// Clear the cache
@@ -671,7 +697,7 @@ class WorkspaceManager: ObservableObject {
 		savedFrames.removeAll()
 		tilingSnapshots.removeAll()
 		activeWorkspace.removeAll()
-		hoverWindowIDs.removeAll()
+		floatWindowIDs.removeAll()
 		closedWindowsCache = nil
 		disconnectedScreenData.removeAll()
 
@@ -1040,8 +1066,8 @@ class WorkspaceManager: ObservableObject {
 		var hiddenIDs: Set<CGWindowID> = []
 
 		for window in currentWindows {
-			// Excludes hovering (floating) windows
-			guard !isHovering(window.id) else { continue }
+			// Float (floating) windows are excluded
+			guard !isFloating(window.id) else { continue }
 
 			// Windows not registered anywhere are excluded (left to the new-window registration process)
 			guard let location = workspaceLocation(for: window.id) else { continue }
@@ -1188,6 +1214,26 @@ class WorkspaceManager: ObservableObject {
 		}
 		tilingSnapshots[screenID]?[workspace] = state
 
+	}
+
+	/// Get the column structure (window IDs only) for the given monitor and workspace
+	/// For restoring a hidden window (the neighbor-memory approach), into an inactive workspace
+	/// Used to find the insertion point
+	func columnsSnapshot(on screenID: ScreenIdentifier, workspace: Int) -> [[CGWindowID]]? {
+		return tilingSnapshots[screenID]?[workspace]?.columns
+	}
+
+	/// Update the column structure (window IDs only) for the given monitor and workspace
+	/// Used for restoring a hidden window. If the target workspace is currently active,
+	/// Since TilingEngine.tiledWindows holds the actual state, not this side,
+	/// Operate directly on TilingEngine (only used when it's not active)
+	func updateColumnsSnapshot(_ columns: [[CGWindowID]], on screenID: ScreenIdentifier, workspace: Int) {
+		if tilingSnapshots[screenID] == nil {
+			tilingSnapshots[screenID] = [:]
+		}
+		var snapshot = tilingSnapshots[screenID]?[workspace] ?? PerScreenSnapshot(columns: [], columnWidthRatios: nil, rowHeightRatios: nil)
+		snapshot.columns = columns
+		tilingSnapshots[screenID]?[workspace] = snapshot
 	}
 
 	/// Restore the saved TilingEngine state
