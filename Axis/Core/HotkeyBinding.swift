@@ -22,11 +22,6 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case moveWindowRight
 	case moveWindowUp
 	case moveWindowDown
-	// Quick gap resize
-	case quickGapLeft
-	case quickGapRight
-	case quickGapUp
-	case quickGapDown
 	// Hover (floating)
 	case hoverToggle
 	case hoverFocusCycle
@@ -55,7 +50,6 @@ enum HotkeyAction: String, Codable, CaseIterable {
 /// The section grouping in the settings screen
 enum HotkeySection: String, CaseIterable {
 	case focusAndMove = "フォーカス / ウィンドウ移動"
-	case quickGapResize = "クイックギャップリサイズ"
 	case hover = "ホバー（フローティング）"
 	case modeSwitching = "モード切り替え"
 	case layout = "レイアウト"
@@ -168,10 +162,6 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: "右にウィンドウ移動",
 		.moveWindowUp: "上にウィンドウ移動",
 		.moveWindowDown: "下にウィンドウ移動",
-		.quickGapLeft: "左のギャップを操作",
-		.quickGapRight: "右のギャップを操作",
-		.quickGapUp: "上のギャップを操作",
-		.quickGapDown: "下のギャップを操作",
 		.hoverToggle: "ホバー ON/OFF",
 		.hoverFocusCycle: "ホバーウィンドウにフォーカス",
 		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
@@ -200,10 +190,6 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: .focusAndMove,
 		.moveWindowUp: .focusAndMove,
 		.moveWindowDown: .focusAndMove,
-		.quickGapLeft: .quickGapResize,
-		.quickGapRight: .quickGapResize,
-		.quickGapUp: .quickGapResize,
-		.quickGapDown: .quickGapResize,
 		.hoverToggle: .hover,
 		.hoverFocusCycle: .hover,
 		.raiseFloatingWindows: .hover,
@@ -274,11 +260,6 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .moveWindowRight, keyCode: kVK_ANSI_L, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowUp,    keyCode: kVK_ANSI_I, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowDown,  keyCode: kVK_ANSI_K, modifiers: ctrlOptShift),
-			// Quick gap resize
-			HotkeyBinding(action: .quickGapLeft,  keyCode: kVK_ANSI_S, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapRight, keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapUp,    keyCode: kVK_ANSI_E, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapDown,  keyCode: kVK_ANSI_D, modifiers: ctrlOpt),
 			// Hover
 			HotkeyBinding(action: .hoverToggle,     keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
 			HotkeyBinding(action: .hoverFocusCycle, keyCode: kVK_ANSI_H, modifiers: ctrlOptShift),

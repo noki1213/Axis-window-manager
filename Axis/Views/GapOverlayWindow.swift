@@ -33,15 +33,15 @@ class GapOverlayWindow: NSWindow {
 	}
 
 	/// Show the overlay on the given screen
-	func showOnScreen(_ screen: NSScreen, gaps: [GapInfo], selectedIndex: Int, state: GapSelectState) {
+	func showOnScreen(_ screen: NSScreen, gaps: [GapInfo], selectedIndex: Int?) {
 		self.setFrame(screen.frame, display: true)
-		overlayView.update(gaps: gaps, selectedIndex: selectedIndex, state: state, screenFrame: screen.frame)
+		overlayView.update(gaps: gaps, selectedIndex: selectedIndex, screenFrame: screen.frame)
 		self.orderFront(nil)
 	}
 
 	/// Update the overlay
-	func update(gaps: [GapInfo], selectedIndex: Int, state: GapSelectState) {
-		overlayView.update(gaps: gaps, selectedIndex: selectedIndex, state: state, screenFrame: self.frame)
+	func update(gaps: [GapInfo], selectedIndex: Int?) {
+		overlayView.update(gaps: gaps, selectedIndex: selectedIndex, screenFrame: self.frame)
 	}
 
 	/// Hide the overlay
@@ -54,8 +54,7 @@ class GapOverlayWindow: NSWindow {
 class GapOverlayView: NSView {
 
 	private var gaps: [GapInfo] = []
-	private var selectedIndex: Int = 0
-	private var state: GapSelectState = .selecting
+	private var selectedIndex: Int? = nil
 	private var screenFrame: CGRect = .zero
 	
 	private let selectionLayer = CAShapeLayer()
@@ -78,24 +77,23 @@ class GapOverlayView: NSView {
 		self.layer?.addSublayer(selectionLayer)
 	}
 
-	func update(gaps: [GapInfo], selectedIndex: Int, state: GapSelectState, screenFrame: CGRect) {
+	func update(gaps: [GapInfo], selectedIndex: Int?, screenFrame: CGRect) {
 		self.gaps = gaps
 		self.selectedIndex = selectedIndex
-		self.state = state
 		self.screenFrame = screenFrame
-		
+
 		updateSelectionLayer()
 	}
-	
+
 	private func updateSelectionLayer() {
-		guard selectedIndex >= 0 && selectedIndex < gaps.count else {
+		guard let selectedIndex = selectedIndex, selectedIndex >= 0 && selectedIndex < gaps.count else {
 			selectionLayer.path = nil
 			return
 		}
-		
+
 		let gap = gaps[selectedIndex]
 		let localFrame = convertToViewCoordinates(gap.frame)
-		
+
 		let path = CGMutablePath()
 		if gap.type == .vertical {
 			let x = localFrame.midX
@@ -106,16 +104,10 @@ class GapOverlayView: NSView {
 			path.move(to: CGPoint(x: localFrame.minX, y: y))
 			path.addLine(to: CGPoint(x: localFrame.maxX, y: y))
 		}
-		
-		// Update the color
-		let color: NSColor
-		if state == .resizing {
-			color = NSColor.white
-		} else {
-			color = NSColor.lightGray
-		}
-		selectionLayer.strokeColor = color.cgColor
-		
+
+		// The edge being manipulated is always highlighted in white
+		selectionLayer.strokeColor = NSColor.white.cgColor
+
 		// Update the path with animation
 		let animation = CABasicAnimation(keyPath: "path")
 		animation.duration = 0.2
