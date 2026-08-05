@@ -98,13 +98,19 @@ class HotkeyManager: ObservableObject {
 				return Unmanaged.passUnretained(event)
 			}
 
-			// Only handle key-down events
-			guard type == .keyDown else {
+			// Pass events through while recording a key (typing a key in the settings screen)
+			if hotkeyManager.isRecordingHotkey {
 				return Unmanaged.passUnretained(event)
 			}
 
-			// Pass events through while recording a key (typing a key in the settings screen)
-			if hotkeyManager.isRecordingHotkey {
+			// Modifier key change (for the adjacent-space peek). Never consume it, just pass it through
+			if type == .flagsChanged {
+				hotkeyManager.handleFlagsChanged(event)
+				return Unmanaged.passUnretained(event)
+			}
+
+			// Only handle key-down events
+			guard type == .keyDown else {
 				return Unmanaged.passUnretained(event)
 			}
 
@@ -135,7 +141,7 @@ class HotkeyManager: ObservableObject {
 		}
 
 		// Create the event tap
-		let eventMask = (1 << CGEventType.keyDown.rawValue)
+		let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
 
 		guard let tap = CGEvent.tapCreate(
 			tap: .cgSessionEventTap,
@@ -197,10 +203,28 @@ class HotkeyManager: ObservableObject {
 		}
 	}
 
+	// MARK: - Modifier Event Handling (for the adjacent-space peek)
+
+	/// Handle a flagsChanged event. Whether exactly Ctrl+Option is held
+	/// Notify WorkspacePeekManager. Since this is called directly from the CGEventTap callback,
+	/// This method itself never consumes the event (the caller passes it through as-is)
+	private func handleFlagsChanged(_ event: CGEvent) {
+		let modifiers = HotkeyModifiers.from(event.flags)
+		let isExactlyCtrlOption = modifiers == [.control, .option]
+		DispatchQueue.main.async {
+			WorkspacePeekManager.shared.handleModifiersChanged(isExactlyCtrlOption: isExactlyCtrlOption)
+		}
+	}
+
 	// MARK: - Key Event Handling
 
 	@discardableResult
 	private func handleKeyEvent(_ event: NSEvent) -> Bool {
+		// Another key was pressed, i.e. a normal shortcut, so don't show/hide the peek preview
+		DispatchQueue.main.async {
+			WorkspacePeekManager.shared.cancelDueToKeyPress()
+		}
+
 		// Return to normal mode with Escape
 		if event.keyCode == kVK_Escape {
 			if currentMode == .windowPalette {

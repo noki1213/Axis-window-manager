@@ -392,6 +392,32 @@ class WorkspaceManager: ObservableObject {
 	    	return result
 	    }
 
+	    /// Returns the window IDs for the given monitor and workspace number in tiling order (used by the peek feature)
+	    /// Columns go left-to-right, and within each column, top-to-bottom. Returns an empty array if the workspace doesn't exist or is empty
+	    func windowIDsInTilingOrder(workspace: Int, on screen: NSScreen) -> [CGWindowID] {
+	    	let id = screenIdentifier(for: screen)
+	    	guard let windowIDs = workspaceWindows[id]?[workspace], !windowIDs.isEmpty else {
+	    		return []
+	    	}
+
+	    	guard let snapshot = tilingSnapshots[id]?[workspace] else {
+	    		return Array(windowIDs)
+	    	}
+
+	    	let orderedByTiling = snapshot.columns.flatMap { $0 }
+	    	var ordered: [CGWindowID] = []
+	    	var remaining = windowIDs
+	    	for wid in orderedByTiling {
+	    		if remaining.contains(wid) {
+	    			ordered.append(wid)
+	    			remaining.remove(wid)
+	    		}
+	    	}
+	    	// Append windows not included in the snapshot (e.g. Hover windows) to the end
+	    	ordered.append(contentsOf: remaining)
+	    	return ordered
+	    }
+
 
 
 	    // MARK: - Workspace Cleanup
