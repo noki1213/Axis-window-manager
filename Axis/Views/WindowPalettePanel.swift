@@ -160,6 +160,20 @@ class WindowPalettePanel: NSPanel {
 
 	// MARK: - Private Methods
 
+	/// Return the label string for a Space section
+	/// workspace == -3: Hidden (windows hidden with Ctrl+Opt+X, i.e. minimized)
+	/// workspace == -2: Float (windows the user deliberately floated)
+	/// workspace == -1: System (system-originated floating windows)
+	/// Otherwise: a normal workspace number
+	private static func sectionLabel(for workspace: Int) -> String {
+		switch workspace {
+		case -3: return "Hidden"
+		case -2: return "Float"
+		case -1: return "System"
+		default: return "Space \(workspace)"
+		}
+	}
+
 	/// Rebuild the whole view
 	private func rebuildViews() {
 		// Remove all existing views
@@ -198,8 +212,9 @@ class WindowPalettePanel: NSPanel {
 			// Each Space section
 			for space in display.spaces {
 				// Space label
-				// Show the Float section (workspace == -1) as "Float"
-				let spaceLabel = NSTextField(labelWithString: space.workspace == -1 ? "Float" : "Space \(space.workspace)")
+				// The Float section (workspace == -2, windows the user has floated) is labeled "Float",
+				// The System section (workspace == -1, system-originated floating windows) is displayed as "System"
+				let spaceLabel = NSTextField(labelWithString: WindowPalettePanel.sectionLabel(for: space.workspace))
 				spaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
 				spaceLabel.textColor = NSColor.white.withAlphaComponent(0.4)
 				spaceLabel.translatesAutoresizingMaskIntoConstraints = false

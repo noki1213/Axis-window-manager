@@ -17,12 +17,15 @@ class HotkeyManager: ObservableObject {
 
 	enum Mode: String {
 		case normal = "Normal"
-		case windowSelect = "Window Select"
 		case gapSelect = "Gap Select"
 		case windowPalette = "Window Palette"
 	}
 
 	@Published var currentMode: Mode = .normal
+
+	/// Whether a placement reservation (Ctrl+Opt+N) is being waited on. Since this is a transient state that only looks at the next single key to confirm/cancel,
+	/// Kept as an independent flag rather than part of Mode (folding it into Mode would drag it into Escape's generic handling)
+	private var isAwaitingPlacementReservationKey: Bool = false
 
 	// MARK: - Lookup table (supports customization)
 
@@ -41,7 +44,6 @@ class HotkeyManager: ObservableObject {
 	private var heartbeatTimer: Timer?
 
 	private let tilingEngine = TilingEngine.shared
-	private let windowSelectManager = WindowSelectManager.shared
 	private let gapSelectManager = GapSelectManager.shared
 	private let windowPaletteManager = WindowPaletteManager.shared
 
@@ -98,19 +100,26 @@ class HotkeyManager: ObservableObject {
 				return Unmanaged.passUnretained(event)
 			}
 
-			// Only handle key-down events
-			guard type == .keyDown else {
-				return Unmanaged.passUnretained(event)
-			}
-
 			// Pass events through while recording a key (typing a key in the settings screen)
 			if hotkeyManager.isRecordingHotkey {
 				return Unmanaged.passUnretained(event)
 			}
 
+			// Modifier key change (for the adjacent-space peek). Never consume it, just pass it through
+			if type == .flagsChanged {
+				hotkeyManager.handleFlagsChanged(event)
+				return Unmanaged.passUnretained(event)
+			}
+
+			// Only handle key-down events
+			guard type == .keyDown else {
+				return Unmanaged.passUnretained(event)
+			}
+
 			// Filtering while in normal mode:
 			// Ignore it unless it includes one of the modifier keys registered in the lookup table
-			if hotkeyManager.currentMode == .normal {
+			// However, while waiting on a placement reservation, let every key through so the next single key can be evaluated
+			if hotkeyManager.currentMode == .normal && !hotkeyManager.isAwaitingPlacementReservationKey {
 				let flags = event.flags
 				let eventModifiers = HotkeyModifiers.from(flags)
 				// Check whether a modifier key matching a lookup table key is present
@@ -135,7 +144,7 @@ class HotkeyManager: ObservableObject {
 		}
 
 		// Create the event tap
-		let eventMask = (1 << CGEventType.keyDown.rawValue)
+		let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
 
 		guard let tap = CGEvent.tapCreate(
 			tap: .cgSessionEventTap,
@@ -197,10 +206,35 @@ class HotkeyManager: ObservableObject {
 		}
 	}
 
+	// MARK: - Modifier Event Handling (for the adjacent-space peek)
+
+	/// Handle a flagsChanged event. Whether exactly Ctrl+Option is held
+	/// Notify WorkspacePeekManager. Since this is called directly from the CGEventTap callback,
+	/// This method itself never consumes the event (the caller passes it through as-is)
+	private func handleFlagsChanged(_ event: CGEvent) {
+		let modifiers = HotkeyModifiers.from(event.flags)
+		let isExactlyCtrlOption = modifiers == [.control, .option]
+		DispatchQueue.main.async {
+			WorkspacePeekManager.shared.handleModifiersChanged(isExactlyCtrlOption: isExactlyCtrlOption)
+		}
+	}
+
 	// MARK: - Key Event Handling
 
 	@discardableResult
 	private func handleKeyEvent(_ event: NSEvent) -> Bool {
+		// Another key was pressed, i.e. a normal shortcut, so don't show/hide the peek preview
+		DispatchQueue.main.async {
+			WorkspacePeekManager.shared.cancelDueToKeyPress()
+		}
+
+		// While waiting on a placement reservation, only look at the next single key to confirm or cancel.
+		// Since Mode wasn't changed (currentMode stays normal), the Escape handling below and
+		// Don't fall through to lookup table handling; finish it here
+		if isAwaitingPlacementReservationKey {
+			return handlePlacementReserveAwaitingKeyEvent(event)
+		}
+
 		// Return to normal mode with Escape
 		if event.keyCode == kVK_Escape {
 			if currentMode == .windowPalette {
@@ -225,11 +259,6 @@ class HotkeyManager: ObservableObject {
 				return true
 			}
 			return false
-		}
-
-		// Special key handling in window-selection mode
-		if currentMode == .windowSelect {
-			return handleWindowSelectModeKeyEvent(event)
 		}
 
 		// Special key handling while in gap selection mode
@@ -328,49 +357,31 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		// MARK: Quick gap resize
-		case .quickGapLeft:
+		// MARK: Merge/split (step move)
+		case .stepMoveLeft:
 			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.left) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+				self?.tilingEngine.stepMoveWindow(direction: .left)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
 				}
 			}
-		case .quickGapRight:
+		case .stepMoveRight:
 			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.right) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-		case .quickGapUp:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.up) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-				}
-			}
-		case .quickGapDown:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				if self?.gapSelectManager.startResizeGapInDirection(.down) == true {
-					self?.currentMode = .gapSelect
-					NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+				self?.tilingEngine.stepMoveWindow(direction: .right)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
 				}
 			}
 
-		// MARK: Hover (floating)
-		case .hoverToggle:
+		// MARK: Float (floating)
+		case .floatToggle:
 			DispatchQueue.main.async { [weak self] in
 				guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-				let wasHovering = WorkspaceManager.shared.isHovering(focusedWindow.id)
-				WorkspaceManager.shared.toggleHover(windowID: focusedWindow.id)
+				let wasFloating = WorkspaceManager.shared.isFloating(focusedWindow.id)
+				WorkspaceManager.shared.toggleFloat(windowID: focusedWindow.id)
 
-				// Move the window to the center of the monitor when hover is turned on
-				if !wasHovering, let screen = WorkspaceManager.shared.focusedScreen() {
+				// When turning Float on, move the window to the center of the monitor
+				if !wasFloating, let screen = WorkspaceManager.shared.focusedScreen() {
 					let visibleFrame = screen.visibleFrame
 					let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 					let centerX = visibleFrame.midX - focusedWindow.frame.width / 2
@@ -384,21 +395,21 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		case .hoverFocusCycle:
+		case .floatFocusCycle:
 			DispatchQueue.main.async {
-				let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
-				guard !hoverIDs.isEmpty else { return }
+				let floatIDs = WorkspaceManager.shared.floatWindowIDs
+				guard !floatIDs.isEmpty else { return }
 				let allWindows = AccessibilityManager.shared.getAllWindows()
-				let hoverWindows = allWindows.filter { hoverIDs.contains($0.id) }
+				let floatWindows = allWindows.filter { floatIDs.contains($0.id) }
 					.sorted { $0.frame.midX < $1.frame.midX }
-				guard !hoverWindows.isEmpty else { return }
+				guard !floatWindows.isEmpty else { return }
 
 				if let focused = AccessibilityManager.shared.getFocusedWindow(),
-				   let currentIdx = hoverWindows.firstIndex(where: { $0.id == focused.id }) {
-					let nextIdx = (currentIdx + 1) % hoverWindows.count
-					hoverWindows[nextIdx].focus()
+				   let currentIdx = floatWindows.firstIndex(where: { $0.id == focused.id }) {
+					let nextIdx = (currentIdx + 1) % floatWindows.count
+					floatWindows[nextIdx].focus()
 				} else {
-					hoverWindows[0].focus()
+					floatWindows[0].focus()
 				}
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
 					BorderManager.shared.updateBorder()
@@ -413,6 +424,17 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
+		// MARK: Hide/restore
+		case .hideWindow:
+			DispatchQueue.main.async {
+				HiddenWindowManager.shared.hideFocusedWindow()
+			}
+
+		case .unhideLastWindow:
+			DispatchQueue.main.async {
+				HiddenWindowManager.shared.unhideLast()
+			}
+
 		// MARK: Zen mode
 		case .zenToggle:
 			DispatchQueue.main.async {
@@ -420,13 +442,6 @@ class HotkeyManager: ObservableObject {
 			}
 
 		// MARK: Mode switching
-		case .windowSelectMode:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				self?.currentMode = .windowSelect
-				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-			}
-
 		case .gapSelectMode:
 			DispatchQueue.main.async { [weak self] in
 				guard !ZenModeManager.shared.isActive else { return }
@@ -506,6 +521,20 @@ class HotkeyManager: ObservableObject {
 				guard let screen = WorkspaceManager.shared.focusedScreen() else { return }
 				WorkspaceManager.shared.moveWindowToPreviousWorkspace(on: screen)
 			}
+
+		// MARK: Placement reservation
+		case .placementReserve:
+			DispatchQueue.main.async { [weak self] in
+				guard let self = self else { return }
+				if self.isAwaitingPlacementReservationKey || PlacementReservationManager.shared.hasActiveReservation {
+					// If pressed again while waiting or while a placement is already confirmed, cancel it
+					self.isAwaitingPlacementReservationKey = false
+					PlacementReservationManager.shared.cancel()
+				} else {
+					self.isAwaitingPlacementReservationKey = true
+					PlacementReservationManager.shared.beginAwaiting()
+				}
+			}
 		}
 	}
 
@@ -538,105 +567,48 @@ class HotkeyManager: ObservableObject {
 		CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
 	}
 
-	// MARK: - Window Select Mode Key Handling
+	// MARK: - Gap Select Mode Key Handling
 
-	/// Key handling in window-selection mode
-	private func handleWindowSelectModeKeyEvent(_ event: NSEvent) -> Bool {
-		let hasModifier = event.modifierFlags.contains([.control, .option])
-		let hasShift = event.modifierFlags.contains(.shift)
-
-		// Enter: select/deselect the window (toggle)
+	/// Key handling while in the new gap mode
+	/// Each key is responsible for one edge, directly moving that edge of the focused window.
+	/// There's no select-then-confirm step; the edge moves the instant the key is pressed.
+	private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
+		// Enter: exit the mode (same as Escape)
 		if event.keyCode == kVK_Return {
 			DispatchQueue.main.async { [weak self] in
-				self?.windowSelectManager.toggleCurrentWindow()
+				guard let self = self else { return }
+				self.gapSelectManager.endGapSelectMode()
+				self.currentMode = .normal
+				NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
 			}
 			return true
 		}
 
-		// Backspace/Delete: clear selection
-		if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
-			DispatchQueue.main.async { [weak self] in
-				self?.windowSelectManager.deselectCurrentWindow()
-			}
-			return true
-		}
+		let hasShift = event.modifierFlags.contains(.shift)
 
-		// V: merge the selected windows vertically (into one column)
-		// Shift+V: split the selected windows' column back into individual columns
-		if event.keyCode == kVK_ANSI_V {
-			DispatchQueue.main.async { [weak self] in
-				if hasShift {
-					self?.windowSelectManager.splitSelectedWindowsToColumns()
-				} else {
-					self?.windowSelectManager.mergeSelectedWindowsVertically()
-				}
-			}
-			return true
-		}
-
-		// JKLI handling (works with or without ctrl+option)
+		// Specify the edge directly with JKLI (plain = grow, Shift = shrink)
 		switch Int(event.keyCode) {
-		case kVK_ANSI_J: // 左
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:left")
-			}
+		case kVK_ANSI_J: // 左辺
 			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .left)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .left)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.left, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_L: // 右
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:right")
-			}
+		case kVK_ANSI_L: // 右辺
 			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .right)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .right)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.right, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_I: // 上
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:up")
-			}
+		case kVK_ANSI_I: // 上辺
 			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .up)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .up)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.up, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_K: // 下
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:down")
-			}
+		case kVK_ANSI_K: // 下辺
 			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .down)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .down)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
+				self?.gapSelectManager.resizeFocusedEdge(.down, widen: !hasShift)
 			}
 			return true
 
@@ -646,69 +618,38 @@ class HotkeyManager: ObservableObject {
 		}
 	}
 
-	// MARK: - Gap Select Mode Key Handling
+	// MARK: - Placement Reservation Awaiting Key Handling
 
-	/// Key handling in gap-selection mode
-	private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
-		// Enter: select the gap / confirm the resize
-		if event.keyCode == kVK_Return {
-			DispatchQueue.main.async { [weak self] in
-				guard let self = self else { return }
-				if self.gapSelectManager.selectCurrentGap() {
-					self.gapSelectManager.endGapSelectMode()
-					self.currentMode = .normal
-					NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
-				}
-			}
-			return true
+	/// Handle the next single key pressed while waiting on a placement reservation.
+	/// The wait is always cleared the moment this is called (since it's one-shot).
+	/// If a key other than I/K/J/L/F (with no modifiers) is pressed, don't confirm the reservation, and
+	/// Don't consume that key; pass it straight through to the app (return false)
+	private func handlePlacementReserveAwaitingKeyEvent(_ event: NSEvent) -> Bool {
+		isAwaitingPlacementReservationKey = false
+
+		// Excluded if a modifier key is held
+		guard HotkeyModifiers.from(event.modifierFlags).isEmpty else {
+			return false
 		}
 
-		// JKLI handling (works with or without ctrl+option)
+		let kind: PlacementReservationKind?
 		switch Int(event.keyCode) {
-		case kVK_ANSI_J: // 左
-			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .left)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .left)
-				}
-			}
-			return true
-
-		case kVK_ANSI_L: // 右
-			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .right)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .right)
-				}
-			}
-			return true
-
-		case kVK_ANSI_I: // 上
-			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .up)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .up)
-				}
-			}
-			return true
-
-		case kVK_ANSI_K: // 下
-			DispatchQueue.main.async { [weak self] in
-				if self?.gapSelectManager.state == .resizing {
-					self?.gapSelectManager.moveGap(direction: .down)
-				} else {
-					self?.gapSelectManager.moveToNextGap(direction: .down)
-				}
-			}
-			return true
-
-		default:
-			// Block every key while in this mode (don't pass them to the app)
-			return true
+		case kVK_ANSI_I: kind = .aboveInColumn
+		case kVK_ANSI_K: kind = .belowInColumn
+		case kVK_ANSI_J: kind = .newColumnLeft
+		case kVK_ANSI_L: kind = .newColumnRight
+		case kVK_ANSI_F: kind = .float
+		default: kind = nil
 		}
+
+		guard let kind = kind else {
+			return false
+		}
+
+		DispatchQueue.main.async {
+			PlacementReservationManager.shared.confirm(kind: kind)
+		}
+		return true
 	}
 
 	// MARK: - Window Palette Mode Key Handling

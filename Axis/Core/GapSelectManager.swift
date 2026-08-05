@@ -32,40 +32,24 @@ struct GapInfo: Equatable {
 	}
 }
 
-/// Gap-selection mode state
-enum GapSelectState {
-	/// A gap is selected (movement steps between gaps)
-	case selecting
-	/// A gap is grabbed and being resized (movement moves the gap)
-	case resizing
-}
-
-	/// Management of gap-selection mode
+/// Manages the new gap mode
+/// Directly moves the four edges (left, right, top, bottom) of the focused window.
+/// While in this mode, each key immediately switches which edge is being adjusted, allowing continuous adjustment.
 class GapSelectManager: ObservableObject {
 	static let shared = GapSelectManager()
 
 	// MARK: - Published Properties
 
-	/// Whether gap-selection mode is active
+	/// Whether the new gap mode is active
 	var isActive: Bool {
 		return !availableGaps.isEmpty
 	}
 
-	/// Current state
-	@Published var state: GapSelectState = .selecting
-	/// All available gaps
+	/// Every gap that can be moved on the current screen
 	@Published var availableGaps: [GapInfo] = []
 
-	/// The index of the currently selected gap
-	@Published var selectedGapIndex: Int = 0
-
-	/// The currently selected gap
-	var selectedGap: GapInfo? {
-		guard selectedGapIndex >= 0 && selectedGapIndex < availableGaps.count else {
-			return nil
-		}
-		return availableGaps[selectedGapIndex]
-	}
+	/// The gap index corresponding to the edge currently being operated on (nil if no edge has been touched yet)
+	@Published var currentGapIndex: Int? = nil
 
 	// MARK: - Dependencies
 
@@ -76,212 +60,114 @@ class GapSelectManager: ObservableObject {
 
 	// MARK: - Public Methods
 
-	/// Start gap-selection mode
+	/// Start the new gap mode
 	func startGapSelectMode() {
+		guard let screen = getCurrentScreen() else { return }
 
-		// Get the current screen
-		guard let screen = getCurrentScreen() else {
-			return
-		}
-
-		// Calculate the gap
 		calculateGaps(for: screen)
+		guard !availableGaps.isEmpty else { return }
 
-		guard !availableGaps.isEmpty else {
-			return
-		}
+		currentGapIndex = nil
 
-		// Initialize the state
-		state = .selecting
-		selectedGapIndex = 0
-
-		// Show the overlay
+		// Show the overlay (no highlight yet, since no edge has been touched)
 		showOverlay(on: screen)
-		
+
 		// Update the focus border (hide it)
 		BorderManager.shared.updateBorder()
 	}
 
-	/// End gap-selection mode
+	/// End the new gap mode
 	func endGapSelectMode() {
-
-		// Hide the overlay
 		hideOverlay()
 
-		// Reset the state
 		availableGaps = []
-		selectedGapIndex = 0
-		state = .selecting
-		
+		currentGapIndex = nil
+
 		// Update the focus border (show it again)
 		BorderManager.shared.updateBorder()
 	}
 
-	/// Move to the next gap
-	func moveToNextGap(direction: Direction) {
-		guard state == .selecting else { return }
+	/// Move the focused window's given edge.
+	/// - Parameters:
+	///   - edge: the edge to move (left/right/up/down)
+	///   - widen: true = move the edge outward to grow the window, false = move it inward to shrink it
+	func resizeFocusedEdge(_ edge: Direction, widen: Bool) {
+		guard let screen = getCurrentScreen() else { return }
+
+		// Bring the gaps up to date
+		calculateGaps(for: screen)
 		guard !availableGaps.isEmpty else { return }
 
-
-		// Find the next gap based on direction
-		let currentGap = selectedGap
-		var bestIndex: Int? = nil
-		var bestDistance: CGFloat = .infinity
-
-		for (index, gap) in availableGaps.enumerated() {
-			guard index != selectedGapIndex else { continue }
-
-			let isValidDirection: Bool
-			let distance: CGFloat
-
-			switch direction {
-			case .left:
-				isValidDirection = gap.frame.midX < (currentGap?.frame.midX ?? 0)
-				distance = (currentGap?.frame.midX ?? 0) - gap.frame.midX
-			case .right:
-				isValidDirection = gap.frame.midX > (currentGap?.frame.midX ?? 0)
-				distance = gap.frame.midX - (currentGap?.frame.midX ?? 0)
-			case .up:
-				// NSScreen's coordinate system has its origin at the bottom-left, so a larger Y is higher
-				isValidDirection = gap.frame.midY > (currentGap?.frame.midY ?? 0)
-				distance = gap.frame.midY - (currentGap?.frame.midY ?? 0)
-			case .down:
-				// NSScreen's coordinate system has its origin at the bottom-left, so a smaller Y is lower
-				isValidDirection = gap.frame.midY < (currentGap?.frame.midY ?? 0)
-				distance = (currentGap?.frame.midY ?? 0) - gap.frame.midY
-			}
-
-			if isValidDirection && distance < bestDistance {
-				bestDistance = distance
-				bestIndex = index
-			}
-		}
-
-		if let newIndex = bestIndex {
-			selectedGapIndex = newIndex
-			updateOverlay()
-		}
-	}
-
-	/// Select the current gap (enters resize mode).
-	/// If a resize is in progress, confirm it and return true (signaling that it should end).
-	func selectCurrentGap() -> Bool {
-		guard state == .selecting else {
-			// Confirm it if a resize is already in progress
-			confirmResize()
-			return true
-		}
-
-		guard selectedGap != nil else { return false }
-
-		state = .resizing
-		updateOverlay()
-		return false
-	}
-	
-	/// Select the gap in the given direction and start resize mode
-	func startResizeGapInDirection(_ direction: Direction) -> Bool {
-		guard let screen = getCurrentScreen() else { return false }
-		
-		// Calculate the gap
-		calculateGaps(for: screen)
-		guard !availableGaps.isEmpty else { return false }
-		
 		// Get the currently focused window
-		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return false }
-		// Update the frame info
+		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
 		focusedWindow.refreshFrame()
-		
-		// Find the target gap
-		var targetGapIndex: Int? = nil
-		
-		// Identify which column/row a window is in
-		// columns is of type [[WindowInfo]], obtainable via tilingEngine.tiledWindows[ScreenIdentifier(from: screen)]
+
 		let columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
-		guard columns.count > 0 else {
-			availableGaps = []
-			return false
+		guard columns.count > 0 else { return }
+
+		guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else {
+			return
 		}
-        
-        guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else {
-            return false
-        }
-		
+
+		// Find the gap corresponding to the given side of the focused window
+		var targetGapIndex: Int? = nil
 		for (index, gap) in availableGaps.enumerated() {
-			switch direction {
+			switch edge {
 			case .left:
 				// Vertical gap to the left of this column (colIndex), at index colIndex - 1
 				if gap.type == .vertical && gap.columnIndex == colIndex - 1 {
 					targetGapIndex = index
 				}
-				
 			case .right:
 				// Vertical gap to the right of this column (colIndex), at index colIndex
 				if gap.type == .vertical && gap.columnIndex == colIndex {
 					targetGapIndex = index
 				}
-				
-			case .up: // 画面上方向（行インデックスが小さい方）
+			case .up:
 				// Horizontal gap between this row and the one above it (rowIndex - 1), at index rowIndex - 1
 				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex - 1 {
 					targetGapIndex = index
 				}
-				
-			case .down: // 画面下方向（行インデックスが大きい方）
+			case .down:
 				// Horizontal gap between this row and the one below it (rowIndex + 1), at index rowIndex
 				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex {
 					targetGapIndex = index
 				}
 			}
-			
 			if targetGapIndex != nil { break }
 		}
-		
-		if let index = targetGapIndex {
-			selectedGapIndex = index
-			state = .resizing
-			// Show the overlay
-			showOverlay(on: screen)
-			BorderManager.shared.updateBorder() // ボーダー消す
-			return true
-		}
-		
-		return false
-	}
 
-	/// Confirm the resize
-	private func confirmResize() {
-		state = .selecting
-		updateOverlay()
-	}
+		// Do nothing if it's flush against the screen edge and there's no corresponding gap
+		guard let index = targetGapIndex else { return }
 
-	/// Move the gap (resize)
-	func moveGap(direction: Direction) {
-		guard state == .resizing else { return }
-		guard let gap = selectedGap else { return }
-
+		currentGapIndex = index
+		let gap = availableGaps[index]
 
 		// Movement amount (pixels)
 		let moveAmount: CGFloat = 50
 
-		guard let screen = getCurrentScreen() else { return }
+		// Convert widen/shrink into the gap's actual direction of movement
+		let moveDirection: Direction
+		switch edge {
+		case .left:  moveDirection = widen ? .left : .right
+		case .right: moveDirection = widen ? .right : .left
+		case .up:    moveDirection = widen ? .up : .down
+		case .down:  moveDirection = widen ? .down : .up
+		}
 
 		switch gap.type {
 		case .vertical:
-			// A vertical gap can only be moved left and right
-			guard direction == .left || direction == .right else { return }
-			let delta = direction == .left ? -moveAmount : moveAmount
+			let delta = moveDirection == .left ? -moveAmount : moveAmount
 			tilingEngine.resizeColumnGap(at: gap.columnIndex, delta: delta, on: screen)
 
 		case .horizontal:
-			// A horizontal gap can only be moved up and down
-			guard direction == .up || direction == .down else { return }
-			guard let rowIndex = gap.rowIndex else { return }
-			let delta = direction == .up ? -moveAmount : moveAmount
-			tilingEngine.resizeRowGap(columnIndex: gap.columnIndex, rowIndex: rowIndex, delta: delta, on: screen)
+			guard let gapRowIndex = gap.rowIndex else { return }
+			let delta = moveDirection == .up ? -moveAmount : moveAmount
+			tilingEngine.resizeRowGap(columnIndex: gap.columnIndex, rowIndex: gapRowIndex, delta: delta, on: screen)
 		}
 
-		// Recalculate the gap
+		// Recompute the gaps and update the overlay
+		// (Since the column/row layout doesn't change, it stays consistent at the same index)
 		calculateGaps(for: screen)
 		updateOverlay()
 	}
@@ -391,13 +277,13 @@ class GapSelectManager: ObservableObject {
 			overlayWindow = GapOverlayWindow()
 		}
 
-		overlayWindow?.showOnScreen(screen, gaps: availableGaps, selectedIndex: selectedGapIndex, state: state)
+		overlayWindow?.showOnScreen(screen, gaps: availableGaps, selectedIndex: currentGapIndex)
 	}
 
 	/// Update the overlay
 	private func updateOverlay() {
 		guard getCurrentScreen() != nil else { return }
-		overlayWindow?.update(gaps: availableGaps, selectedIndex: selectedGapIndex, state: state)
+		overlayWindow?.update(gaps: availableGaps, selectedIndex: currentGapIndex)
 	}
 
 	/// Hide the overlay

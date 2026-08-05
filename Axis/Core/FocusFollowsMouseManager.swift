@@ -121,11 +121,7 @@ class FocusFollowsMouseManager: ObservableObject {
 			return
 		}
 
-		// Do nothing while in window-selection mode or gap-selection mode
-		guard !WindowSelectManager.shared.isActive else {
-			logSkipReason("windowSelectMode")
-			return
-		}
+		// Do nothing while in gap selection mode
 		guard !GapSelectManager.shared.isActive else {
 			logSkipReason("gapSelectMode")
 			return
@@ -184,7 +180,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		// Re-raise that screen's floating windows to the front (without stealing focus).
 		// Without this, a floating window gets buried just from the mouse passing over a tile, and
 		// After this, hovering can no longer reach the floating window
-		let isFloatingTarget = WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat()
+		let isFloatingTarget = WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat()
 		if !isFloatingTarget,
 		   let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
 			PerfLog.measure("FFM.raiseFloatingWindows", threshold: 0.005) {

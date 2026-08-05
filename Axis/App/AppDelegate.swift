@@ -160,8 +160,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch mode {
         case .normal:
             iconName = "rectangle.split.3x1" // 通常のタイリングアイコン
-        case .windowSelect:
-            iconName = "rectangle.stack" // ウィンドウ選択
         case .gapSelect:
             iconName = "arrow.left.and.right" // ギャップ選択
         case .windowPalette:
@@ -526,6 +524,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lastOnScreenIDSignature = onScreenIDs
 
         let allWindows = accessibilityManager.getAllWindows()
+
+        // Check whether a window hidden with Ctrl+Opt+X was manually restored via the Dock or similar.
+        // Don't add a new poller — piggyback on this existing periodic scan (0.3s interval)
+        HiddenWindowManager.shared.checkForManualRestores(allWindows: allWindows)
+
         let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         let currentCount = currentWindows.count
 
@@ -613,7 +616,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     allWindowsByID[w.id] = w
                 }
                 let fullscreenWindowIDs = closedWindowIDs.filter { allWindowsByID[$0]?.isFullscreen == true }
-                let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs)
+
+                // A window hidden (minimized) with Ctrl+Opt+X still shows up in the AX list, but
+                // it drops out of CGWindowList's onScreen list (minimized windows aren't considered on-screen).
+                // Excluded because misreading this as "closed" would lose the neighbor memory and workspace registration.
+                // But if it's also gone from allWindowsByID (the whole app really quit), then
+                // Treat it as closed normally
+                let stillHiddenWindowIDs = closedWindowIDs.filter {
+                    HiddenWindowManager.shared.isHidden($0) && allWindowsByID[$0] != nil
+                }
+
+                let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs).subtracting(stillHiddenWindowIDs)
 
                 // Only do the cache save, unregister, and focus handling if a window was genuinely closed
                 if !reallyClosedWindowIDs.isEmpty {
@@ -629,6 +642,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Also unregister from the workspace
                     for closedID in reallyClosedWindowIDs {
                         workspaceManager.unregisterWindow(closedID)
+                        // If it was actually closed while hidden, drop it from the hidden list too
+                        HiddenWindowManager.shared.forgetIfPresent(closedID)
                     }
 
                     focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
@@ -708,6 +723,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
                     if workspaceManager.isWindowInAnyWorkspace(newID) {
+                        continue
+                    }
+
+                    // If a placement reservation (Ctrl+Opt+N) is active, prefer that.
+                    // If the reservation was consumed, both workspace registration and placement are already done, so skip the normal path
+                    if let window = currentWindows.first(where: { $0.id == newID }),
+                       PlacementReservationManager.shared.consumeIfApplicable(newWindow: window) {
                         continue
                     }
 
