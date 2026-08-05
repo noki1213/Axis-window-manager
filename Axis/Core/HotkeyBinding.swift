@@ -22,19 +22,19 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case moveWindowRight
 	case moveWindowUp
 	case moveWindowDown
-	// Quick gap resize
-	case quickGapLeft
-	case quickGapRight
-	case quickGapUp
-	case quickGapDown
-	// Hover (floating)
-	case hoverToggle
-	case hoverFocusCycle
+	// Merge/split (step move)
+	case stepMoveLeft
+	case stepMoveRight
+	// Float (floating)
+	case floatToggle
+	case floatFocusCycle
 	case raiseFloatingWindows
+	// Hide/restore
+	case hideWindow
+	case unhideLastWindow
 	// Zen mode
 	case zenToggle
 	// Mode switching
-	case windowSelectMode
 	case gapSelectMode
 	case windowPaletteMode
 	// Layout
@@ -48,6 +48,8 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case workspacePrev
 	case moveWindowToNextWorkspace
 	case moveWindowToPrevWorkspace
+	// Placement reservation
+	case placementReserve
 }
 
 // MARK: - HotkeySection (UI section grouping)
@@ -55,12 +57,13 @@ enum HotkeyAction: String, Codable, CaseIterable {
 /// The section grouping in the settings screen
 enum HotkeySection: String, CaseIterable {
 	case focusAndMove = "フォーカス / ウィンドウ移動"
-	case quickGapResize = "クイックギャップリサイズ"
-	case hover = "ホバー（フローティング）"
+	case float = "Float"
+	case hidden = "Hidden"
 	case modeSwitching = "モード切り替え"
 	case layout = "レイアウト"
 	case monitor = "モニター"
 	case workspace = "ワークスペース"
+	case placementReserve = "Placement Reserve"
 }
 
 // MARK: - HotkeyModifiers (a combination of modifier keys)
@@ -168,15 +171,14 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: "右にウィンドウ移動",
 		.moveWindowUp: "上にウィンドウ移動",
 		.moveWindowDown: "下にウィンドウ移動",
-		.quickGapLeft: "左のギャップを操作",
-		.quickGapRight: "右のギャップを操作",
-		.quickGapUp: "上のギャップを操作",
-		.quickGapDown: "下のギャップを操作",
-		.hoverToggle: "ホバー ON/OFF",
-		.hoverFocusCycle: "ホバーウィンドウにフォーカス",
+		.stepMoveLeft: "左へ1ステップ移動（合流/分離）",
+		.stepMoveRight: "右へ1ステップ移動（合流/分離）",
+		.floatToggle: "Float ON/OFF",
+		.floatFocusCycle: "Floatウィンドウにフォーカス",
 		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
+		.hideWindow: "ウィンドウを隠す",
+		.unhideLastWindow: "最後に隠したウィンドウを復元",
 		.zenToggle: "Zen モード ON/OFF",
-		.windowSelectMode: "Window Select モード",
 		.gapSelectMode: "Gap Select モード",
 		.windowPaletteMode: "Window Palette モード",
 		.resetLayout: "レイアウトをリセット",
@@ -187,6 +189,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.workspacePrev: "前のワークスペース",
 		.moveWindowToNextWorkspace: "ウィンドウを次のワークスペースへ",
 		.moveWindowToPrevWorkspace: "ウィンドウを前のワークスペースへ",
+		.placementReserve: "Placement Reserve (Await Next Key)",
 	]
 
 	// MARK: - Section classification dictionary
@@ -200,15 +203,14 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: .focusAndMove,
 		.moveWindowUp: .focusAndMove,
 		.moveWindowDown: .focusAndMove,
-		.quickGapLeft: .quickGapResize,
-		.quickGapRight: .quickGapResize,
-		.quickGapUp: .quickGapResize,
-		.quickGapDown: .quickGapResize,
-		.hoverToggle: .hover,
-		.hoverFocusCycle: .hover,
-		.raiseFloatingWindows: .hover,
+		.stepMoveLeft: .focusAndMove,
+		.stepMoveRight: .focusAndMove,
+		.floatToggle: .float,
+		.floatFocusCycle: .float,
+		.raiseFloatingWindows: .float,
+		.hideWindow: .hidden,
+		.unhideLastWindow: .hidden,
 		.zenToggle: .modeSwitching,
-		.windowSelectMode: .modeSwitching,
 		.gapSelectMode: .modeSwitching,
 		.windowPaletteMode: .modeSwitching,
 		.resetLayout: .layout,
@@ -219,6 +221,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.workspacePrev: .workspace,
 		.moveWindowToNextWorkspace: .workspace,
 		.moveWindowToPrevWorkspace: .workspace,
+		.placementReserve: .placementReserve,
 	]
 
 	// MARK: - Key code -> display name
@@ -274,19 +277,19 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .moveWindowRight, keyCode: kVK_ANSI_L, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowUp,    keyCode: kVK_ANSI_I, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowDown,  keyCode: kVK_ANSI_K, modifiers: ctrlOptShift),
-			// Quick gap resize
-			HotkeyBinding(action: .quickGapLeft,  keyCode: kVK_ANSI_S, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapRight, keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapUp,    keyCode: kVK_ANSI_E, modifiers: ctrlOpt),
-			HotkeyBinding(action: .quickGapDown,  keyCode: kVK_ANSI_D, modifiers: ctrlOpt),
-			// Hover
-			HotkeyBinding(action: .hoverToggle,     keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
-			HotkeyBinding(action: .hoverFocusCycle, keyCode: kVK_ANSI_H, modifiers: ctrlOptShift),
+			// Merge/split (step move)
+			HotkeyBinding(action: .stepMoveLeft,  keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
+			HotkeyBinding(action: .stepMoveRight, keyCode: kVK_ANSI_Semicolon, modifiers: ctrlOpt),
+			// Float
+			HotkeyBinding(action: .floatToggle,     keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
+			HotkeyBinding(action: .floatFocusCycle, keyCode: kVK_ANSI_F, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .raiseFloatingWindows, keyCode: kVK_ANSI_B, modifiers: ctrlOpt),
+			// Hide/restore
+			HotkeyBinding(action: .hideWindow,       keyCode: kVK_ANSI_X, modifiers: ctrlOpt),
+			HotkeyBinding(action: .unhideLastWindow, keyCode: kVK_ANSI_X, modifiers: ctrlOptShift),
 			// Zen mode
 			HotkeyBinding(action: .zenToggle, keyCode: kVK_ANSI_Z, modifiers: ctrlOpt),
 			// Mode switching
-			HotkeyBinding(action: .windowSelectMode,  keyCode: kVK_ANSI_W, modifiers: ctrlOpt),
 			HotkeyBinding(action: .gapSelectMode,     keyCode: kVK_ANSI_G, modifiers: ctrlOpt),
 			HotkeyBinding(action: .windowPaletteMode, keyCode: kVK_ANSI_P, modifiers: ctrlOpt),
 			// Layout
@@ -300,6 +303,8 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .workspacePrev, keyCode: kVK_ANSI_U, modifiers: ctrlOpt),
 			HotkeyBinding(action: .moveWindowToNextWorkspace, keyCode: kVK_ANSI_O, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowToPrevWorkspace, keyCode: kVK_ANSI_U, modifiers: ctrlOptShift),
+			// Placement reservation
+			HotkeyBinding(action: .placementReserve, keyCode: kVK_ANSI_N, modifiers: ctrlOpt),
 		]
 	}
 }

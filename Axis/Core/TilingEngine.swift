@@ -54,7 +54,7 @@ class TilingEngine: ObservableObject {
         // - shouldFloat(): excludes windows that should float
         // - workspaceIDs.contains(): targets only windows in the current workspace
         let managedWindows = allWindows.filter { window in
-            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isHovering(window.id)
+            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isFloating(window.id)
         }
 
         // If there are no target windows, clear the column structure and return
@@ -117,7 +117,7 @@ class TilingEngine: ObservableObject {
         raiseFloatingWindows(on: screen)
     }
 
-    /// Raise floating windows (hover-designated or shouldFloat) on the given screen to the front
+    /// Raise the floating windows (explicitly marked Float, or shouldFloat) on the given screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
     /// Doesn't steal focus.
     func raiseFloatingWindows(on screen: NSScreen) {
@@ -158,8 +158,8 @@ class TilingEngine: ObservableObject {
             guard !WorkspaceManager.shared.isWindowHidden(window.id) else { continue }
             guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { continue }
             guard !zenHiddenIDs.contains(window.id) else { continue }
-            // Floating windows only (hover-designated or float targets)
-            guard WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat() else { continue }
+            // Floating windows only (explicitly marked Float, or otherwise eligible to float)
+            guard WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat() else { continue }
             // Only raise genuine windows (standard windows or dialogs)
             // (so we don't raise invisible helper windows, like Arc's, on every pass)
             guard window.shouldBeManaged()
@@ -230,13 +230,13 @@ class TilingEngine: ObservableObject {
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
 
-        // Insert hovering windows into a column based on X coordinate too, so they're eligible for focus movement
-        let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
-        if !hoverIDs.isEmpty {
+        // Floating windows are also inserted into a column based on X coordinate (so they're reachable by focus movement)
+        let floatIDs = WorkspaceManager.shared.floatWindowIDs
+        if !floatIDs.isEmpty {
             let allWins = accessibilityManager.getAllWindows()
-            let hoverWindows = allWins.filter { hoverIDs.contains($0.id) && workspaceIDs.contains($0.id) }
+            let floatWindows = allWins.filter { floatIDs.contains($0.id) && workspaceIDs.contains($0.id) }
                 .sorted { $0.frame.midX < $1.frame.midX }
-            for hw in hoverWindows {
+            for hw in floatWindows {
                 // Look at the X coordinate and insert at the right spot in the tiling columns
                 var insertIndex = columns.count
                 for (i, col) in columns.enumerated() {
@@ -520,6 +520,103 @@ class TilingEngine: ObservableObject {
         // Keep focus as is, and move the cursor too
         currentWindow.focus()
         moveCursorToWindow(currentWindow)
+    }
+
+    /// Move the focused window one step in the given direction (merge/split, equivalent to niri's/PaperWM's consume/expel)
+    /// - If it's in a column with other windows: leave that column and insert it as its own column next to the neighbor in the given direction (detach)
+    /// - If it's alone in its column: merge onto the end of the neighboring column in the given direction (attach). Do nothing if there's no neighboring column
+    /// A method independent of the existing moveWindow(direction:), with no effect at all on moveWindow's whole-column-swap logic
+    func stepMoveWindow(direction: Direction) {
+        guard direction == .left || direction == .right else { return }
+
+        guard let currentWindow = accessibilityManager.getFocusedWindow(),
+              let screen = getScreen(for: currentWindow) else {
+            return
+        }
+        let screenID = ScreenIdentifier(from: screen)
+
+        // Get the window IDs of the current workspace
+        let workspaceIDs = getWorkspaceWindowIDs(on: screen)
+
+        // Get all columns and filter down to just the workspace's windows
+        let allColumns = tiledWindows[screenID] ?? []
+        var columns = allColumns.map { column in
+            column.filter { workspaceIDs.contains($0.id) }
+        }.filter { !$0.isEmpty }
+
+        guard let (columnIndex, rowIndex) = findWindowPosition(window: currentWindow, in: columns) else {
+            return
+        }
+
+        if columns[columnIndex].count > 1 {
+            // Detach: leave the current column and insert it as its own column next to the one in the given direction
+            columns[columnIndex].remove(at: rowIndex)
+            let insertIndex = (direction == .left) ? columnIndex : columnIndex + 1
+            columns.insert([currentWindow], at: insertIndex)
+        } else {
+            // Attach: since it's in a column by itself, merge it onto the end of the neighboring column in the given direction
+            let targetColumnIndex = (direction == .left) ? columnIndex - 1 : columnIndex + 1
+            guard targetColumnIndex >= 0 && targetColumnIndex < columns.count else {
+                // Do nothing if there's no destination
+                return
+            }
+            columns.remove(at: columnIndex)
+            // For a left move the merge-target index stays as is; for a right move it shifts back by one once the source column is removed
+            let adjustedTargetIndex = (direction == .left) ? targetColumnIndex : targetColumnIndex - 1
+            columns[adjustedTargetIndex].append(currentWindow)
+        }
+
+        // Only store on-screen windows in tiledWindows
+        tiledWindows[screenID] = columns
+        applyColumnTiling(columns: columns, on: screen)
+
+        // Keep focus as is, and move the cursor too
+        currentWindow.focus()
+        moveCursorToWindow(currentWindow)
+    }
+
+    /// Insert a new window into the column structure at the position specified by the placement reservation (Ctrl+Opt+N)
+    /// Doesn't actually apply the frame (applyColumnTiling). Inserting it into the column structure here is enough, since
+    /// The normal tile() called right after this treats it as an "existing window," and
+    /// Skips the X-coordinate-based insertion logic and applies the layout as-is
+    func insertReservedWindow(_ window: WindowInfo, columnIndex: Int, kind: PlacementReservationKind, on screen: NSScreen) {
+        let screenID = ScreenIdentifier(from: screen)
+        var columns = tiledWindows[screenID] ?? []
+
+        // Just in case, remove it first if it's already in the column structure
+        for i in 0..<columns.count {
+            columns[i].removeAll { $0.id == window.id }
+        }
+        columns = columns.filter { !$0.isEmpty }
+
+        switch kind {
+        case .aboveInColumn, .belowInColumn:
+            guard !columns.isEmpty else {
+                columns = [[window]]
+                tiledWindows[screenID] = columns
+                return
+            }
+            let idx = min(max(columnIndex, 0), columns.count - 1)
+            if kind == .aboveInColumn {
+                columns[idx].insert(window, at: 0)
+            } else {
+                columns[idx].append(window)
+            }
+
+        case .newColumnLeft:
+            let idx = min(max(columnIndex, 0), columns.count)
+            columns.insert([window], at: idx)
+
+        case .newColumnRight:
+            let idx = min(max(columnIndex + 1, 0), columns.count)
+            columns.insert([window], at: idx)
+
+        case .float:
+            // Floats aren't placed into the column structure, so do nothing (the caller should already branch on this)
+            return
+        }
+
+        tiledWindows[screenID] = columns
     }
 
     /// Move the window to another screen
@@ -914,7 +1011,7 @@ class TilingEngine: ObservableObject {
     /// Update the frame held by the column structure with the frame that was actually applied
     /// The column structure's WindowInfo holds the frame measured "before" tiling was applied, and
     /// Without updating this, the stale coordinates would linger until the next window addition or removal.
-    /// causes the logic that inserts new or hovering windows into a column by X coordinate to pick the wrong spot
+    /// Causes the logic that inserts new or floating windows into a column by X coordinate to pick the wrong spot
     /// Logs when tiling results in a layout where a single window occupies the whole screen.
     /// Diagnostic logging to pin down when the "an unexpected window goes fullscreen" bug occurs.
     /// Cross-referenced with the line above (a window miss/disappearance) to narrow down the cause
