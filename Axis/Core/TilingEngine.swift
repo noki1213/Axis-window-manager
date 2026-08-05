@@ -54,7 +54,7 @@ class TilingEngine: ObservableObject {
         // - shouldFloat(): excludes windows that should float
         // - workspaceIDs.contains(): targets only windows in the current workspace
         let managedWindows = allWindows.filter { window in
-            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isHovering(window.id)
+            window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isFloating(window.id)
         }
 
         // If there are no target windows, clear the column structure and return
@@ -117,7 +117,7 @@ class TilingEngine: ObservableObject {
         raiseFloatingWindows(on: screen)
     }
 
-    /// Raise floating windows (hover-designated or shouldFloat) on the given screen to the front
+    /// Raise the floating windows (explicitly marked Float, or shouldFloat) on the given screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
     /// Doesn't steal focus.
     func raiseFloatingWindows(on screen: NSScreen) {
@@ -158,8 +158,8 @@ class TilingEngine: ObservableObject {
             guard !WorkspaceManager.shared.isWindowHidden(window.id) else { continue }
             guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { continue }
             guard !zenHiddenIDs.contains(window.id) else { continue }
-            // Floating windows only (hover-designated or float targets)
-            guard WorkspaceManager.shared.isHovering(window.id) || window.shouldFloat() else { continue }
+            // Floating windows only (explicitly marked Float, or otherwise eligible to float)
+            guard WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat() else { continue }
             // Only raise genuine windows (standard windows or dialogs)
             // (so we don't raise invisible helper windows, like Arc's, on every pass)
             guard window.shouldBeManaged()
@@ -230,13 +230,13 @@ class TilingEngine: ObservableObject {
             column.filter { workspaceIDs.contains($0.id) }
         }.filter { !$0.isEmpty }
 
-        // Insert hovering windows into a column based on X coordinate too, so they're eligible for focus movement
-        let hoverIDs = WorkspaceManager.shared.hoverWindowIDs
-        if !hoverIDs.isEmpty {
+        // Floating windows are also inserted into a column based on X coordinate (so they're reachable by focus movement)
+        let floatIDs = WorkspaceManager.shared.floatWindowIDs
+        if !floatIDs.isEmpty {
             let allWins = accessibilityManager.getAllWindows()
-            let hoverWindows = allWins.filter { hoverIDs.contains($0.id) && workspaceIDs.contains($0.id) }
+            let floatWindows = allWins.filter { floatIDs.contains($0.id) && workspaceIDs.contains($0.id) }
                 .sorted { $0.frame.midX < $1.frame.midX }
-            for hw in hoverWindows {
+            for hw in floatWindows {
                 // Look at the X coordinate and insert at the right spot in the tiling columns
                 var insertIndex = columns.count
                 for (i, col) in columns.enumerated() {
@@ -914,7 +914,7 @@ class TilingEngine: ObservableObject {
     /// Update the frame held by the column structure with the frame that was actually applied
     /// The column structure's WindowInfo holds the frame measured "before" tiling was applied, and
     /// Without updating this, the stale coordinates would linger until the next window addition or removal.
-    /// causes the logic that inserts new or hovering windows into a column by X coordinate to pick the wrong spot
+    /// Causes the logic that inserts new or floating windows into a column by X coordinate to pick the wrong spot
     /// Logs when tiling results in a layout where a single window occupies the whole screen.
     /// Diagnostic logging to pin down when the "an unexpected window goes fullscreen" bug occurs.
     /// Cross-referenced with the line above (a window miss/disappearance) to narrow down the cause

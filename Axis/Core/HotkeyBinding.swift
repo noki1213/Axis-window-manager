@@ -22,9 +22,9 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case moveWindowRight
 	case moveWindowUp
 	case moveWindowDown
-	// Hover (floating)
-	case hoverToggle
-	case hoverFocusCycle
+	// Float (floating)
+	case floatToggle
+	case floatFocusCycle
 	case raiseFloatingWindows
 	// Zen mode
 	case zenToggle
@@ -50,7 +50,7 @@ enum HotkeyAction: String, Codable, CaseIterable {
 /// The section grouping in the settings screen
 enum HotkeySection: String, CaseIterable {
 	case focusAndMove = "フォーカス / ウィンドウ移動"
-	case hover = "ホバー（フローティング）"
+	case float = "Float"
 	case modeSwitching = "モード切り替え"
 	case layout = "レイアウト"
 	case monitor = "モニター"
@@ -162,8 +162,8 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: "右にウィンドウ移動",
 		.moveWindowUp: "上にウィンドウ移動",
 		.moveWindowDown: "下にウィンドウ移動",
-		.hoverToggle: "ホバー ON/OFF",
-		.hoverFocusCycle: "ホバーウィンドウにフォーカス",
+		.floatToggle: "Float ON/OFF",
+		.floatFocusCycle: "Floatウィンドウにフォーカス",
 		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
 		.zenToggle: "Zen モード ON/OFF",
 		.windowSelectMode: "Window Select モード",
@@ -190,9 +190,9 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: .focusAndMove,
 		.moveWindowUp: .focusAndMove,
 		.moveWindowDown: .focusAndMove,
-		.hoverToggle: .hover,
-		.hoverFocusCycle: .hover,
-		.raiseFloatingWindows: .hover,
+		.floatToggle: .float,
+		.floatFocusCycle: .float,
+		.raiseFloatingWindows: .float,
 		.zenToggle: .modeSwitching,
 		.windowSelectMode: .modeSwitching,
 		.gapSelectMode: .modeSwitching,
@@ -260,9 +260,9 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .moveWindowRight, keyCode: kVK_ANSI_L, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowUp,    keyCode: kVK_ANSI_I, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowDown,  keyCode: kVK_ANSI_K, modifiers: ctrlOptShift),
-			// Hover
-			HotkeyBinding(action: .hoverToggle,     keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
-			HotkeyBinding(action: .hoverFocusCycle, keyCode: kVK_ANSI_H, modifiers: ctrlOptShift),
+			// Float
+			HotkeyBinding(action: .floatToggle,     keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
+			HotkeyBinding(action: .floatFocusCycle, keyCode: kVK_ANSI_F, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .raiseFloatingWindows, keyCode: kVK_ANSI_B, modifiers: ctrlOpt),
 			// Zen mode
 			HotkeyBinding(action: .zenToggle, keyCode: kVK_ANSI_Z, modifiers: ctrlOpt),
