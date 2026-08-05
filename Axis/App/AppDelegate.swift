@@ -726,6 +726,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
+                    // If a placement reservation (Ctrl+Opt+N) is active, prefer that.
+                    // If the reservation was consumed, both workspace registration and placement are already done, so skip the normal path
+                    if let window = currentWindows.first(where: { $0.id == newID }),
+                       PlacementReservationManager.shared.consumeIfApplicable(newWindow: window) {
+                        continue
+                    }
+
                     // Register to the monitor that had focus one cycle ago, if there is one
                     if let screen = lastFocusedScreen {
                         workspaceManager.registerWindow(newID, on: screen)
