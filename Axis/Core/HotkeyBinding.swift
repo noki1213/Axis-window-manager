@@ -22,6 +22,9 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case moveWindowRight
 	case moveWindowUp
 	case moveWindowDown
+	// Merge/split (step move)
+	case stepMoveLeft
+	case stepMoveRight
 	// Float (floating)
 	case floatToggle
 	case floatFocusCycle
@@ -29,7 +32,6 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	// Zen mode
 	case zenToggle
 	// Mode switching
-	case windowSelectMode
 	case gapSelectMode
 	case windowPaletteMode
 	// Layout
@@ -162,11 +164,12 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: "右にウィンドウ移動",
 		.moveWindowUp: "上にウィンドウ移動",
 		.moveWindowDown: "下にウィンドウ移動",
+		.stepMoveLeft: "左へ1ステップ移動（合流/分離）",
+		.stepMoveRight: "右へ1ステップ移動（合流/分離）",
 		.floatToggle: "Float ON/OFF",
 		.floatFocusCycle: "Floatウィンドウにフォーカス",
 		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
 		.zenToggle: "Zen モード ON/OFF",
-		.windowSelectMode: "Window Select モード",
 		.gapSelectMode: "Gap Select モード",
 		.windowPaletteMode: "Window Palette モード",
 		.resetLayout: "レイアウトをリセット",
@@ -190,11 +193,12 @@ struct HotkeyBinding: Codable, Identifiable {
 		.moveWindowRight: .focusAndMove,
 		.moveWindowUp: .focusAndMove,
 		.moveWindowDown: .focusAndMove,
+		.stepMoveLeft: .focusAndMove,
+		.stepMoveRight: .focusAndMove,
 		.floatToggle: .float,
 		.floatFocusCycle: .float,
 		.raiseFloatingWindows: .float,
 		.zenToggle: .modeSwitching,
-		.windowSelectMode: .modeSwitching,
 		.gapSelectMode: .modeSwitching,
 		.windowPaletteMode: .modeSwitching,
 		.resetLayout: .layout,
@@ -260,6 +264,9 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .moveWindowRight, keyCode: kVK_ANSI_L, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowUp,    keyCode: kVK_ANSI_I, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowDown,  keyCode: kVK_ANSI_K, modifiers: ctrlOptShift),
+			// Merge/split (step move)
+			HotkeyBinding(action: .stepMoveLeft,  keyCode: kVK_ANSI_H, modifiers: ctrlOpt),
+			HotkeyBinding(action: .stepMoveRight, keyCode: kVK_ANSI_Semicolon, modifiers: ctrlOpt),
 			// Float
 			HotkeyBinding(action: .floatToggle,     keyCode: kVK_ANSI_F, modifiers: ctrlOpt),
 			HotkeyBinding(action: .floatFocusCycle, keyCode: kVK_ANSI_F, modifiers: ctrlOptShift),
@@ -267,7 +274,6 @@ struct HotkeyBinding: Codable, Identifiable {
 			// Zen mode
 			HotkeyBinding(action: .zenToggle, keyCode: kVK_ANSI_Z, modifiers: ctrlOpt),
 			// Mode switching
-			HotkeyBinding(action: .windowSelectMode,  keyCode: kVK_ANSI_W, modifiers: ctrlOpt),
 			HotkeyBinding(action: .gapSelectMode,     keyCode: kVK_ANSI_G, modifiers: ctrlOpt),
 			HotkeyBinding(action: .windowPaletteMode, keyCode: kVK_ANSI_P, modifiers: ctrlOpt),
 			// Layout

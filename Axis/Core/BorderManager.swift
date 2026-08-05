@@ -23,7 +23,7 @@ class BorderManager: ObservableObject {
     private(set) var isInMissionControl = false // ミッションコントロール表示中フラグ（外部からは読み取りのみ）
 
     // Settings
-    private let padding: CGFloat = 10.0 // WindowSelectManagerと同じパディング
+    private let padding: CGFloat = 10.0 // 枠線のパディング
 
     private init() {
         setupNotifications()
@@ -163,7 +163,7 @@ class BorderManager: ObservableObject {
             return
         }
 
-        if WindowSelectManager.shared.isActive || GapSelectManager.shared.isActive {
+        if GapSelectManager.shared.isActive {
             hideBorder()
             return
         }
@@ -319,5 +319,54 @@ class BorderManager: ObservableObject {
         borderView = nil
         currentWindow = nil
         currentWindowID = nil
+    }
+}
+
+// MARK: - Selection Border View
+
+/// The view that draws the border around the focused window
+class SelectionBorderView: NSView {
+
+    var showsFill: Bool = true {
+        didSet { self.setNeedsDisplay(bounds) }
+    }
+
+    var borderColor: NSColor = .white {
+        didSet { self.setNeedsDisplay(bounds) }
+    }
+
+    var fillColor: NSColor = NSColor.white.withAlphaComponent(0.15) {
+        didSet { self.setNeedsDisplay(bounds) }
+    }
+
+    /// For compatibility with the older interface (setting it applies to both)
+    var mainColor: NSColor {
+        get { return borderColor }
+        set {
+            borderColor = newValue
+            fillColor = newValue.withAlphaComponent(0.15)
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        // The border is drawn a bit thicker (4pt), so draw with room for that plus an 8pt margin
+        // As a result, the border ends up drawn about 2pt outside the actual window (Padding 10 - Inset 8 = 2)
+        let inset: CGFloat = 8
+        let cornerRadius: CGFloat = 12
+
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), xRadius: cornerRadius, yRadius: cornerRadius)
+
+        // The background fill (only when showsFill is true)
+        if showsFill {
+            fillColor.setFill()
+            path.fill()
+        }
+
+        // Draw the border
+        borderColor.setStroke()
+        path.lineWidth = 4
+        path.stroke()
     }
 }

@@ -17,7 +17,6 @@ class HotkeyManager: ObservableObject {
 
 	enum Mode: String {
 		case normal = "Normal"
-		case windowSelect = "Window Select"
 		case gapSelect = "Gap Select"
 		case windowPalette = "Window Palette"
 	}
@@ -41,7 +40,6 @@ class HotkeyManager: ObservableObject {
 	private var heartbeatTimer: Timer?
 
 	private let tilingEngine = TilingEngine.shared
-	private let windowSelectManager = WindowSelectManager.shared
 	private let gapSelectManager = GapSelectManager.shared
 	private let windowPaletteManager = WindowPaletteManager.shared
 
@@ -251,11 +249,6 @@ class HotkeyManager: ObservableObject {
 			return false
 		}
 
-		// Special key handling in window-selection mode
-		if currentMode == .windowSelect {
-			return handleWindowSelectModeKeyEvent(event)
-		}
-
 		// Special key handling while in gap selection mode
 		if currentMode == .gapSelect {
 			return handleGapSelectModeKeyEvent(event)
@@ -352,6 +345,22 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
+		// MARK: Merge/split (step move)
+		case .stepMoveLeft:
+			DispatchQueue.main.async { [weak self] in
+				self?.tilingEngine.stepMoveWindow(direction: .left)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
+				}
+			}
+		case .stepMoveRight:
+			DispatchQueue.main.async { [weak self] in
+				self?.tilingEngine.stepMoveWindow(direction: .right)
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+					BorderManager.shared.updateBorder()
+				}
+			}
+
 		// MARK: Float (floating)
 		case .floatToggle:
 			DispatchQueue.main.async { [weak self] in
@@ -410,13 +419,6 @@ class HotkeyManager: ObservableObject {
 			}
 
 		// MARK: Mode switching
-		case .windowSelectMode:
-			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				self?.currentMode = .windowSelect
-				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
-			}
-
 		case .gapSelectMode:
 			DispatchQueue.main.async { [weak self] in
 				guard !ZenModeManager.shared.isActive else { return }
@@ -526,114 +528,6 @@ class HotkeyManager: ObservableObject {
 		let warpY = mainScreenHeight - centerY
 
 		CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
-	}
-
-	// MARK: - Window Select Mode Key Handling
-
-	/// Key handling in window-selection mode
-	private func handleWindowSelectModeKeyEvent(_ event: NSEvent) -> Bool {
-		let hasModifier = event.modifierFlags.contains([.control, .option])
-		let hasShift = event.modifierFlags.contains(.shift)
-
-		// Enter: select/deselect the window (toggle)
-		if event.keyCode == kVK_Return {
-			DispatchQueue.main.async { [weak self] in
-				self?.windowSelectManager.toggleCurrentWindow()
-			}
-			return true
-		}
-
-		// Backspace/Delete: clear selection
-		if event.keyCode == kVK_Delete || event.keyCode == kVK_ForwardDelete {
-			DispatchQueue.main.async { [weak self] in
-				self?.windowSelectManager.deselectCurrentWindow()
-			}
-			return true
-		}
-
-		// V: merge the selected windows vertically (into one column)
-		// Shift+V: split the selected windows' column back into individual columns
-		if event.keyCode == kVK_ANSI_V {
-			DispatchQueue.main.async { [weak self] in
-				if hasShift {
-					self?.windowSelectManager.splitSelectedWindowsToColumns()
-				} else {
-					self?.windowSelectManager.mergeSelectedWindowsVertically()
-				}
-			}
-			return true
-		}
-
-		// JKLI handling (works with or without ctrl+option)
-		switch Int(event.keyCode) {
-		case kVK_ANSI_J: // 左
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:left")
-			}
-			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .left)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .left)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
-			}
-			return true
-
-		case kVK_ANSI_L: // 右
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:right")
-			}
-			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .right)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .right)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
-			}
-			return true
-
-		case kVK_ANSI_I: // 上
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:up")
-			}
-			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .up)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .up)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
-			}
-			return true
-
-		case kVK_ANSI_K: // 下
-			if !hasShift {
-				PerfLog.markKeyPressStart("JKLI:down")
-			}
-			DispatchQueue.main.async { [weak self] in
-				if hasShift || (hasModifier && hasShift) {
-					self?.windowSelectManager.moveSelectedWindows(direction: .down)
-				} else {
-					self?.tilingEngine.moveFocus(direction: .down)
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						self?.windowSelectManager.updateOverlays()
-					}
-				}
-			}
-			return true
-
-		default:
-			// Block every key while in this mode (don't pass them to the app)
-			return true
-		}
 	}
 
 	// MARK: - Gap Select Mode Key Handling

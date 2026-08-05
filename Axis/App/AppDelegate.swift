@@ -160,8 +160,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch mode {
         case .normal:
             iconName = "rectangle.split.3x1" // 通常のタイリングアイコン
-        case .windowSelect:
-            iconName = "rectangle.stack" // ウィンドウ選択
         case .gapSelect:
             iconName = "arrow.left.and.right" // ギャップ選択
         case .windowPalette:
