@@ -8,14 +8,14 @@
 import AppKit
 
 /// The class that manages the neighboring-workspace peek
-/// Holding Ctrl+Option (modifier keys only) shows, at the left edge of each monitor, the left-neighboring workspace's
-/// Show the right-neighboring workspace's app icons stacked vertically at the right edge. When the modifier key is released, or
-/// Dismiss it immediately if another key is pressed.
+/// Holding Ctrl+Option (modifier keys alone), while there's a focused window,
+/// Displays two cards side by side at the center of the monitor, representing the neighboring workspaces to the left and right.
+/// Dismiss it immediately when the modifier keys are released or another key is pressed.
 class WorkspacePeekManager {
 	static let shared = WorkspacePeekManager()
 
 	/// The delay before showing (to avoid false triggers). Tune this one value to adjust the feel
-	static let showDelay: TimeInterval = 0.2
+	static let showDelay: TimeInterval = 0.08
 
 	/// Whether exactly Ctrl+Option is currently held
 	private var isModifierHeld = false
@@ -23,10 +23,31 @@ class WorkspacePeekManager {
 	/// The delayed task waiting to show it
 	private var pendingShowWorkItem: DispatchWorkItem?
 
-	/// The currently displayed overlay window (one per monitor)
-	private var overlayWindows: [WorkspacePeekOverlayWindow] = []
+	/// The currently displayed overlay window
+	private var overlayWindow: WorkspacePeekOverlayWindow?
+
+	/// The display content gathered in advance at the moment the modifier key was pressed
+	/// Since scanning windows at the moment of display makes it feel slow to appear,
+	/// Gather it right after the press, so only drawing remains after the delay
+	private var preparedContent: PeekContent?
 
 	private init() {}
+
+	// MARK: - Display content
+
+	/// The content shown in the peek preview
+	private struct PeekContent {
+		let screen: NSScreen
+		let leftWorkspace: Int
+		let leftIcons: [NSImage]
+		let rightWorkspace: Int
+		let rightIcons: [NSImage]
+
+		/// There's no point showing it if both sides are empty
+		var isEmpty: Bool {
+			return leftIcons.isEmpty && rightIcons.isEmpty
+		}
+	}
 
 	// MARK: - Input from flagsChanged
 
@@ -37,23 +58,31 @@ class WorkspacePeekManager {
 			// Do nothing if it's already recognized as being held down
 			guard !isModifierHeld else { return }
 			isModifierHeld = true
+			prepareContent()
 			scheduleShow()
 		} else {
 			isModifierHeld = false
 			cancelPendingShow()
+			preparedContent = nil
 			hide()
 		}
 	}
 
 	/// Called when a normal key input (i.e. a shortcut operation) occurs
 	/// Cancel the scheduled peek preview, and dismiss it immediately if it's currently showing.
-	/// However, if Ctrl+Option is still held down, reset the delay timer and schedule it to show again
+	/// However, if Ctrl+Option is still held down, regather the content and schedule it to show again
 	/// (While held down for continuous operation it stays hidden each time, and reappears once your hand stops)
 	func cancelDueToKeyPress() {
 		cancelPendingShow()
 		hide()
 
 		if isModifierHeld {
+			// The operation may have changed the workspace or window layout, so gather it again.
+			// Right after key handling the change may not have taken effect yet, so defer to the next loop
+			DispatchQueue.main.async { [weak self] in
+				guard let self = self, self.isModifierHeld else { return }
+				self.prepareContent()
+			}
 			scheduleShow()
 		}
 	}
@@ -75,26 +104,47 @@ class WorkspacePeekManager {
 		pendingShowWorkItem = nil
 	}
 
-	/// Show the peek-preview overlay only on the single monitor that has the focused window
+	/// Gather and cache the display content (heavy work is consolidated here)
+	private func prepareContent() {
+		guard let screen = targetScreen() else {
+			preparedContent = nil
+			return
+		}
+
+		let currentWS = WorkspaceManager.shared.currentWorkspace(on: screen)
+		let leftWS = currentWS - 1
+		let rightWS = currentWS + 1
+
+		// Only fetch the window list once
+		let allWindows = AccessibilityManager.shared.getAllWindows()
+		let windowsByID = Dictionary(allWindows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+		preparedContent = PeekContent(
+			screen: screen,
+			leftWorkspace: leftWS,
+			leftIcons: appIcons(inWorkspace: leftWS, on: screen, windowsByID: windowsByID),
+			rightWorkspace: rightWS,
+			rightIcons: appIcons(inWorkspace: rightWS, on: screen, windowsByID: windowsByID)
+		)
+	}
+
+	/// Show the gathered content centered on the monitor
 	private func show() {
-		// Do nothing if the modifier key was released while showing (a belt-and-suspenders double check)
+		// Do nothing if the modifier key was released before it got shown (a just-in-case double check)
 		guard isModifierHeld else { return }
+		guard let content = preparedContent, !content.isEmpty else { return }
 
 		hide()
 
-		guard let screen = targetScreen() else { return }
-
-		let currentWS = WorkspaceManager.shared.currentWorkspace(on: screen)
-
-		let leftIcons = appIcons(inWorkspace: currentWS - 1, on: screen)
-		let rightIcons = appIcons(inWorkspace: currentWS + 1, on: screen)
-
-		// Don't create the overlay at all if there's nothing to show on either side
-		guard !leftIcons.isEmpty || !rightIcons.isEmpty else { return }
-
 		let overlay = WorkspacePeekOverlayWindow()
-		overlay.show(on: screen, leftIcons: leftIcons, rightIcons: rightIcons)
-		overlayWindows.append(overlay)
+		overlay.show(
+			on: content.screen,
+			leftWorkspace: content.leftWorkspace,
+			leftIcons: content.leftIcons,
+			rightWorkspace: content.rightWorkspace,
+			rightIcons: content.rightIcons
+		)
+		overlayWindow = overlay
 	}
 
 	/// Decide which monitor to show the peek preview on
@@ -112,49 +162,36 @@ class WorkspacePeekManager {
 		return WorkspaceManager.shared.focusedScreen()
 	}
 
-	/// Hide all overlays
+	/// Hide the overlay
 	private func hide() {
-		guard !overlayWindows.isEmpty else { return }
-		for overlay in overlayWindows {
-			overlay.hide()
-		}
-		overlayWindows.removeAll()
+		overlayWindow?.hide()
+		overlayWindow = nil
 	}
 
 	// MARK: - Icon fetching
 
-	/// Return deduplicated app icons, in tiling order, for the windows belonging to the given monitor and workspace
-	private func appIcons(inWorkspace workspace: Int, on screen: NSScreen) -> [NSImage] {
+	/// Return the app icons, in tiling order, for the windows belonging to the given monitor and workspace
+	/// Show one icon per window so you can tell how many windows are next to it
+	/// (If the same app has multiple windows open, the same icon appears that many times)
+	private func appIcons(inWorkspace workspace: Int, on screen: NSScreen, windowsByID: [CGWindowID: WindowInfo]) -> [NSImage] {
 		let orderedIDs = WorkspaceManager.shared.windowIDsInTilingOrder(workspace: workspace, on: screen)
 		guard !orderedIDs.isEmpty else { return [] }
 
-		let allWindows = AccessibilityManager.shared.getAllWindows()
-		let windowsByID = Dictionary(uniqueKeysWithValues: allWindows.map { ($0.id, $0) })
-
-		var seenApps = Set<pid_t>()
 		var icons: [NSImage] = []
-
 		for windowID in orderedIDs {
 			guard let window = windowsByID[windowID] else { continue }
-			let pid = window.app.processIdentifier
-
-			// Show only one icon even if the same app has multiple windows
-			guard !seenApps.contains(pid) else { continue }
-			seenApps.insert(pid)
-
 			if let icon = window.app.icon {
 				icons.append(icon)
 			}
 		}
-
 		return icons
 	}
 }
 
 // MARK: - WorkspacePeekOverlayWindow
 
-/// The overlay window responsible for showing the peek preview (one is created per monitor)
-/// To never steal focus, treat it as a non-activating panel and ignore mouse events too
+/// The overlay window responsible for the peek display
+/// To never steal focus, it ignores mouse events and never becomes the key window
 private class WorkspacePeekOverlayWindow: NSWindow {
 
 	private let peekView = WorkspacePeekView()
@@ -177,10 +214,20 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 		self.contentView = peekView
 	}
 
-	/// Show the peek preview on the given monitor
-	func show(on screen: NSScreen, leftIcons: [NSImage], rightIcons: [NSImage]) {
+	/// Doesn't become the key window (doesn't steal focus)
+	override var canBecomeKey: Bool { return false }
+	override var canBecomeMain: Bool { return false }
+
+	/// Show the peek preview centered on the given monitor
+	func show(on screen: NSScreen, leftWorkspace: Int, leftIcons: [NSImage], rightWorkspace: Int, rightIcons: [NSImage]) {
 		self.setFrame(screen.frame, display: true)
-		peekView.update(leftIcons: leftIcons, rightIcons: rightIcons, screenSize: screen.frame.size)
+		peekView.update(
+			leftWorkspace: leftWorkspace,
+			leftIcons: leftIcons,
+			rightWorkspace: rightWorkspace,
+			rightIcons: rightIcons,
+			screenSize: screen.frame.size
+		)
 		self.orderFront(nil)
 	}
 
@@ -192,80 +239,154 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 
 // MARK: - WorkspacePeekView
 
-/// The view that draws the left and right icon panels for the peek preview
+/// A view that draws the two left/right cards at the center of the screen
 private class WorkspacePeekView: NSView {
 
+	// MARK: Layout constants
+
 	/// Icon size
-	private static let iconSize: CGFloat = 40
+	private static let iconSize: CGFloat = 34
 	/// Spacing between icons
-	private static let iconSpacing: CGFloat = 12
-	/// The padding inside the panel
-	private static let panelPadding: CGFloat = 10
-	/// Distance from the screen edge to the panel
-	private static let edgeInset: CGFloat = 16
-	/// The panel's corner radius
-	private static let cornerRadius: CGFloat = 14
+	private static let iconSpacing: CGFloat = 10
+	/// The card's inner padding
+	private static let cardPadding: CGFloat = 14
+	/// Spacing between the label and the icon row
+	private static let labelGap: CGFloat = 10
+	/// The label's height
+	private static let labelHeight: CGFloat = 16
+	/// The card's minimum width
+	private static let cardMinWidth: CGFloat = 132
+	/// Spacing between the left and right cards (this gap indicates the left/right direction)
+	private static let centerGap: CGFloat = 72
+	/// The card's corner radius
+	private static let cornerRadius: CGFloat = 16
 
-	private var leftPanel: NSVisualEffectView?
-	private var rightPanel: NSVisualEffectView?
+	// MARK: Color scheme
 
-	/// Update the left and right icon lists and re-lay them out
-	func update(leftIcons: [NSImage], rightIcons: [NSImage], screenSize: CGSize) {
+	/// The card's background (black #262427)
+	private static let cardBackgroundColor = NSColor(srgbRed: 0x26 / 255.0, green: 0x24 / 255.0, blue: 0x27 / 255.0, alpha: 0.55)
+	/// The card's border (light black #545252)
+	private static let cardBorderColor = NSColor(srgbRed: 0x54 / 255.0, green: 0x52 / 255.0, blue: 0x52 / 255.0, alpha: 0.9)
+	/// Label text (white, #c4c4c4)
+	private static let labelColor = NSColor(srgbRed: 0xc4 / 255.0, green: 0xc4 / 255.0, blue: 0xc4 / 255.0, alpha: 1.0)
+	/// The direction arrow (cyan, #4AAEC8)
+	private static let arrowColor = NSColor(srgbRed: 0x4A / 255.0, green: 0xAE / 255.0, blue: 0xC8 / 255.0, alpha: 1.0)
+
+	private var leftCard: NSView?
+	private var rightCard: NSView?
+
+	/// Update the display content and reposition it
+	func update(leftWorkspace: Int, leftIcons: [NSImage], rightWorkspace: Int, rightIcons: [NSImage], screenSize: CGSize) {
 		subviews.forEach { $0.removeFromSuperview() }
-		leftPanel = nil
-		rightPanel = nil
+		leftCard = nil
+		rightCard = nil
 
 		if !leftIcons.isEmpty {
-			let panel = Self.makePanel(icons: leftIcons)
-			addSubview(panel)
-			leftPanel = panel
+			let card = Self.makeCard(workspace: leftWorkspace, icons: leftIcons, isLeft: true)
+			addSubview(card)
+			leftCard = card
 		}
 		if !rightIcons.isEmpty {
-			let panel = Self.makePanel(icons: rightIcons)
-			addSubview(panel)
-			rightPanel = panel
+			let card = Self.makeCard(workspace: rightWorkspace, icons: rightIcons, isLeft: false)
+			addSubview(card)
+			rightCard = card
 		}
 
-		layoutPanels(screenSize: screenSize)
+		layoutCards(screenSize: screenSize)
 	}
 
-	/// Build a translucent panel for one row of icons (size derived from the icon count, laid out with an explicit frame)
-	private static func makePanel(icons: [NSImage]) -> NSVisualEffectView {
+	/// Build a single card
+	/// - Parameters:
+	///   - workspace: the workspace number (shown in the label)
+	///   - icons: the icons to lay out side by side
+	///   - isLeft: true for the card on the left (changes the arrow direction and alignment)
+	private static func makeCard(workspace: Int, icons: [NSImage], isLeft: Bool) -> NSView {
 		let count = icons.count
-		let width = iconSize + panelPadding * 2
-		let height = CGFloat(count) * iconSize + CGFloat(max(0, count - 1)) * iconSpacing + panelPadding * 2
+		let iconsWidth = CGFloat(count) * iconSize + CGFloat(max(0, count - 1)) * iconSpacing
+		let width = max(cardMinWidth, iconsWidth + cardPadding * 2)
+		let height = cardPadding * 2 + labelHeight + labelGap + iconSize
 
-		let panel = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: width, height: height))
-		panel.material = .hudWindow
-		panel.state = .active
-		panel.blendingMode = .withinWindow
-		panel.wantsLayer = true
-		panel.layer?.cornerRadius = cornerRadius
-		panel.layer?.masksToBounds = true
+		let card = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+		card.material = .hudWindow
+		card.state = .active
+		card.blendingMode = .behindWindow
+		card.wantsLayer = true
+		card.layer?.cornerRadius = cornerRadius
+		card.layer?.masksToBounds = true
+		card.layer?.backgroundColor = cardBackgroundColor.cgColor
+		card.layer?.borderWidth = 1
+		card.layer?.borderColor = cardBorderColor.cgColor
 
-		// NSView's origin is at the bottom-left, so stack from the bottom up to get top-to-bottom ordering
+		// Label (the left card reads "‹ Space N", the right card "Space N ›")
+		let label = NSTextField(labelWithAttributedString: makeLabelText(workspace: workspace, isLeft: isLeft))
+		label.frame = CGRect(
+			x: cardPadding,
+			y: height - cardPadding - labelHeight,
+			width: width - cardPadding * 2,
+			height: labelHeight
+		)
+		label.alignment = isLeft ? .left : .right
+		card.addSubview(label)
+
+		// Icon row (centered within the card)
+		let iconsStartX = (width - iconsWidth) / 2
 		for (index, icon) in icons.enumerated() {
-			let y = height - panelPadding - iconSize - CGFloat(index) * (iconSize + iconSpacing)
-			let imageView = NSImageView(frame: CGRect(x: panelPadding, y: y, width: iconSize, height: iconSize))
+			let x = iconsStartX + CGFloat(index) * (iconSize + iconSpacing)
+			let imageView = NSImageView(frame: CGRect(x: x, y: cardPadding, width: iconSize, height: iconSize))
 			imageView.image = icon
 			imageView.imageScaling = .scaleProportionallyUpOrDown
-			panel.addSubview(imageView)
+			card.addSubview(imageView)
 		}
 
-		return panel
+		return card
 	}
 
-	/// Position the panel vertically centered and aligned to the monitor's edge
-	private func layoutPanels(screenSize: CGSize) {
-		if let panel = leftPanel {
-			var frame = panel.frame
-			frame.origin = CGPoint(x: Self.edgeInset, y: (screenSize.height - frame.height) / 2)
-			panel.frame = frame
+	/// Build the label's decorated string. Color just the arrow cyan to make the direction stand out
+	private static func makeLabelText(workspace: Int, isLeft: Bool) -> NSAttributedString {
+		let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+		let arrowFont = NSFont.systemFont(ofSize: 13, weight: .bold)
+
+		let result = NSMutableAttributedString()
+		let arrow = NSAttributedString(
+			string: isLeft ? "\u{2039}  " : "  \u{203A}",
+			attributes: [.font: arrowFont, .foregroundColor: arrowColor]
+		)
+		let name = NSAttributedString(
+			string: "Space \(workspace)",
+			attributes: [.font: font, .foregroundColor: labelColor]
+		)
+
+		if isLeft {
+			result.append(arrow)
+			result.append(name)
+		} else {
+			result.append(name)
+			result.append(arrow)
 		}
-		if let panel = rightPanel {
-			var frame = panel.frame
-			frame.origin = CGPoint(x: screenSize.width - Self.edgeInset - frame.width, y: (screenSize.height - frame.height) / 2)
-			panel.frame = frame
+		return result
+	}
+
+	/// Place the two cards at the center of the screen, spaced apart on either side
+	/// Even when only one side exists, show it at that side's fixed position so the direction is still readable
+	private func layoutCards(screenSize: CGSize) {
+		let centerX = screenSize.width / 2
+		let centerY = screenSize.height / 2
+
+		if let card = leftCard {
+			var frame = card.frame
+			frame.origin = CGPoint(
+				x: centerX - Self.centerGap / 2 - frame.width,
+				y: centerY - frame.height / 2
+			)
+			card.frame = frame
+		}
+		if let card = rightCard {
+			var frame = card.frame
+			frame.origin = CGPoint(
+				x: centerX + Self.centerGap / 2,
+				y: centerY - frame.height / 2
+			)
+			card.frame = frame
 		}
 	}
 }
