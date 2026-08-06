@@ -76,6 +76,12 @@ class WindowPalettePanel: NSPanel {
 	/// The height of the Display title
 	private let displayTitleHeight: CGFloat = 22
 
+	/// Animation token (for handling re-entrancy)
+	private var animationToken: Int = 0
+
+	/// Whether a hide animation is currently in progress
+	private var isHiding: Bool = false
+
 	// MARK: - Init
 
 	init() {
@@ -129,9 +135,19 @@ class WindowPalettePanel: NSPanel {
 		])
 	}
 
+	/// Set the contentView's layer.anchorPoint to the center (0.5, 0.5) and correct the position accordingly
+	private func setupContentViewLayer() {
+		guard let contentView = self.contentView else { return }
+		contentView.wantsLayer = true
+		guard let layer = contentView.layer else { return }
+		let bounds = layer.bounds
+		layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+		layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+	}
+
 	// MARK: - Public Methods
 
-	/// Set the Display data and show the panel
+	/// Set the Display data and show the panel (with a fade-in and scale-up animation)
 	func showWithDisplays(_ newDisplays: [WindowPaletteDisplay], displayIndex: Int, spaceIndex: Int, itemIndex: Int) {
 		self.displays = newDisplays
 		self.selectedDisplayIndex = displayIndex
@@ -142,7 +158,27 @@ class WindowPalettePanel: NSPanel {
 		updateSelection()
 		positionOnScreen()
 
+		animationToken += 1
+		isHiding = false
+
+		setupContentViewLayer()
+
+		// If currently hidden or at alpha 0, start from the initial state (alpha: 0, scale: 0.96)
+		let isCurrentlyInvisible = !self.isVisible || self.alphaValue == 0
+		if isCurrentlyInvisible {
+			self.alphaValue = 0.0
+			self.contentView?.layer?.transform = CATransform3DMakeScale(0.96, 0.96, 1.0)
+		}
+
 		self.orderFrontRegardless()
+
+		NSAnimationContext.runAnimationGroup { context in
+			context.duration = 0.12
+			context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+			context.allowsImplicitAnimation = true
+			self.animator().alphaValue = 1.0
+			self.contentView?.animator().layer?.transform = CATransform3DIdentity
+		}
 	}
 
 	/// Update the selection position
@@ -153,9 +189,33 @@ class WindowPalettePanel: NSPanel {
 		updateSelection()
 	}
 
-	/// Close the panel
+	/// Close the panel (with a fade-out and scale-down animation)
 	func hidePanel() {
-		self.orderOut(nil)
+		guard self.isVisible && self.alphaValue > 0 else {
+			self.orderOut(nil)
+			return
+		}
+
+		animationToken += 1
+		let currentToken = animationToken
+		isHiding = true
+
+		setupContentViewLayer()
+
+		NSAnimationContext.runAnimationGroup({ context in
+			context.duration = 0.09
+			context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+			context.allowsImplicitAnimation = true
+			self.animator().alphaValue = 0.0
+			self.contentView?.animator().layer?.transform = CATransform3DMakeScale(0.98, 0.98, 1.0)
+		}, completionHandler: { [weak self] in
+			guard let self = self else { return }
+			if self.animationToken == currentToken && self.isHiding {
+				self.orderOut(nil)
+				self.isHiding = false
+				self.contentView?.layer?.transform = CATransform3DIdentity
+			}
+		})
 	}
 
 	// MARK: - Private Methods
