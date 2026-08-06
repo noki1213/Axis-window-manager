@@ -85,30 +85,65 @@ struct WindowInfo: Identifiable, Equatable {
     /// The maximum number of attempts for setting the frame
     private static let frameMaxAttempts = 3
 
+    /// The frame Axis last applied (window ID → frame)
+    /// Because the watchdog and retiling keep rewriting the same layout over and over,
+    /// Skip the AX write entirely when it's "already meant to be there, and actually is there"
+    private static var lastAppliedFrames: [CGWindowID: CGRect] = [:]
+
+    /// Discard the record of the applied frame (e.g. when a window closes)
+    static func forgetAppliedFrame(_ windowID: CGWindowID) {
+        lastAppliedFrames.removeValue(forKey: windowID)
+    }
+
     /// Set the window's position and size
     /// Modeled on AeroSpace's implementation: set size → position → size, in that order.
+    /// Except that when enlarging a window, the position is decided first (see the ordering note below).
     /// It also reads back the actual frame after setting it and re-applies if it drifted from the requested value.
     /// (for apps like Ghostty that round sizes to cell units, setting it just once may not
     /// because it ends up left smaller than its assigned area, not matching what was requested)
     func setFrame(_ newFrame: CGRect) {
+        // Do nothing if it's already at the target position and size, and Axis itself was the one that put it there.
+        // The reason for conditioning on "this app placed it" is that right after it's moved by an external cause,
+        // So it doesn't get mistakenly skipped due to a WindowInfo holding a stale frame
+        if Self.isCloseEnough(frame, newFrame),
+           let applied = Self.lastAppliedFrames[id],
+           Self.isCloseEnough(applied, newFrame) {
+            return
+        }
+
         // Moving a window makes the cached frame stale, so discard it
         AccessibilityManager.shared.invalidateWindowCache()
+
+        // Decides the write order.
+        // When enlarging, writing the size first makes the window — still at its old position — overflow off-screen, and
+        // The app itself can shrink it, so it may not end up at the requested size.
+        // so when expanding, set the position first, then the size
+        let isGrowing = newFrame.width > frame.width + Self.frameTolerance
+            || newFrame.height > frame.height + Self.frameTolerance
 
         // Disable animation (the technique used by AeroSpace/yabai/Rectangle)
         disableAnimations {
             var previousFrame: CGRect?
 
             for attempt in 0..<Self.frameMaxAttempts {
-                // Set the size first (important: it won't be positioned correctly in any other order)
-                setSize(newFrame.size)
-                // Set the position
-                setPosition(newFrame.origin)
-                // Set the size again (needed for some apps)
-                setSize(newFrame.size)
+                if isGrowing {
+                    // Position → size → position
+                    applyPosition(newFrame.origin)
+                    setSize(newFrame.size)
+                    applyPosition(newFrame.origin)
+                } else {
+                    // Size → position → size (some apps need the size set last to take effect)
+                    setSize(newFrame.size)
+                    applyPosition(newFrame.origin)
+                    setSize(newFrame.size)
+                }
 
                 // Read back the frame that was actually applied and verify it
                 guard let actual = Self.getFrame(from: axElement) else { return }
-                if Self.isCloseEnough(actual, newFrame) { return }
+                if Self.isCloseEnough(actual, newFrame) {
+                    Self.lastAppliedFrames[id] = newFrame
+                    return
+                }
 
                 // If the requested size is below the minimum, give up since it can't shrink further
                 if newFrame.width < minSize.width - Self.frameTolerance
@@ -164,10 +199,16 @@ struct WindowInfo: Identifiable, Equatable {
     /// Set the window's position
     func setPosition(_ position: CGPoint) {
         disableAnimations {
-            var pos = position
-            let positionValue = AXValueCreate(.cgPoint, &pos)!
-            AXUIElementSetAttributeValue(axElement, kAXPositionAttribute as CFString, positionValue)
+            applyPosition(position)
         }
+    }
+
+    /// Write only the position to AX (disabling animation is the caller's responsibility)
+    /// Prevents applying the animation-disable twice when called from within setFrame
+    private func applyPosition(_ position: CGPoint) {
+        var pos = position
+        let positionValue = AXValueCreate(.cgPoint, &pos)!
+        AXUIElementSetAttributeValue(axElement, kAXPositionAttribute as CFString, positionValue)
     }
     
     /// Set the window's size
