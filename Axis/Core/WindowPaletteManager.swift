@@ -100,9 +100,10 @@ class WindowPaletteManager {
 
 	/// End palette mode (cancel)
 	func endPalette() {
+		// Close the palette (hide with animation)
 		panel?.hidePanel()
 
-		// Restore the window that was hidden
+		// Restore the window that was hidden (restored immediately, without waiting for the animation to finish)
 		restoreHiddenWindows()
 
 		// If it was carried over from Zen mode, re-tiling and restoring the border are required
