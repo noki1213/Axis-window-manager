@@ -51,6 +51,9 @@ class GapSelectManager: ObservableObject {
 	/// The gap index corresponding to the edge currently being operated on (nil if no edge has been touched yet)
 	@Published var currentGapIndex: Int? = nil
 
+	/// The gap indices for edges the focused window can actually move (used for candidate display)
+	@Published var candidateGapIndices: [Int] = []
+
 	// MARK: - Dependencies
 
 	private let tilingEngine = TilingEngine.shared
@@ -68,6 +71,7 @@ class GapSelectManager: ObservableObject {
 		guard !availableGaps.isEmpty else { return }
 
 		currentGapIndex = nil
+		updateCandidateGapIndices(on: screen)
 
 		// Show the overlay (no highlight yet, since no edge has been touched)
 		showOverlay(on: screen)
@@ -82,6 +86,7 @@ class GapSelectManager: ObservableObject {
 
 		availableGaps = []
 		currentGapIndex = nil
+		candidateGapIndices = []
 
 		// Update the focus border (show it again)
 		BorderManager.shared.updateBorder()
@@ -98,49 +103,14 @@ class GapSelectManager: ObservableObject {
 		calculateGaps(for: screen)
 		guard !availableGaps.isEmpty else { return }
 
-		// Get the currently focused window
-		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-		focusedWindow.refreshFrame()
-
-		let columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
-		guard columns.count > 0 else { return }
-
-		guard let (colIndex, rowIndex) = tilingEngine.findWindowPosition(window: focusedWindow, in: columns) else {
-			return
-		}
-
-		// Find the gap corresponding to the given side of the focused window
-		var targetGapIndex: Int? = nil
-		for (index, gap) in availableGaps.enumerated() {
-			switch edge {
-			case .left:
-				// Vertical gap to the left of this column (colIndex), at index colIndex - 1
-				if gap.type == .vertical && gap.columnIndex == colIndex - 1 {
-					targetGapIndex = index
-				}
-			case .right:
-				// Vertical gap to the right of this column (colIndex), at index colIndex
-				if gap.type == .vertical && gap.columnIndex == colIndex {
-					targetGapIndex = index
-				}
-			case .up:
-				// Horizontal gap between this row and the one above it (rowIndex - 1), at index rowIndex - 1
-				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex - 1 {
-					targetGapIndex = index
-				}
-			case .down:
-				// Horizontal gap between this row and the one below it (rowIndex + 1), at index rowIndex
-				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex {
-					targetGapIndex = index
-				}
-			}
-			if targetGapIndex != nil { break }
-		}
+		// Find the focused window's position and the gap corresponding to the given edge
+		guard let (colIndex, rowIndex) = focusedWindowPosition(on: screen) else { return }
 
 		// Do nothing if it's flush against the screen edge and there's no corresponding gap
-		guard let index = targetGapIndex else { return }
+		guard let index = findGapIndex(edge: edge, colIndex: colIndex, rowIndex: rowIndex) else { return }
 
 		currentGapIndex = index
+		updateCandidateGapIndices(on: screen)
 		let gap = availableGaps[index]
 
 		// Movement amount (pixels)
@@ -173,6 +143,51 @@ class GapSelectManager: ObservableObject {
 	}
 
 	// MARK: - Private Methods
+
+	/// Get the focused window's tiling position (column index, row index)
+	private func focusedWindowPosition(on screen: NSScreen) -> (Int, Int)? {
+		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return nil }
+		focusedWindow.refreshFrame()
+
+		let columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
+		guard columns.count > 0 else { return nil }
+
+		return tilingEngine.findWindowPosition(window: focusedWindow, in: columns)
+	}
+
+	/// Find the gap index corresponding to the focused window's given edge.
+	/// Returns nil for an edge that's flush against the screen edge with no corresponding gap.
+	private func findGapIndex(edge: Direction, colIndex: Int, rowIndex: Int) -> Int? {
+		for (index, gap) in availableGaps.enumerated() {
+			switch edge {
+			case .left:
+				// Vertical gap to the left of this column (colIndex), at index colIndex - 1
+				if gap.type == .vertical && gap.columnIndex == colIndex - 1 { return index }
+			case .right:
+				// Vertical gap to the right of this column (colIndex), at index colIndex
+				if gap.type == .vertical && gap.columnIndex == colIndex { return index }
+			case .up:
+				// Horizontal gap between this row and the one above it (rowIndex - 1), at index rowIndex - 1
+				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex - 1 { return index }
+			case .down:
+				// Horizontal gap between this row and the one below it (rowIndex + 1), at index rowIndex
+				if gap.type == .horizontal && gap.columnIndex == colIndex && gap.rowIndex == rowIndex { return index }
+			}
+		}
+		return nil
+	}
+
+	/// Collect as candidates only the gaps for edges the focused window can actually move
+	private func updateCandidateGapIndices(on screen: NSScreen) {
+		guard let (colIndex, rowIndex) = focusedWindowPosition(on: screen) else {
+			candidateGapIndices = []
+			return
+		}
+
+		candidateGapIndices = [Direction.left, .right, .up, .down].compactMap {
+			findGapIndex(edge: $0, colIndex: colIndex, rowIndex: rowIndex)
+		}
+	}
 
 	/// Get the current screen
 	private func getCurrentScreen() -> NSScreen? {
@@ -277,13 +292,13 @@ class GapSelectManager: ObservableObject {
 			overlayWindow = GapOverlayWindow()
 		}
 
-		overlayWindow?.showOnScreen(screen, gaps: availableGaps, selectedIndex: currentGapIndex)
+		overlayWindow?.showOnScreen(screen, gaps: availableGaps, selectedIndex: currentGapIndex, candidateIndices: candidateGapIndices)
 	}
 
 	/// Update the overlay
 	private func updateOverlay() {
 		guard getCurrentScreen() != nil else { return }
-		overlayWindow?.update(gaps: availableGaps, selectedIndex: currentGapIndex)
+		overlayWindow?.update(gaps: availableGaps, selectedIndex: currentGapIndex, candidateIndices: candidateGapIndices)
 	}
 
 	/// Hide the overlay
