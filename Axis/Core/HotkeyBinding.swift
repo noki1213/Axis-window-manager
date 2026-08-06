@@ -41,8 +41,6 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case resetLayout
 	case resizeIncrease
 	case resizeDecrease
-	// Monitor
-	case monitorCursorCycle
 	// Workspace
 	case workspaceNext
 	case workspacePrev
@@ -61,7 +59,6 @@ enum HotkeySection: String, CaseIterable {
 	case hidden = "Hidden"
 	case modeSwitching = "Modes"
 	case layout = "Layout"
-	case monitor = "Monitor"
 	case workspace = "Workspace"
 	case placementReserve = "Placement Reserve"
 }
@@ -184,7 +181,6 @@ struct HotkeyBinding: Codable, Identifiable {
 		.resetLayout: "Reset Layout",
 		.resizeIncrease: "Enlarge Window",
 		.resizeDecrease: "Shrink Window",
-		.monitorCursorCycle: "Move Cursor to Next Monitor",
 		.workspaceNext: "Next Workspace",
 		.workspacePrev: "Previous Workspace",
 		.moveWindowToNextWorkspace: "Move Window to Next Workspace",
@@ -216,7 +212,6 @@ struct HotkeyBinding: Codable, Identifiable {
 		.resetLayout: .layout,
 		.resizeIncrease: .layout,
 		.resizeDecrease: .layout,
-		.monitorCursorCycle: .monitor,
 		.workspaceNext: .workspace,
 		.workspacePrev: .workspace,
 		.moveWindowToNextWorkspace: .workspace,
@@ -296,8 +291,6 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .resetLayout,     keyCode: kVK_ANSI_R, modifiers: ctrlOpt),
 			HotkeyBinding(action: .resizeIncrease,  keyCode: kVK_ANSI_Equal, modifiers: ctrlOpt),
 			HotkeyBinding(action: .resizeDecrease,  keyCode: kVK_ANSI_Minus, modifiers: ctrlOpt),
-			// Monitor
-			HotkeyBinding(action: .monitorCursorCycle, keyCode: kVK_ANSI_M, modifiers: ctrlOpt),
 			// Workspace
 			HotkeyBinding(action: .workspaceNext, keyCode: kVK_ANSI_O, modifiers: ctrlOpt),
 			HotkeyBinding(action: .workspacePrev, keyCode: kVK_ANSI_U, modifiers: ctrlOpt),

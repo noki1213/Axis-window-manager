@@ -490,12 +490,6 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 
-		// MARK: Monitor
-		case .monitorCursorCycle:
-			DispatchQueue.main.async { [weak self] in
-				self?.cycleMonitorCursor()
-			}
-
 		// MARK: Workspace
 		case .workspaceNext:
 			DispatchQueue.main.async {
@@ -536,35 +530,6 @@ class HotkeyManager: ObservableObject {
 				}
 			}
 		}
-	}
-
-	// MARK: - Monitor Cursor
-
-	/// Move the cursor to the next monitor
-	private func cycleMonitorCursor() {
-		let screens = NSScreen.screens
-		guard screens.count > 1 else { return }
-
-		let currentLocation = NSEvent.mouseLocation
-
-		// Identify the current screen
-		guard let currentScreenIndex = screens.firstIndex(where: { $0.frame.contains(currentLocation) }) else {
-			return
-		}
-
-		// Next screen (cycles)
-		let nextIndex = (currentScreenIndex + 1) % screens.count
-		let nextScreen = screens[nextIndex]
-
-		// Move the cursor to the center of the next screen
-		let centerX = nextScreen.frame.midX
-		let centerY = nextScreen.frame.midY
-
-		// Convert since CGWarpMouseCursorPosition uses a top-left origin
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let warpY = mainScreenHeight - centerY
-
-		CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
 	}
 
 	// MARK: - Gap Select Mode Key Handling
