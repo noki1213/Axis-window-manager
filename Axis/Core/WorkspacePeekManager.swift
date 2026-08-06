@@ -35,17 +35,24 @@ class WorkspacePeekManager {
 
 	// MARK: - Display content
 
+	/// Info for a single window shown in the peek preview (same content as a window palette card)
+	struct PeekItem {
+		let icon: NSImage?
+		let appName: String
+		let windowTitle: String
+	}
+
 	/// The content shown in the peek preview
 	private struct PeekContent {
 		let screen: NSScreen
 		let leftWorkspace: Int
-		let leftIcons: [NSImage]
+		let leftItems: [PeekItem]
 		let rightWorkspace: Int
-		let rightIcons: [NSImage]
+		let rightItems: [PeekItem]
 
 		/// There's no point showing it if both sides are empty
 		var isEmpty: Bool {
-			return leftIcons.isEmpty && rightIcons.isEmpty
+			return leftItems.isEmpty && rightItems.isEmpty
 		}
 	}
 
@@ -122,9 +129,9 @@ class WorkspacePeekManager {
 		preparedContent = PeekContent(
 			screen: screen,
 			leftWorkspace: leftWS,
-			leftIcons: appIcons(inWorkspace: leftWS, on: screen, windowsByID: windowsByID),
+			leftItems: peekItems(inWorkspace: leftWS, on: screen, windowsByID: windowsByID),
 			rightWorkspace: rightWS,
-			rightIcons: appIcons(inWorkspace: rightWS, on: screen, windowsByID: windowsByID)
+			rightItems: peekItems(inWorkspace: rightWS, on: screen, windowsByID: windowsByID)
 		)
 	}
 
@@ -140,9 +147,9 @@ class WorkspacePeekManager {
 		overlay.show(
 			on: content.screen,
 			leftWorkspace: content.leftWorkspace,
-			leftIcons: content.leftIcons,
+			leftItems: content.leftItems,
 			rightWorkspace: content.rightWorkspace,
-			rightIcons: content.rightIcons
+			rightItems: content.rightItems
 		)
 		overlayWindow = overlay
 	}
@@ -168,23 +175,25 @@ class WorkspacePeekManager {
 		overlayWindow = nil
 	}
 
-	// MARK: - Icon fetching
+	// MARK: - Fetching display items
 
-	/// Return the app icons, in tiling order, for the windows belonging to the given monitor and workspace
-	/// Show one icon per window so you can tell how many windows are next to it
+	/// Return the windows belonging to the given monitor and workspace, one at a time, in tiling order
+	/// Emit one entry per window, so it's clear how many windows are next to it
 	/// (If the same app has multiple windows open, the same icon appears that many times)
-	private func appIcons(inWorkspace workspace: Int, on screen: NSScreen, windowsByID: [CGWindowID: WindowInfo]) -> [NSImage] {
+	private func peekItems(inWorkspace workspace: Int, on screen: NSScreen, windowsByID: [CGWindowID: WindowInfo]) -> [PeekItem] {
 		let orderedIDs = WorkspaceManager.shared.windowIDsInTilingOrder(workspace: workspace, on: screen)
 		guard !orderedIDs.isEmpty else { return [] }
 
-		var icons: [NSImage] = []
+		var items: [PeekItem] = []
 		for windowID in orderedIDs {
 			guard let window = windowsByID[windowID] else { continue }
-			if let icon = window.app.icon {
-				icons.append(icon)
-			}
+			items.append(PeekItem(
+				icon: window.app.icon,
+				appName: window.app.localizedName ?? "",
+				windowTitle: window.title
+			))
 		}
-		return icons
+		return items
 	}
 }
 
@@ -219,13 +228,13 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 	override var canBecomeMain: Bool { return false }
 
 	/// Show the peek preview centered on the given monitor
-	func show(on screen: NSScreen, leftWorkspace: Int, leftIcons: [NSImage], rightWorkspace: Int, rightIcons: [NSImage]) {
+	func show(on screen: NSScreen, leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem]) {
 		self.setFrame(screen.frame, display: true)
 		peekView.update(
 			leftWorkspace: leftWorkspace,
-			leftIcons: leftIcons,
+			leftItems: leftItems,
 			rightWorkspace: rightWorkspace,
-			rightIcons: rightIcons,
+			rightItems: rightItems,
 			screenSize: screen.frame.size
 		)
 		self.orderFront(nil)
@@ -244,22 +253,22 @@ private class WorkspacePeekView: NSView {
 
 	// MARK: Layout constants
 
-	/// Icon size
-	private static let iconSize: CGFloat = 34
-	/// Spacing between icons
-	private static let iconSpacing: CGFloat = 10
-	/// The card's inner padding
+	/// The spacing between individual window cards
+	private static let itemSpacing: CGFloat = 8
+	/// The padding inside the panel
 	private static let cardPadding: CGFloat = 14
-	/// Spacing between the label and the icon row
+	/// The spacing between the label and the card row
 	private static let labelGap: CGFloat = 10
 	/// The label's height
 	private static let labelHeight: CGFloat = 16
-	/// The card's minimum width
+	/// The panel's minimum width
 	private static let cardMinWidth: CGFloat = 132
-	/// Spacing between the left and right cards (this gap indicates the left/right direction)
+	/// The gap between the left and right panels (this space indicates the left/right direction)
 	private static let centerGap: CGFloat = 72
-	/// The card's corner radius
+	/// The panel's corner radius
 	private static let cornerRadius: CGFloat = 16
+	/// The minimum margin to leave at the screen's left and right edges
+	private static let screenMargin: CGFloat = 24
 
 	// MARK: Color scheme
 
@@ -276,18 +285,21 @@ private class WorkspacePeekView: NSView {
 	private var rightCard: NSView?
 
 	/// Update the display content and reposition it
-	func update(leftWorkspace: Int, leftIcons: [NSImage], rightWorkspace: Int, rightIcons: [NSImage], screenSize: CGSize) {
+	func update(leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem], screenSize: CGSize) {
 		subviews.forEach { $0.removeFromSuperview() }
 		leftCard = nil
 		rightCard = nil
 
-		if !leftIcons.isEmpty {
-			let card = Self.makeCard(workspace: leftWorkspace, icons: leftIcons, isLeft: true)
+		// The width available on one side (half the screen, minus the center gap and the screen-edge margin)
+		let availableWidth = screenSize.width / 2 - Self.centerGap / 2 - Self.screenMargin
+
+		if !leftItems.isEmpty {
+			let card = Self.makeCard(workspace: leftWorkspace, items: leftItems, isLeft: true, maxWidth: availableWidth)
 			addSubview(card)
 			leftCard = card
 		}
-		if !rightIcons.isEmpty {
-			let card = Self.makeCard(workspace: rightWorkspace, icons: rightIcons, isLeft: false)
+		if !rightItems.isEmpty {
+			let card = Self.makeCard(workspace: rightWorkspace, items: rightItems, isLeft: false, maxWidth: availableWidth)
 			addSubview(card)
 			rightCard = card
 		}
@@ -295,16 +307,26 @@ private class WorkspacePeekView: NSView {
 		layoutCards(screenSize: screenSize)
 	}
 
-	/// Build a single card
+	/// Build the panel for a single workspace
+	/// Lay out cards inside identical to the window palette's (icon + app name + window title), side by side
 	/// - Parameters:
 	///   - workspace: the workspace number (shown in the label)
-	///   - icons: the icons to lay out side by side
-	///   - isLeft: true for the card on the left (changes the arrow direction and alignment)
-	private static func makeCard(workspace: Int, icons: [NSImage], isLeft: Bool) -> NSView {
-		let count = icons.count
-		let iconsWidth = CGFloat(count) * iconSize + CGFloat(max(0, count - 1)) * iconSpacing
-		let width = max(cardMinWidth, iconsWidth + cardPadding * 2)
-		let height = cardPadding * 2 + labelHeight + labelGap + iconSize
+	///   - items: the windows to lay out (in tiling order)
+	///   - isLeft: true for the panel on the left (changes the arrow direction and alignment)
+	///   - maxWidth: the max width available to this panel. Cards beyond it aren't laid out
+	private static func makeCard(workspace: Int, items: [WorkspacePeekManager.PeekItem], isLeft: Bool, maxWidth: CGFloat) -> NSView {
+		let itemWidth = WindowPaletteItemView.cardWidth
+		let itemHeight = WindowPaletteItemView.cardHeight
+
+		// Lay out only as many as fit within the width (drop whatever doesn't fit)
+		let usableWidth = max(itemWidth, maxWidth - cardPadding * 2)
+		let maxCount = max(1, Int((usableWidth + itemSpacing) / (itemWidth + itemSpacing)))
+		let shownItems = Array(items.prefix(maxCount))
+
+		let count = shownItems.count
+		let itemsWidth = CGFloat(count) * itemWidth + CGFloat(max(0, count - 1)) * itemSpacing
+		let width = max(cardMinWidth, itemsWidth + cardPadding * 2)
+		let height = cardPadding * 2 + labelHeight + labelGap + itemHeight
 
 		let card = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: width, height: height))
 		card.material = .hudWindow
@@ -317,8 +339,10 @@ private class WorkspacePeekView: NSView {
 		card.layer?.borderWidth = 1
 		card.layer?.borderColor = cardBorderColor.cgColor
 
-		// Label (the left card reads "‹ Space N", the right card "Space N ›")
-		let label = NSTextField(labelWithAttributedString: makeLabelText(workspace: workspace, isLeft: isLeft))
+		// Label (left reads "‹ Space N", right reads "Space N ›").
+		// If some cards didn't fit, append "+N" at the end
+		let hiddenCount = items.count - count
+		let label = NSTextField(labelWithAttributedString: makeLabelText(workspace: workspace, isLeft: isLeft, hiddenCount: hiddenCount))
 		label.frame = CGRect(
 			x: cardPadding,
 			y: height - cardPadding - labelHeight,
@@ -328,21 +352,21 @@ private class WorkspacePeekView: NSView {
 		label.alignment = isLeft ? .left : .right
 		card.addSubview(label)
 
-		// Icon row (centered within the card)
-		let iconsStartX = (width - iconsWidth) / 2
-		for (index, icon) in icons.enumerated() {
-			let x = iconsStartX + CGFloat(index) * (iconSize + iconSpacing)
-			let imageView = NSImageView(frame: CGRect(x: x, y: cardPadding, width: iconSize, height: iconSize))
-			imageView.image = icon
-			imageView.imageScaling = .scaleProportionallyUpOrDown
-			card.addSubview(imageView)
+		// The row of window cards (centered within the panel)
+		let itemsStartX = (width - itemsWidth) / 2
+		for (index, item) in shownItems.enumerated() {
+			let x = itemsStartX + CGFloat(index) * (itemWidth + itemSpacing)
+			let itemView = WindowPaletteItemView(frame: CGRect(x: x, y: cardPadding, width: itemWidth, height: itemHeight))
+			itemView.configure(icon: item.icon, appName: item.appName, windowTitle: item.windowTitle)
+			card.addSubview(itemView)
 		}
 
 		return card
 	}
 
 	/// Build the label's decorated string. Color just the arrow cyan to make the direction stand out
-	private static func makeLabelText(workspace: Int, isLeft: Bool) -> NSAttributedString {
+	/// - Parameter hiddenCount: the number of windows that didn't fit and weren't laid out (nothing is appended if 0)
+	private static func makeLabelText(workspace: Int, isLeft: Bool, hiddenCount: Int) -> NSAttributedString {
 		let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
 		let arrowFont = NSFont.systemFont(ofSize: 13, weight: .bold)
 
@@ -351,8 +375,12 @@ private class WorkspacePeekView: NSView {
 			string: isLeft ? "\u{2039}  " : "  \u{203A}",
 			attributes: [.font: arrowFont, .foregroundColor: arrowColor]
 		)
+		var nameText = "Space \(workspace)"
+		if hiddenCount > 0 {
+			nameText += "  +\(hiddenCount)"
+		}
 		let name = NSAttributedString(
-			string: "Space \(workspace)",
+			string: nameText,
 			attributes: [.font: font, .foregroundColor: labelColor]
 		)
 

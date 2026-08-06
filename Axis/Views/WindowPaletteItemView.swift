@@ -93,7 +93,7 @@ class WindowPaletteItemView: NSView {
 	func configure(icon: NSImage?, appName: String, windowTitle: String) {
 		iconImageView.image = icon
 		appNameLabel.stringValue = appName
-		titleLabel.stringValue = windowTitle.isEmpty ? "(タイトルなし)" : windowTitle
+		titleLabel.stringValue = windowTitle.isEmpty ? "No title" : windowTitle
 	}
 
 	// MARK: - Drawing
