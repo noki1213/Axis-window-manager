@@ -52,6 +52,9 @@ class PlacementReservationManager {
 	/// The preview overlay window (reused)
 	private var previewWindow: PlacementPreviewOverlayWindow?
 
+	/// A flag for whether the pre-placement layout has been applied
+	private var isLayoutApplied: Bool = false
+
 	/// A callback to tell the caller (HotkeyManager) that the wait was cleared automatically
 	var onAwaitingCanceled: (() -> Void)?
 
@@ -78,12 +81,20 @@ class PlacementReservationManager {
 
 	/// Cancel the reservation (Ctrl+Opt+N was pressed again, it timed out, etc.)
 	func cancel() {
+		let targetScreen = current?.screen
+		let shouldRestoreTile = isLayoutApplied
+		isLayoutApplied = false
+
 		pendingFocusSnapshot = nil
 		current = nil
 		timeoutWorkItem?.cancel()
 		timeoutWorkItem = nil
 		BorderManager.shared.setDashed(false)
 		hidePreview()
+
+		if shouldRestoreTile, let screen = targetScreen {
+			TilingEngine.shared.tile(on: screen)
+		}
 	}
 
 	// MARK: - Confirm
@@ -103,7 +114,9 @@ class PlacementReservationManager {
 				return
 			}
 			current = PendingReservation(kind: .float, screen: screen, columnIndex: 0)
-			showPreview(kind: .float, screen: screen, columnIndex: 0)
+			isLayoutApplied = false
+			let axFrame = Self.previewFrame(kind: .float, screen: screen, columnIndex: 0)
+			showPreview(axFrame: axFrame)
 
 		case .aboveInColumn, .belowInColumn, .newColumnLeft, .newColumnRight:
 			// A within-column or column-relative reservation can't be resolved without a known focus position
@@ -112,7 +125,14 @@ class PlacementReservationManager {
 				return
 			}
 			current = PendingReservation(kind: kind, screen: snapshot.screen, columnIndex: snapshot.columnIndex)
-			showPreview(kind: kind, screen: snapshot.screen, columnIndex: snapshot.columnIndex)
+			if let axFrame = TilingEngine.shared.applyReservedSlotLayout(columnIndex: snapshot.columnIndex, kind: kind, on: snapshot.screen) {
+				isLayoutApplied = true
+				showPreview(axFrame: axFrame)
+			} else {
+				isLayoutApplied = false
+				let axFrame = Self.previewFrame(kind: kind, screen: snapshot.screen, columnIndex: snapshot.columnIndex)
+				showPreview(axFrame: axFrame)
+			}
 		}
 
 		scheduleTimeout()
@@ -149,6 +169,7 @@ class PlacementReservationManager {
 			)
 		}
 
+		isLayoutApplied = false
 		cancel() // 一度きりの予約なので消費したら解除する（プレビューも消える）
 		return true
 	}
@@ -186,8 +207,7 @@ class PlacementReservationManager {
 	// MARK: - Preview display
 
 	/// After confirming: show the chosen destination with a dotted border
-	private func showPreview(kind: PlacementReservationKind, screen: NSScreen, columnIndex: Int) {
-		let axFrame = Self.previewFrame(kind: kind, screen: screen, columnIndex: columnIndex)
+	private func showPreview(axFrame: CGRect) {
 		let screenRect = Self.toScreenRect(axFrame)
 
 		if previewWindow == nil {
