@@ -449,7 +449,7 @@ class WindowPaletteManager {
 
 					let item = WindowPaletteItem(
 						windowID: windowID,
-						appName: windowInfo.app.localizedName ?? "不明なアプリ",
+						appName: windowInfo.app.localizedName ?? "Unknown App",
 						windowTitle: windowInfo.title,
 						appIcon: windowInfo.app.icon,
 						workspace: workspace,
@@ -519,7 +519,7 @@ class WindowPaletteManager {
 
 			let item = WindowPaletteItem(
 				windowID: window.id,
-				appName: window.app.localizedName ?? "不明なアプリ",
+				appName: window.app.localizedName ?? "Unknown App",
 				windowTitle: window.title,
 				appIcon: window.app.icon,
 				workspace: -1,
@@ -541,7 +541,7 @@ class WindowPaletteManager {
 			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
 			let item = WindowPaletteItem(
 				windowID: record.windowID,
-				appName: windowInfo.app.localizedName ?? "不明なアプリ",
+				appName: windowInfo.app.localizedName ?? "Unknown App",
 				windowTitle: windowInfo.title,
 				appIcon: windowInfo.app.icon,
 				workspace: -3,

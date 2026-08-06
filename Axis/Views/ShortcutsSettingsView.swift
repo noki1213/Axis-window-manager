@@ -36,7 +36,7 @@ struct ShortcutsSettingsView: View {
 			// Reset-to-default button
 			HStack {
 				Spacer()
-				Button("デフォルトに戻す") {
+				Button("Reset to Defaults") {
 					store.resetToDefaults()
 					HotkeyManager.shared.reloadBindings()
 				}
@@ -45,8 +45,8 @@ struct ShortcutsSettingsView: View {
 		}
 		.alert(item: $conflictAlert) { info in
 			Alert(
-				title: Text("キーの重複"),
-				message: Text("\(info.conflictingDisplayName) で既に使用されています。"),
+				title: Text("Key Already Assigned"),
+				message: Text("Already used by \(info.conflictingDisplayName)."),
 				dismissButton: .default(Text("OK"))
 			)
 		}
