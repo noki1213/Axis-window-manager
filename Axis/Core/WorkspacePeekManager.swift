@@ -152,17 +152,16 @@ class WorkspacePeekManager {
 
 		guard let content = preparedContent, !content.isEmpty else { return }
 
-		hide()
-
-		let overlay = WorkspacePeekOverlayWindow()
-		overlay.show(
+		if overlayWindow == nil {
+			overlayWindow = WorkspacePeekOverlayWindow()
+		}
+		overlayWindow?.show(
 			on: content.screen,
 			leftWorkspace: content.leftWorkspace,
 			leftItems: content.leftItems,
 			rightWorkspace: content.rightWorkspace,
 			rightItems: content.rightItems
 		)
-		overlayWindow = overlay
 	}
 
 	/// Decide which monitor to show the peek preview on
@@ -183,7 +182,6 @@ class WorkspacePeekManager {
 	/// Hide the overlay
 	private func hide() {
 		overlayWindow?.hide()
-		overlayWindow = nil
 	}
 
 	// MARK: - Fetching display items
@@ -216,6 +214,12 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 
 	private let peekView = WorkspacePeekView()
 
+	/// Animation token (for handling re-entrancy)
+	private var animationToken: Int = 0
+
+	/// Whether a hide animation is currently in progress
+	private var isHiding: Bool = false
+
 	init() {
 		super.init(
 			contentRect: .zero,
@@ -238,7 +242,17 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 	override var canBecomeKey: Bool { return false }
 	override var canBecomeMain: Bool { return false }
 
-	/// Show the peek preview centered on the given monitor
+	/// Set the contentView's layer.anchorPoint to the center (0.5, 0.5) and correct the position accordingly
+	private func setupContentViewLayer() {
+		guard let contentView = self.contentView else { return }
+		contentView.wantsLayer = true
+		guard let layer = contentView.layer else { return }
+		let bounds = layer.bounds
+		layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+		layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+	}
+
+	/// Show the peek preview centered on the given monitor (with a fade-in and scale-up animation)
 	func show(on screen: NSScreen, leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem]) {
 		self.setFrame(screen.frame, display: true)
 		peekView.update(
@@ -248,12 +262,57 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 			rightItems: rightItems,
 			screenSize: screen.frame.size
 		)
+
+		animationToken += 1
+		isHiding = false
+
+		setupContentViewLayer()
+
+		// If currently hidden or at alpha 0, start from the initial state (alpha: 0, scale: 0.96)
+		let isCurrentlyInvisible = !self.isVisible || self.alphaValue == 0
+		if isCurrentlyInvisible {
+			self.alphaValue = 0.0
+			self.contentView?.layer?.transform = CATransform3DMakeScale(0.96, 0.96, 1.0)
+		}
+
 		self.orderFront(nil)
+
+		NSAnimationContext.runAnimationGroup { context in
+			context.duration = 0.12
+			context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+			context.allowsImplicitAnimation = true
+			self.animator().alphaValue = 1.0
+			self.contentView?.animator().layer?.transform = CATransform3DIdentity
+		}
 	}
 
-	/// Hide the overlay
+	/// Hide the overlay (with a fade-out and scale-down animation)
 	func hide() {
-		self.orderOut(nil)
+		guard self.isVisible && self.alphaValue > 0 else {
+			self.orderOut(nil)
+			return
+		}
+
+		animationToken += 1
+		let currentToken = animationToken
+		isHiding = true
+
+		setupContentViewLayer()
+
+		NSAnimationContext.runAnimationGroup({ context in
+			context.duration = 0.09
+			context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+			context.allowsImplicitAnimation = true
+			self.animator().alphaValue = 0.0
+			self.contentView?.animator().layer?.transform = CATransform3DMakeScale(0.98, 0.98, 1.0)
+		}, completionHandler: { [weak self] in
+			guard let self = self else { return }
+			if self.animationToken == currentToken && self.isHiding {
+				self.orderOut(nil)
+				self.isHiding = false
+				self.contentView?.layer?.transform = CATransform3DIdentity
+			}
+		})
 	}
 }
 
