@@ -24,6 +24,10 @@ class WorkspacePeekManager {
 	/// Whether exactly Ctrl+Option is currently held
 	private var isModifierHeld = false
 
+	/// Whether to stop showing the peek preview for the rest of this key-hold
+	/// Used so that once a shortcut has been used, it isn't shown again until the modifier key is released
+	private var isSuppressedUntilRelease = false
+
 	/// The delayed task waiting to show it
 	private var pendingShowWorkItem: DispatchWorkItem?
 
@@ -69,10 +73,12 @@ class WorkspacePeekManager {
 			// Do nothing if it's already recognized as being held down
 			guard !isModifierHeld else { return }
 			isModifierHeld = true
+			isSuppressedUntilRelease = false
 			prepareContent()
 			scheduleShow()
 		} else {
 			isModifierHeld = false
+			isSuppressedUntilRelease = false
 			cancelPendingShow()
 			preparedContent = nil
 			hide()
@@ -81,21 +87,13 @@ class WorkspacePeekManager {
 
 	/// Called when a normal key input (i.e. a shortcut operation) occurs
 	/// Cancel the scheduled peek preview, and dismiss it immediately if it's currently showing.
-	/// However, if Ctrl+Option is still held down, regather the content and schedule it to show again
-	/// (While held down for continuous operation it stays hidden each time, and reappears once your hand stops)
+	/// Furthermore, don't show it again until the modifier key is released.
+	/// With a usage pattern of holding down the modifier key (a layer key on cornix) while continuing to operate,
+	/// Because the peek preview popping up every time your hand pauses gets in the way
 	func cancelDueToKeyPress() {
 		cancelPendingShow()
 		hide()
-
-		if isModifierHeld {
-			// The operation may have changed the workspace or window layout, so gather it again.
-			// Right after key handling the change may not have taken effect yet, so defer to the next loop
-			DispatchQueue.main.async { [weak self] in
-				guard let self = self, self.isModifierHeld else { return }
-				self.prepareContent()
-			}
-			scheduleShow()
-		}
+		isSuppressedUntilRelease = true
 	}
 
 	// MARK: - Display control
@@ -143,6 +141,9 @@ class WorkspacePeekManager {
 	private func show() {
 		// Do nothing if the modifier key was released before it got shown (a just-in-case double check)
 		guard isModifierHeld else { return }
+
+		// Don't show it if a shortcut was used even once during this key-hold
+		guard !isSuppressedUntilRelease else { return }
 
 		// Don't show it while another overlay, like the window palette or gap mode, is up, since they'd overlap.
 		// Ctrl+Option stays held down even after opening the palette, so without this check
