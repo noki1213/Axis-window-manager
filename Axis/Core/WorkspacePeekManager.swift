@@ -14,8 +14,12 @@ import AppKit
 class WorkspacePeekManager {
 	static let shared = WorkspacePeekManager()
 
-	/// The delay before showing (to avoid false triggers). Tune this one value to adjust the feel
-	static let showDelay: TimeInterval = 0.08
+	/// The delay before it's shown. Adjusted to taste, so only this needs to change.
+	/// Since Ctrl+Option is the prefix for every shortcut, if it's too short, within the same space
+	/// The peek preview would show up every time, even for a plain focus move.
+	/// Set longer than the interval for typing a normal shortcut, so it's deliberately treated as being held down
+	/// Set up to only appear when that happens
+	static let showDelay: TimeInterval = 0.4
 
 	/// Whether exactly Ctrl+Option is currently held
 	private var isModifierHeld = false
@@ -139,6 +143,12 @@ class WorkspacePeekManager {
 	private func show() {
 		// Do nothing if the modifier key was released before it got shown (a just-in-case double check)
 		guard isModifierHeld else { return }
+
+		// Don't show it while another overlay, like the window palette or gap mode, is up, since they'd overlap.
+		// Ctrl+Option stays held down even after opening the palette, so without this check
+		// After 400ms the peek preview ends up overlapping the palette
+		guard HotkeyManager.shared.currentMode == .normal else { return }
+
 		guard let content = preparedContent, !content.isEmpty else { return }
 
 		hide()
