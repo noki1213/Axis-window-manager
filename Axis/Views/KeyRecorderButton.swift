@@ -119,7 +119,7 @@ class KeyRecorderNSView: NSView {
 		isRecording = true
 		HotkeyManager.shared.isRecordingHotkey = true
 
-		label.stringValue = "キーを押してください..."
+		label.stringValue = "Press a key..."
 		label.textColor = NSColor.systemOrange
 		backgroundBox.borderColor = NSColor.systemOrange
 		backgroundBox.fillColor = NSColor.systemOrange.withAlphaComponent(0.1)

@@ -56,13 +56,13 @@ enum HotkeyAction: String, Codable, CaseIterable {
 
 /// The section grouping in the settings screen
 enum HotkeySection: String, CaseIterable {
-	case focusAndMove = "フォーカス / ウィンドウ移動"
+	case focusAndMove = "Focus / Move Window"
 	case float = "Float"
 	case hidden = "Hidden"
-	case modeSwitching = "モード切り替え"
-	case layout = "レイアウト"
-	case monitor = "モニター"
-	case workspace = "ワークスペース"
+	case modeSwitching = "Modes"
+	case layout = "Layout"
+	case monitor = "Monitor"
+	case workspace = "Workspace"
 	case placementReserve = "Placement Reserve"
 }
 
@@ -163,32 +163,32 @@ struct HotkeyBinding: Codable, Identifiable {
 	// MARK: - Action name dictionary
 
 	static let actionDisplayNames: [HotkeyAction: String] = [
-		.focusLeft: "左にフォーカス移動",
-		.focusRight: "右にフォーカス移動",
-		.focusUp: "上にフォーカス移動",
-		.focusDown: "下にフォーカス移動",
-		.moveWindowLeft: "左にウィンドウ移動",
-		.moveWindowRight: "右にウィンドウ移動",
-		.moveWindowUp: "上にウィンドウ移動",
-		.moveWindowDown: "下にウィンドウ移動",
-		.stepMoveLeft: "左へ1ステップ移動（合流/分離）",
-		.stepMoveRight: "右へ1ステップ移動（合流/分離）",
+		.focusLeft: "Focus Left",
+		.focusRight: "Focus Right",
+		.focusUp: "Focus Up",
+		.focusDown: "Focus Down",
+		.moveWindowLeft: "Move Window Left",
+		.moveWindowRight: "Move Window Right",
+		.moveWindowUp: "Move Window Up",
+		.moveWindowDown: "Move Window Down",
+		.stepMoveLeft: "Step Move Left (Merge / Split)",
+		.stepMoveRight: "Step Move Right (Merge / Split)",
 		.floatToggle: "Float ON/OFF",
-		.floatFocusCycle: "Floatウィンドウにフォーカス",
-		.raiseFloatingWindows: "浮遊ウィンドウを最前面へ",
-		.hideWindow: "ウィンドウを隠す",
-		.unhideLastWindow: "最後に隠したウィンドウを復元",
-		.zenToggle: "Zen モード ON/OFF",
-		.gapSelectMode: "Gap Select モード",
-		.windowPaletteMode: "Window Palette モード",
-		.resetLayout: "レイアウトをリセット",
-		.resizeIncrease: "ウィンドウを拡大",
-		.resizeDecrease: "ウィンドウを縮小",
-		.monitorCursorCycle: "カーソルを次のモニターへ",
-		.workspaceNext: "次のワークスペース",
-		.workspacePrev: "前のワークスペース",
-		.moveWindowToNextWorkspace: "ウィンドウを次のワークスペースへ",
-		.moveWindowToPrevWorkspace: "ウィンドウを前のワークスペースへ",
+		.floatFocusCycle: "Focus Float Window",
+		.raiseFloatingWindows: "Raise Floating Windows",
+		.hideWindow: "Hide Window",
+		.unhideLastWindow: "Restore Last Hidden Window",
+		.zenToggle: "Zen Mode ON/OFF",
+		.gapSelectMode: "Gap Adjust Mode",
+		.windowPaletteMode: "Window Palette Mode",
+		.resetLayout: "Reset Layout",
+		.resizeIncrease: "Enlarge Window",
+		.resizeDecrease: "Shrink Window",
+		.monitorCursorCycle: "Move Cursor to Next Monitor",
+		.workspaceNext: "Next Workspace",
+		.workspacePrev: "Previous Workspace",
+		.moveWindowToNextWorkspace: "Move Window to Next Workspace",
+		.moveWindowToPrevWorkspace: "Move Window to Previous Workspace",
 		.placementReserve: "Placement Reserve (Await Next Key)",
 	]
 

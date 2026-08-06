@@ -20,19 +20,19 @@ struct StartupGuideView: View {
 				.foregroundColor(.accentColor)
 
 			// Title
-			Text("Axis を開始する前に")
+			Text("Before You Start Axis")
 				.font(.title2)
 				.fontWeight(.bold)
 
 			// Description text
 			VStack(alignment: .center, spacing: 16) {
-				Text("Axis は macOS の仮想デスクトップを\nまたいでウィンドウを管理できません。")
+				Text("Axis cannot manage windows\nacross multiple macOS virtual desktops.")
 					.foregroundColor(.secondary)
 					.multilineTextAlignment(.center)
 					.lineLimit(nil)
 					.fixedSize(horizontal: false, vertical: true)
 
-				Text("すべてのウィンドウを1つのデスクトップに\n移動してから続行してください。")
+				Text("Please move all windows to a single desktop\nbefore continuing.")
 					.multilineTextAlignment(.center)
 					.lineLimit(nil)
 					.fixedSize(horizontal: false, vertical: true)
@@ -43,7 +43,7 @@ struct StartupGuideView: View {
 			// Continue button
 			Button(action: onContinue) {
 				HStack {
-					Text("準備できました")
+					Text("Ready")
 					Text("(Enter)")
 						.foregroundColor(.secondary)
 				}
