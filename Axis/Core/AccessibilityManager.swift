@@ -72,15 +72,26 @@ class AccessibilityManager: ObservableObject {
 
         let perfStart = now
 
-        var windows: [WindowInfo] = []
         let runningApps = NSWorkspace.shared.runningApplications.filter {
             $0.activationPolicy == .regular
         }
 
-        for app in runningApps {
-            let appWindows = getWindows(for: app)
-            windows.append(contentsOf: appWindows)
+        // Run the per-app AX queries in parallel.
+        // Running them serially means a slow-responding app (measured: Activity Monitor at 187ms, Outlook at 149ms)
+        // The wait times just summed up, adding up to 25-390ms overall.
+        // Running them in parallel cuts the wait down to just the slowest single app.
+        // Write results back by index to preserve the original app order
+        var results = [[WindowInfo]](repeating: [], count: runningApps.count)
+        if !runningApps.isEmpty {
+            let lock = NSLock()
+            DispatchQueue.concurrentPerform(iterations: runningApps.count) { index in
+                let appWindows = self.getWindows(for: runningApps[index])
+                lock.lock()
+                results[index] = appWindows
+                lock.unlock()
+            }
         }
+        let windows = results.flatMap { $0 }
 
         // Record windows that disappeared since the last scan (for diagnostics).
         // A genuine close also shows up here, but if it appears right before "assigned the whole screen,"
