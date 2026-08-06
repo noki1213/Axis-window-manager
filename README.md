@@ -14,11 +14,11 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Focus Follows Mouse: Automatically focus and raise the window under the mouse pointer (delay adjustable in Settings, can be turned off).
 - Floating Windows on Top: Dialogs and floating windows are automatically kept above tiled windows. A rescue shortcut brings them all to the front at once.
 - Zen Mode: Focus on a single window by centering it and hiding others (distraction-free).
-- Gap Adjustment: Enter a mode where each key directly drives one edge of the focused window, growing or shrinking it on the spot.
+- Gap Adjustment: Enter a mode where each key directly drives one edge of the focused window, growing or shrinking it on the spot. The edges you can actually move are outlined as you enter.
 - Hide / Restore Windows: Hide the focused window out of the tiling layout, and restore it later next to where it used to sit.
 - Placement Reservation: Decide where the next new window will land — stacked in the current column, a new column to the side, or floating — before it even opens.
 - Window Palette: Quickly switch between windows across all workspaces.
-- Workspace Peek: Hold Ctrl+Option to preview the app icons of the adjacent workspaces at each monitor's edges.
+- Workspace Peek: Hold Ctrl+Option to preview the adjacent workspaces as two cards in the middle of the screen.
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
 - Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
@@ -64,7 +64,9 @@ If the key combination is already used by another action, a conflict warning wil
 
 ### Gap Adjustment
 - Enters a mode where each key directly controls one edge (left / right / top / bottom) of the focused window
+- On entering, the edges that can actually be moved are drawn as faint lines, so you can see the mode is active and which edges are available — edges sitting against the screen border have nothing to move and are not shown
 - Pressing the key expands that edge outward; holding Shift shrinks it inward
+- The edge you are currently driving is highlighted with a thicker line
 - No select-then-confirm step — each key press immediately moves the edge, and you can keep adjusting different edges in sequence
 - Press Return or Escape to exit
 
@@ -87,16 +89,15 @@ If the key combination is already used by another action, a conflict warning wil
 
 ### Workspace Peek
 - Hold down Ctrl+Option (with no other key) to preview the adjacent workspaces
-- App icons for the left-neighbor and right-neighbor workspace appear at the left and right edges of each monitor
-- Releasing the modifiers, or pressing any other key, dismisses the preview immediately
+- Two cards appear in the middle of the monitor — the left-neighbor workspace on the left, the right-neighbor on the right — each listing its windows with the same app icon, app name and window title as the Window Palette
+- It appears after a short hold, so the modifiers used as a prefix for ordinary shortcuts do not trigger it
+- Releasing the modifiers or pressing any other key dismisses it; once you have fired a shortcut, it stays hidden until you release the modifiers
+- It is not shown while another mode is active
 
 ### Workspace Management
 - Switch to next/previous workspace
 - Move the focused window to next/previous workspace
 - Empty workspaces are automatically removed and reordered
-
-### Monitor Cursor
-- Move the mouse cursor to the next monitor
 
 ## Installation
 
@@ -166,11 +167,11 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - Focus Follows Mouse：マウスを乗せたウィンドウを自動でフォーカス＆前面化します（遅延は設定で変更可能、オフにもできます）
 - 浮遊ウィンドウの前面キープ：ダイアログなどの浮遊ウィンドウがタイルの裏に隠れないよう常に前面に保ちます。全部をまとめて前面に出す救出キーもあります
 - Zen モード：一つのウィンドウに集中するため、中央に配置して他のウィンドウを非表示にします
-- ギャップ操作：モードに入るとキーごとに上下左右いずれかの辺を直接担当し、その場で辺を動かしてサイズ調整します
+- ギャップ操作：モードに入るとキーごとに上下左右いずれかの辺を直接担当し、その場で辺を動かしてサイズ調整します。入った時点で動かせる辺が線で表示されます
 - ウィンドウを隠す/復元：フォーカス中のウィンドウをタイリングから隠し、あとで元にいた場所の近くへ復元します
 - 配置予約：次に開く新規ウィンドウの置き場所（列内の上/下、左右の新規列、Float）を先に決めておきます
 - ウィンドウパレット：全ワークスペースのウィンドウを一覧表示して素早く切り替え
-- 隣ワークスペースのチラ見せ：Ctrl+Option を押しっぱなしにすると、各モニター端に隣のワークスペースのアプリアイコンが表示されます
+- 隣ワークスペースのチラ見せ：Ctrl+Option を押しっぱなしにすると、画面中央に隣のワークスペースがカード2枚で表示されます
 - ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示。現在のモードに応じてメニューバーのアイコンが変化
 - スマートワークスペース：ワークスペース間の移動と、ウィンドウの移動を効率的に実行。空のワークスペースは自動削除されます
 - カスタムキーボードショートカット：設定画面からすべてのショートカットを自由に変更できます
@@ -217,7 +218,9 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 ### ギャップ操作
 - モードに入ると、キーごとにフォーカス中ウィンドウの辺（左右上下）を直接担当する
+- 入った瞬間、実際に動かせる辺が薄い線で表示される。モードに入ったことと、どの辺を動かせるかが一目でわかる（画面端に接している辺は動かす相手がないため表示されない）
 - 素押しでその辺を外側へ広げ、Shift を押しながらだと内側へ縮める
+- いま操作している辺は太い線でハイライトされる
 - 選択→確定という手順はなく、キーを押した瞬間に辺が動く。続けて別の辺を調整することもできる
 - Return または Escape でモードを終了
 
@@ -240,16 +243,15 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 ### 隣ワークスペースのチラ見せ
 - Ctrl+Option（他の修飾キーなし）を押しっぱなしにすると、隣のワークスペースをプレビュー表示
-- 各モニターの左端に左隣ワークスペース、右端に右隣ワークスペースのアプリアイコンが表示される
-- 修飾キーを離す、または他のキーを押すと即座に消える
+- モニターの中央にカード2枚が並び、左に左隣、右に右隣のワークスペースの中身が出る。各ウィンドウはウィンドウパレットと同じアイコン・アプリ名・ウィンドウタイトルで表示される
+- 少し押しっぱなしにしてから出るので、ショートカットの前置きとして Ctrl+Option を押しただけでは出ない
+- 修飾キーを離すか他のキーを押すと消える。一度ショートカットを使ったら、修飾キーを離すまで出てこない
+- 他のモード中は表示されない
 
 ### ワークスペース管理
 - 次/前のワークスペースに切り替え
 - フォーカス中のウィンドウを次/前のワークスペースに移動
 - 空のワークスペースは自動的に削除され、ID が再割り当てされます
-
-### モニター間のカーソル移動
-- マウスカーソルを次のモニターに移動
 
 ## インストール
 
