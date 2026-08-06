@@ -99,6 +99,18 @@ enum PerfLog {
 		keyPressLabel = label
 	}
 
+	/// Called at the moment the key-press handling actually starts running.
+	/// If the main thread is busy with other work (like scanning every window),
+	/// The wait time from the key press to reaching this point gets longer.
+	/// Break down how much of the total "key press -> focus confirmed" time was spent waiting in line
+	static func reportKeyPressHandlerStart() {
+		guard enabled, let start = keyPressStart else { return }
+		let elapsed = CFAbsoluteTimeGetCurrent() - start
+		if elapsed >= 0.005 {
+			write(String(format: "キー押下→処理開始(%@): %.1fms", keyPressLabel ?? "?", elapsed * 1000))
+		}
+	}
+
 	/// Call this once focus is confirmed (or once we give up confirming it).
 	/// Print the elapsed time since markKeyPressStart as one line, then clear the record
 	static func reportKeyPressToFocusConfirmed() {
