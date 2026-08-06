@@ -142,11 +142,7 @@ class TilingEngine: ObservableObject {
                     targetPIDs.insert(pid)
                 }
             }
-            var windows: [WindowInfo] = []
-            for pid in targetPIDs {
-                windows.append(contentsOf: accessibilityManager.getWindows(forPID: pid))
-            }
-            return windows
+            return accessibilityManager.getWindows(forPIDs: targetPIDs)
         }
 
         for window in targetWindows {

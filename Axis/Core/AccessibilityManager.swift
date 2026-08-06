@@ -192,6 +192,26 @@ class AccessibilityManager: ObservableObject {
         return getWindows(for: app)
     }
     
+    /// Fetch the windows for multiple PIDs together (querying each app in parallel)
+    func getWindows(forPIDs pids: Set<pid_t>) -> [WindowInfo] {
+        guard isAccessibilityEnabled, !pids.isEmpty else {
+            return []
+        }
+
+        let apps = pids.compactMap { NSRunningApplication(processIdentifier: $0) }
+        guard !apps.isEmpty else { return [] }
+
+        var results = [[WindowInfo]](repeating: [], count: apps.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: apps.count) { index in
+            let appWindows = self.getWindows(for: apps[index])
+            lock.lock()
+            results[index] = appWindows
+            lock.unlock()
+        }
+        return results.flatMap { $0 }
+    }
+
     /// Get the set of window IDs currently showing in the current Space (on screen)
     /// Using kCGWindowListOptionOnScreenOnly excludes windows on other Spaces
     func getOnScreenWindowIDs() -> Set<CGWindowID> {
