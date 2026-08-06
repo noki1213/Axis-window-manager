@@ -245,7 +245,9 @@ struct WindowInfo: Identifiable, Equatable {
             PerfLog.logf("WindowInfo.focus()同期部分: %.1fms", perfSyncElapsed * 1000)
         }
 
-        verifyFocus(attempt: 0, focusStart: perfOverallStart)
+        // If this focus change came from a key press, pick up that record to measure end-to-end time
+        let claimedKeyPress = PerfLog.claimKeyPress()
+        verifyFocus(attempt: 0, focusStart: perfOverallStart, claimedKeyPress: claimedKeyPress)
     }
 
     /// The actual implementation of setting focus (a single attempt)
@@ -350,14 +352,13 @@ struct WindowInfo: Identifiable, Equatable {
 
     /// Confirm whether focus actually moved, and retry if it didn't
     /// - Parameter focusStart: For measurement. The time of the first focus() call
-    private func verifyFocus(attempt: Int, focusStart: CFAbsoluteTime) {
+    private func verifyFocus(attempt: Int, focusStart: CFAbsoluteTime, claimedKeyPress: (label: String, start: CFAbsoluteTime)?) {
         guard attempt < Self.focusRetryDelays.count else {
             if PerfLog.enabled {
                 let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
                 PerfLog.logf("WindowInfo.verifyFocus: 5回とも失敗 (%.1fms)", elapsed * 1000)
             }
-            // Clear any lingering key-press-start measurement
-            PerfLog.reportKeyPressToFocusConfirmed()
+            PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
             return
         }
 
@@ -368,13 +369,13 @@ struct WindowInfo: Identifiable, Equatable {
                     let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
                     PerfLog.logf("WindowInfo.verifyFocus: %d回目の確認で成功 (%.1fms)", attempt + 1, elapsed * 1000)
                 }
-                PerfLog.reportKeyPressToFocusConfirmed()
+                PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
                 return
             }
 
             // Some apps don't respond to raising via AX, so also call activate() from the second attempt onward
             self.applyFocusOnce(useAppActivate: attempt >= 1)
-            self.verifyFocus(attempt: attempt + 1, focusStart: focusStart)
+            self.verifyFocus(attempt: attempt + 1, focusStart: focusStart, claimedKeyPress: claimedKeyPress)
         }
     }
 
