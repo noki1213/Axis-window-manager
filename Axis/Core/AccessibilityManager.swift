@@ -244,6 +244,35 @@ class AccessibilityManager: ObservableObject {
         return WindowInfo(axElement: windowElement, app: frontApp)
     }
     
+    /// Get just the ID of the focused window
+    /// getFocusedWindow() queries several AX attributes — title, size, role, etc. — to build a WindowInfo
+    /// Polls AX about 8 times. Just to confirm whether focus actually moved to the target window
+    /// In this case, get just the ID to reduce the wait on the main thread
+    func getFocusedWindowID() -> CGWindowID? {
+        guard isAccessibilityEnabled,
+              let frontApp = NSWorkspace.shared.frontmostApplication else {
+            return nil
+        }
+
+        let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, 0.3)
+
+        var focusedWindowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
+              let axWindow = focusedWindowRef else {
+            return nil
+        }
+
+        let element = axWindow as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.3)
+
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow(element, &windowID) == .success, windowID != 0 else {
+            return nil
+        }
+        return windowID
+    }
+
     /// Get the window at the given coordinates (screen coordinate system: bottom-left origin)
     func getWindowAt(_ point: CGPoint) -> WindowInfo? {
         // Target only on-screen windows
