@@ -255,8 +255,15 @@ struct WindowInfo: Identifiable, Equatable {
         // Normally this raises the process and designates the window at the same time.
         // If this succeeds, the app never gets a chance to pick a different window of its own
         if !useAppActivate, setFrontProcessWithThisWindow() {
-            AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
-            AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            // Raising the app and designating the key window are both already done by this point.
+            // The follow-up AX write is a just-in-case backup, but for slow-responding apps
+            // Each call could block for up to 0.3 seconds, and two of those back to back were what made key presses feel sluggish.
+            // No need to wait for the result, so run it off the main thread in the background
+            let element = axElement
+            DispatchQueue.global(qos: .userInitiated).async {
+                AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            }
             return
         }
 
@@ -356,7 +363,7 @@ struct WindowInfo: Identifiable, Equatable {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
             // Do nothing if focus has already moved as intended
-            if AccessibilityManager.shared.getFocusedWindow()?.id == self.id {
+            if AccessibilityManager.shared.getFocusedWindowID() == self.id {
                 if PerfLog.enabled {
                     let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
                     PerfLog.logf("WindowInfo.verifyFocus: %d回目の確認で成功 (%.1fms)", attempt + 1, elapsed * 1000)
