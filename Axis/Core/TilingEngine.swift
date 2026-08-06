@@ -619,6 +619,144 @@ class TilingEngine: ObservableObject {
         tiledWindows[screenID] = columns
     }
 
+    /// Given each column's slot count, compute the frame (in AX coordinates) of every slot under an even split
+    func slotFrames(columnSizes: [Int], on screen: NSScreen) -> [[CGRect]] {
+        guard !columnSizes.isEmpty else { return [] }
+
+        let visibleFrame = screen.visibleFrame
+        let columnCount = CGFloat(columnSizes.count)
+
+        // Available width (accounting for padding and gaps)
+        let totalColumnGaps = windowGap * (columnCount - 1)
+        let availableWidth = visibleFrame.width - (screenPadding * 2) - totalColumnGaps
+        let columnWidth = availableWidth / columnCount
+
+        // The Accessibility API's coordinate system has a top-left origin (relative to the main screen)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
+
+        var currentX = visibleFrame.minX + screenPadding
+        var result: [[CGRect]] = []
+
+        for count in columnSizes {
+            guard count > 0 else {
+                result.append([])
+                currentX += columnWidth + windowGap
+                continue
+            }
+
+            let rowCount = CGFloat(count)
+            let totalRowGaps = windowGap * (rowCount - 1)
+            let availableHeight = visibleFrame.height - (screenPadding * 2) - totalRowGaps
+
+            var currentY = screenTopInAX + screenPadding
+            var colFrames: [CGRect] = []
+
+            for _ in 0..<count {
+                let rowHeight = availableHeight / rowCount
+
+                var newFrame = CGRect(
+                    x: currentX,
+                    y: currentY,
+                    width: columnWidth,
+                    height: rowHeight
+                )
+
+                // Adjust the position if it would overflow the screen
+                newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
+                colFrames.append(newFrame)
+
+                currentY += rowHeight + windowGap
+            }
+
+            result.append(colFrames)
+            currentX += columnWidth + windowGap
+        }
+
+        return result
+    }
+
+    /// Pre-place the existing windows (provisional tiling) to clear space for the reserved slot, and return the reserved slot's CGRect (AX coordinates)
+    func applyReservedSlotLayout(columnIndex: Int, kind: PlacementReservationKind, on screen: NSScreen) -> CGRect? {
+        guard kind != .float else { return nil }
+
+        let screenID = ScreenIdentifier(from: screen)
+        let columns = tiledWindows[screenID] ?? []
+
+        // When there are zero windows (empty columns): reserve a single slot covering the whole screen
+        if columns.isEmpty || columns.allSatisfy({ $0.isEmpty }) {
+            let frames = slotFrames(columnSizes: [1], on: screen)
+            guard let reservedFrame = frames.first?.first else { return nil }
+            return reservedFrame
+        }
+
+        var columnSizes = columns.map { $0.count }
+        var reservedColIndex: Int = 0
+        var reservedRowIndex: Int = 0
+
+        switch kind {
+        case .aboveInColumn:
+            let clampedCol = min(max(columnIndex, 0), columns.count - 1)
+            columnSizes[clampedCol] += 1
+            reservedColIndex = clampedCol
+            reservedRowIndex = 0
+
+        case .belowInColumn:
+            let clampedCol = min(max(columnIndex, 0), columns.count - 1)
+            columnSizes[clampedCol] += 1
+            reservedColIndex = clampedCol
+            reservedRowIndex = columnSizes[clampedCol] - 1
+
+        case .newColumnLeft:
+            let insertCol = min(max(columnIndex, 0), columns.count)
+            columnSizes.insert(1, at: insertCol)
+            reservedColIndex = insertCol
+            reservedRowIndex = 0
+
+        case .newColumnRight:
+            let insertCol = min(max(columnIndex + 1, 0), columns.count)
+            columnSizes.insert(1, at: insertCol)
+            reservedColIndex = insertCol
+            reservedRowIndex = 0
+
+        case .float:
+            return nil
+        }
+
+        let frames = slotFrames(columnSizes: columnSizes, on: screen)
+        guard reservedColIndex < frames.count, reservedRowIndex < frames[reservedColIndex].count else { return nil }
+        let reservedFrame = frames[reservedColIndex][reservedRowIndex]
+
+        // Place existing real windows into the non-reserved slots
+        for (colIdx, column) in columns.enumerated() {
+            let targetColIdx: Int
+            switch kind {
+            case .aboveInColumn, .belowInColumn:
+                targetColIdx = colIdx
+            case .newColumnLeft, .newColumnRight:
+                targetColIdx = (colIdx >= reservedColIndex) ? colIdx + 1 : colIdx
+            case .float:
+                continue
+            }
+
+            for (rowIdx, window) in column.enumerated() {
+                let targetRowIdx: Int
+                if kind == .aboveInColumn && colIdx == reservedColIndex {
+                    targetRowIdx = rowIdx + 1
+                } else {
+                    targetRowIdx = rowIdx
+                }
+
+                guard targetColIdx < frames.count, targetRowIdx < frames[targetColIdx].count else { continue }
+                let newFrame = frames[targetColIdx][targetRowIdx]
+                window.setFrame(newFrame)
+                updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
+            }
+        }
+
+        return reservedFrame
+    }
+
     /// Move the window to another screen
     private func moveWindowToScreen(_ window: WindowInfo, from sourceScreen: NSScreen, to targetScreen: NSScreen, position: HorizontalPosition) {
         let sourceID = ScreenIdentifier(from: sourceScreen)
@@ -952,59 +1090,18 @@ class TilingEngine: ObservableObject {
         columnWidthRatios[screenID] = nil
         rowHeightRatios[screenID] = nil
 
-        let visibleFrame = screen.visibleFrame
-        let columnCount = CGFloat(columns.count)
-
-        // Available width (accounting for padding and gaps)
-        let totalColumnGaps = windowGap * (columnCount - 1)
-        let availableWidth = visibleFrame.width - (screenPadding * 2) - totalColumnGaps
-        let columnWidth = availableWidth / columnCount
-
-        // The Accessibility API's coordinate system has a top-left origin (relative to the main screen)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
-
-        var currentX = visibleFrame.minX + screenPadding
+        let columnSizes = columns.map { $0.count }
+        let frames = slotFrames(columnSizes: columnSizes, on: screen)
 
         for (colIndex, column) in columns.enumerated() {
-            guard !column.isEmpty else { continue }
-
-            // Get the row height ratio
-            let rowRatios = rowHeightRatios[screenID]?[colIndex]
-
-            let rowCount = CGFloat(column.count)
-            let totalRowGaps = windowGap * (rowCount - 1)
-            let availableHeight = visibleFrame.height - (screenPadding * 2) - totalRowGaps
-
-            var currentY = screenTopInAX + screenPadding
-
+            guard colIndex < frames.count else { continue }
             for (rowIndex, window) in column.enumerated() {
-                // Row height (use the ratio if one exists, otherwise split evenly)
-                let rowHeight: CGFloat
-                if let ratios = rowRatios, rowIndex < ratios.count, ratios.count == column.count {
-                    rowHeight = availableHeight * ratios[rowIndex]
-                } else {
-                    rowHeight = availableHeight / rowCount
-                }
-
-                var newFrame = CGRect(
-                    x: currentX,
-                    y: currentY,
-                    width: columnWidth,
-                    height: rowHeight
-                )
-
-                // Adjust the position if it would overflow the screen
-                newFrame = adjustFrameToFitScreen(frame: newFrame, visibleFrame: visibleFrame, mainScreenHeight: mainScreenHeight)
-
+                guard rowIndex < frames[colIndex].count else { continue }
+                let newFrame = frames[colIndex][rowIndex]
                 window.setFrame(newFrame)
                 // Also update the frame held by the column structure (so stale coordinates don't linger)
                 updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
-
-                currentY += rowHeight + windowGap
             }
-
-            currentX += columnWidth + windowGap
         }
     }
 
