@@ -25,6 +25,18 @@ class BorderManager: ObservableObject {
     // Settings
     private let padding: CGFloat = 10.0 // 枠線のパディング
 
+    /// Apps that don't get a border.
+    /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
+    /// Also excluded because it flickers while the border returns to the original window right after a close.
+    private let borderExcludedBundleIds: Set<String> = [
+        "com.noki.TextToClipboard"
+    ]
+
+    /// Whether the border is currently hidden because of an excluded app.
+    /// Even when an excluded app closes, the notification telling us focus returned to the original window
+    /// can fail to arrive, so while this flag is set, a watchdog timer watches for the return instead
+    private var hiddenForExcludedApp = false
+
     /// Whether to draw the border dashed. Since the border window is recreated on every focus move,
     /// State is held here and reflected in the view both at creation and on switches
     private var isDashed = false
@@ -180,6 +192,16 @@ class BorderManager: ObservableObject {
             return
         }
 
+        // Don't show the border on windows of excluded apps
+        if let bundleId = focusedWindow.app.bundleIdentifier,
+           borderExcludedBundleIds.contains(bundleId) {
+            hideBorder()
+            hiddenForExcludedApp = true
+            return
+        }
+
+        hiddenForExcludedApp = false
+
         // Don't show the border on windows evacuated to another workspace or while the palette is showing
         if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
            WindowPaletteManager.shared.isWindowHidden(focusedWindow.id) {
@@ -245,6 +267,17 @@ class BorderManager: ObservableObject {
 
         // Don't update while Mission Control is active
         if isInMissionControl { return }
+
+        // While the border is hidden because of an excluded app, watch for the frontmost app changing.
+        // Right after an excluded app closes, the notification sometimes doesn't arrive, so the border wouldn't come back on its own
+        if hiddenForExcludedApp {
+            let frontBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            if frontBundleId == nil || !borderExcludedBundleIds.contains(frontBundleId!) {
+                hiddenForExcludedApp = false
+                scheduleUpdateBorder()
+            }
+            return
+        }
 
         guard let currentWindow = currentWindow,
               let borderWindow = borderWindow,
