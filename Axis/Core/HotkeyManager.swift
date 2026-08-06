@@ -298,7 +298,8 @@ class HotkeyManager: ObservableObject {
 		case .focusLeft:
 			PerfLog.markKeyPressStart("focusLeft")
 			DispatchQueue.main.async { [weak self] in
-				if let targetID = self?.tilingEngine.moveFocus(direction: .left) {
+				PerfLog.reportKeyPressHandlerStart()
+				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .left) }) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
 						BorderManager.shared.updateBorderExpecting(windowID: targetID)
 					}
@@ -307,7 +308,8 @@ class HotkeyManager: ObservableObject {
 		case .focusRight:
 			PerfLog.markKeyPressStart("focusRight")
 			DispatchQueue.main.async { [weak self] in
-				if let targetID = self?.tilingEngine.moveFocus(direction: .right) {
+				PerfLog.reportKeyPressHandlerStart()
+				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .right) }) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
 						BorderManager.shared.updateBorderExpecting(windowID: targetID)
 					}
@@ -316,7 +318,8 @@ class HotkeyManager: ObservableObject {
 		case .focusUp:
 			PerfLog.markKeyPressStart("focusUp")
 			DispatchQueue.main.async { [weak self] in
-				if let targetID = self?.tilingEngine.moveFocus(direction: .up) {
+				PerfLog.reportKeyPressHandlerStart()
+				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .up) }) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
 						BorderManager.shared.updateBorderExpecting(windowID: targetID)
 					}
@@ -325,7 +328,8 @@ class HotkeyManager: ObservableObject {
 		case .focusDown:
 			PerfLog.markKeyPressStart("focusDown")
 			DispatchQueue.main.async { [weak self] in
-				if let targetID = self?.tilingEngine.moveFocus(direction: .down) {
+				PerfLog.reportKeyPressHandlerStart()
+				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .down) }) {
 					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
 						BorderManager.shared.updateBorderExpecting(windowID: targetID)
 					}
