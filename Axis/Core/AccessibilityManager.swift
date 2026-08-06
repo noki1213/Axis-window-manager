@@ -135,7 +135,14 @@ class AccessibilityManager: ObservableObject {
     /// Always call this right after Axis changes state — moving a window, shifting focus, etc.
     func invalidateWindowCache() {
         cachedAllWindowsTime = 0
+        cachedFocusedWindowTime = 0
     }
+
+    /// The focused window cache
+    /// Within a single operation, many call sites were each querying independently, and
+    /// Measured running nearly 10 times per second (6-282ms each)
+    private var cachedFocusedWindow: WindowInfo?
+    private var cachedFocusedWindowTime: CFAbsoluteTime = 0
 
     /// Get the windows of a specific application
     func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
@@ -243,6 +250,13 @@ class AccessibilityManager: ObservableObject {
             return nil
         }
 
+        // The same very-short-lived cache as getAllWindows.
+        // Whenever Axis itself moves focus, always discard it via invalidateWindowCache()
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - cachedFocusedWindowTime < Self.allWindowsCacheTTL {
+            return cachedFocusedWindow
+        }
+
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
             return nil
         }
@@ -261,7 +275,10 @@ class AccessibilityManager: ObservableObject {
 
         // Treat it as an AXUIElement
         let windowElement = axWindow as! AXUIElement
-        return WindowInfo(axElement: windowElement, app: frontApp)
+        let window = WindowInfo(axElement: windowElement, app: frontApp)
+        cachedFocusedWindow = window
+        cachedFocusedWindowTime = CFAbsoluteTimeGetCurrent()
+        return window
     }
     
     /// Get just the ID of the focused window

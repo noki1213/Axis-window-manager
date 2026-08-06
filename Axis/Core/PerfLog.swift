@@ -111,13 +111,24 @@ enum PerfLog {
 		}
 	}
 
-	/// Call this once focus is confirmed (or once we give up confirming it).
-	/// Print the elapsed time since markKeyPressStart as one line, then clear the record
-	static func reportKeyPressToFocusConfirmed() {
-		guard enabled, let start = keyPressStart else { return }
-		let elapsed = CFAbsoluteTimeGetCurrent() - start
-		write(String(format: "キー押下→フォーカス確定(%@): %.1fms", keyPressLabel ?? "?", elapsed * 1000))
+	/// Claims the recorded key press as belonging to this focus operation.
+	/// Only presses within 0.3 seconds can be claimed.
+	/// Without this, when a key is pressed but focus doesn't actually move, the record keeps lingering, and
+	/// A later mouse-hover focus would hijack that record, and
+	/// It produces a duration far longer than reality (measured at 400-865ms)
+	static func claimKeyPress() -> (label: String, start: CFAbsoluteTime)? {
+		guard enabled, let start = keyPressStart else { return nil }
+		let label = keyPressLabel ?? "?"
 		keyPressStart = nil
 		keyPressLabel = nil
+		guard CFAbsoluteTimeGetCurrent() - start <= 0.3 else { return nil }
+		return (label, start)
+	}
+
+	/// Print a line with the time focus was confirmed, for the key press that was claimed
+	static func reportKeyPressToFocusConfirmed(_ claimed: (label: String, start: CFAbsoluteTime)?) {
+		guard enabled, let claimed else { return }
+		let elapsed = CFAbsoluteTimeGetCurrent() - claimed.start
+		write(String(format: "キー押下→フォーカス確定(%@): %.1fms", claimed.label, elapsed * 1000))
 	}
 }
