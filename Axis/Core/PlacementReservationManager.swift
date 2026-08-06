@@ -52,6 +52,9 @@ class PlacementReservationManager {
 	/// The preview overlay window (reused)
 	private var previewWindow: PlacementPreviewOverlayWindow?
 
+	/// A callback to tell the caller (HotkeyManager) that the wait was cleared automatically
+	var onAwaitingCanceled: (() -> Void)?
+
 	private init() {}
 
 	/// Whether there's a confirmed reservation
@@ -65,6 +68,12 @@ class PlacementReservationManager {
 	/// Since focus shifts when a new window opens, it must not be evaluated after opening
 	func beginAwaiting() {
 		pendingFocusSnapshot = Self.captureFocusSnapshot()
+
+		// To signal "now waiting on a reservation" without adding anything to the screen, just switch the focus border to dotted
+		BorderManager.shared.setDashed(true)
+
+		// Also auto-clear it after the same duration as after confirming, if it's left waiting untouched
+		scheduleTimeout()
 	}
 
 	/// Cancel the reservation (Ctrl+Opt+N was pressed again, it timed out, etc.)
@@ -73,6 +82,7 @@ class PlacementReservationManager {
 		current = nil
 		timeoutWorkItem?.cancel()
 		timeoutWorkItem = nil
+		BorderManager.shared.setDashed(false)
 		hidePreview()
 	}
 
@@ -82,16 +92,25 @@ class PlacementReservationManager {
 	func confirm(kind: PlacementReservationKind) {
 		defer { pendingFocusSnapshot = nil }
 
+		// Once confirmed, its job as a signal is done (from here on, the preview border shows the state)
+		BorderManager.shared.setDashed(false)
+
 		switch kind {
 		case .float:
 			// Float can be resolved even without focused-column info
-			guard let screen = pendingFocusSnapshot?.screen ?? WorkspaceManager.shared.focusedScreen() else { return }
+			guard let screen = pendingFocusSnapshot?.screen ?? WorkspaceManager.shared.focusedScreen() else {
+				hidePreview()
+				return
+			}
 			current = PendingReservation(kind: .float, screen: screen, columnIndex: 0)
 			showPreview(kind: .float, screen: screen, columnIndex: 0)
 
 		case .aboveInColumn, .belowInColumn, .newColumnLeft, .newColumnRight:
 			// A within-column or column-relative reservation can't be resolved without a known focus position
-			guard let snapshot = pendingFocusSnapshot else { return }
+			guard let snapshot = pendingFocusSnapshot else {
+				hidePreview()
+				return
+			}
 			current = PendingReservation(kind: kind, screen: snapshot.screen, columnIndex: snapshot.columnIndex)
 			showPreview(kind: kind, screen: snapshot.screen, columnIndex: snapshot.columnIndex)
 		}
@@ -156,7 +175,9 @@ class PlacementReservationManager {
 	private func scheduleTimeout() {
 		timeoutWorkItem?.cancel()
 		let workItem = DispatchWorkItem { [weak self] in
-			self?.cancel()
+			guard let self = self else { return }
+			self.cancel()
+			self.onAwaitingCanceled?()
 		}
 		timeoutWorkItem = workItem
 		DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeoutInterval, execute: workItem)
@@ -164,6 +185,7 @@ class PlacementReservationManager {
 
 	// MARK: - Preview display
 
+	/// After confirming: show the chosen destination with a dotted border
 	private func showPreview(kind: PlacementReservationKind, screen: NSScreen, columnIndex: Int) {
 		let axFrame = Self.previewFrame(kind: kind, screen: screen, columnIndex: columnIndex)
 		let screenRect = Self.toScreenRect(axFrame)
@@ -250,6 +272,7 @@ class PlacementReservationManager {
 		let y = mainScreenHeight - axFrame.origin.y - axFrame.height
 		return CGRect(x: axFrame.origin.x, y: y, width: axFrame.width, height: axFrame.height)
 	}
+
 }
 
 // MARK: - PlacementPreviewOverlayWindow

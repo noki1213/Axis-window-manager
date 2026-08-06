@@ -25,6 +25,17 @@ class BorderManager: ObservableObject {
     // Settings
     private let padding: CGFloat = 10.0 // 枠線のパディング
 
+    /// Whether to draw the border dashed. Since the border window is recreated on every focus move,
+    /// State is held here and reflected in the view both at creation and on switches
+    private var isDashed = false
+
+    /// Toggle the border's dashed display (dashed only while waiting for a placement reservation)
+    func setDashed(_ dashed: Bool) {
+        guard isDashed != dashed else { return }
+        isDashed = dashed
+        borderView?.isDashed = dashed
+    }
+
     private init() {
         setupNotifications()
         setupMissionControlObserver()
@@ -93,6 +104,7 @@ class BorderManager: ObservableObject {
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.mainColor = .white // ノーマルモードは白
         view.showsFill = false // ノーマルモードは曇りなし！
+        view.isDashed = isDashed // 待ち受け中に枠線が作り直されても点線のままにする
         view.autoresizingMask = [.width, .height]
         overlay.contentView?.addSubview(view)
         
@@ -339,6 +351,11 @@ class SelectionBorderView: NSView {
         didSet { self.setNeedsDisplay(bounds) }
     }
 
+    /// Whether to draw the border dashed (set true only while waiting for a placement reservation, as the signal that the mode was entered)
+    var isDashed: Bool = false {
+        didSet { self.setNeedsDisplay(bounds) }
+    }
+
     /// For compatibility with the older interface (setting it applies to both)
     var mainColor: NSColor {
         get { return borderColor }
@@ -367,6 +384,9 @@ class SelectionBorderView: NSView {
         // Draw the border
         borderColor.setStroke()
         path.lineWidth = 4
+        if isDashed {
+            path.setLineDash([6, 5], count: 2, phase: 0)
+        }
         path.stroke()
     }
 }

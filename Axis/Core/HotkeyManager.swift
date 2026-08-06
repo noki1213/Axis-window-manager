@@ -47,7 +47,12 @@ class HotkeyManager: ObservableObject {
 	private let gapSelectManager = GapSelectManager.shared
 	private let windowPaletteManager = WindowPaletteManager.shared
 
-	private init() {}
+	private init() {
+		// When the reservation expires from a timeout, also reset the waiting flag here
+		PlacementReservationManager.shared.onAwaitingCanceled = { [weak self] in
+			self?.isAwaitingPlacementReservationKey = false
+		}
+	}
 
 	// MARK: - Public Methods
 
@@ -592,8 +597,11 @@ class HotkeyManager: ObservableObject {
 	private func handlePlacementReserveAwaitingKeyEvent(_ event: NSEvent) -> Bool {
 		isAwaitingPlacementReservationKey = false
 
-		// Excluded if a modifier key is held
+		// Excluded if a modifier key is held (also hides the candidate display)
 		guard HotkeyModifiers.from(event.modifierFlags).isEmpty else {
+			DispatchQueue.main.async {
+				PlacementReservationManager.shared.cancel()
+			}
 			return false
 		}
 
@@ -608,6 +616,10 @@ class HotkeyManager: ObservableObject {
 		}
 
 		guard let kind = kind else {
+			// Cancel the reservation if a non-target key is pressed (also hide the candidate display)
+			DispatchQueue.main.async {
+				PlacementReservationManager.shared.cancel()
+			}
 			return false
 		}
 
