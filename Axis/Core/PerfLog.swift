@@ -131,4 +131,58 @@ enum PerfLog {
 		let elapsed = CFAbsoluteTimeGetCurrent() - claimed.start
 		write(String(format: "キー押下→フォーカス確定(%@): %.1fms", claimed.label, elapsed * 1000))
 	}
+
+	// MARK: - Focus-retrieval failure (tracking the disappearing-border symptom)
+
+	/// Since focus retrieval is also called from off the main thread, guard the state with a lock
+	private static let focusLostLock = NSLock()
+	/// Whether focus retrieval is currently failing repeatedly
+	private static var focusLostActive = false
+	/// The count of consecutive failures while it keeps failing
+	private static var focusLostCount = 0
+	/// The time the failure started
+	private static var focusLostStart: CFAbsoluteTime = 0
+	/// The time the last failure log was printed (throttles logs from consecutive failures to one line per second)
+	private static var focusLostLastLogged: CFAbsoluteTime = 0
+
+	/// Called when retrieving the focused window fails.
+	/// - Parameters:
+	///   - reason: where it failed (no frontmost app / AX error / couldn't get a window ID, etc.)
+	///   - app: the frontmost app at that moment
+	static func reportFocusLost(reason: String, app: String) {
+		guard enabled else { return }
+		focusLostLock.lock()
+		defer { focusLostLock.unlock() }
+		let now = CFAbsoluteTimeGetCurrent()
+
+		if !focusLostActive {
+			focusLostActive = true
+			focusLostCount = 1
+			focusLostStart = now
+			focusLostLastLogged = now
+			write("フォーカス取得失敗: \(reason) app=\(app)")
+			return
+		}
+
+		focusLostCount += 1
+		if now - focusLostLastLogged >= 1.0 {
+			focusLostLastLogged = now
+			write(String(format: "フォーカス取得失敗が継続: %@ app=%@ 連続%d回 %.1fs",
+			             reason, app, focusLostCount, now - focusLostStart))
+		}
+	}
+
+	/// Called when retrieving the focused window succeeds.
+	/// Only if the failure was ongoing, print a line showing how long it was lost for
+	static func reportFocusRecovered(app: String) {
+		guard enabled else { return }
+		focusLostLock.lock()
+		defer { focusLostLock.unlock() }
+		guard focusLostActive else { return }
+		let elapsed = CFAbsoluteTimeGetCurrent() - focusLostStart
+		focusLostActive = false
+		write(String(format: "フォーカス取得が復帰: app=%@ 失われていた時間 %.1fs（連続%d回）",
+		             app, elapsed, focusLostCount))
+		focusLostCount = 0
+	}
 }
