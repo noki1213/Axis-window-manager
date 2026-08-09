@@ -258,24 +258,39 @@ class AccessibilityManager: ObservableObject {
         }
 
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            PerfLog.reportFocusLost(reason: "最前面アプリなし", app: "-")
             return nil
         }
 
+        let appName = frontApp.bundleIdentifier ?? frontApp.localizedName ?? "?"
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
         // Set a timeout so the main thread doesn't block on a slow-responding app
         // (too short and it misses slow apps' windows, breaking the layout)
         AXUIElementSetMessagingTimeout(axApp, 0.3)
         var focusedWindowRef: CFTypeRef?
+        let axStart = CFAbsoluteTimeGetCurrent()
         let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
+        let axElapsed = CFAbsoluteTimeGetCurrent() - axStart
 
         guard result == .success, let axWindow = focusedWindowRef else {
+            // For tracking down the border-disappearing issue. Records the AX error code and elapsed time
+            // (around 0.3 seconds means a timeout; -25204 is no response, -25212 is no such attribute)
+            PerfLog.reportFocusLost(
+                reason: String(format: "AXエラー %d (%.0fms)", result.rawValue, axElapsed * 1000),
+                app: appName
+            )
             return nil
         }
 
         // Treat it as an AXUIElement
         let windowElement = axWindow as! AXUIElement
-        let window = WindowInfo(axElement: windowElement, app: frontApp)
+        guard let window = WindowInfo(axElement: windowElement, app: frontApp) else {
+            // When AX returned a window but its window ID couldn't be obtained
+            PerfLog.reportFocusLost(reason: "ウィンドウID取得不可", app: appName)
+            return nil
+        }
+        PerfLog.reportFocusRecovered(app: appName)
         cachedFocusedWindow = window
         cachedFocusedWindowTime = CFAbsoluteTimeGetCurrent()
         return window
