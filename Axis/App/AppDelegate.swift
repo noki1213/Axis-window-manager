@@ -37,6 +37,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// The monitor of the window that had focus on the previous timer cycle
     /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
     private var lastFocusedScreen: NSScreen?
+    /// The window ID that had focus on the previous cycle (for detecting focus moving to
+    /// Used to detect focus movement and automatically switch workspaces.
+    /// (fills the gap, since onActiveAppChanged only fires on app switches)
+    private var lastFocusedWindowID: CGWindowID?
     private var wasScreenLocked = false
     private var isWaking = false
 
@@ -501,9 +505,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // By the time a new window is detected, macOS has already moved focus to it, so
         // Using the value recorded one cycle ago lets us correctly determine which monitor had focus
         // (this needs to run every cycle, so it's placed before the full-scan skip below)
-        if let focused = accessibilityManager.getFocusedWindow(),
-           workspaceManager.isWindowInAnyWorkspace(focused.id) {
-            lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
+        if let focused = accessibilityManager.getFocusedWindow() {
+            if workspaceManager.isWindowInAnyWorkspace(focused.id) {
+                lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
+            }
+
+            // Detects when focus moves, within the same app, to a different window in a different workspace.
+            // NSWorkspace.didActivateApplicationNotification only fires on app switches, so
+            // Focus moving between windows within the same app (e.g. an external tool
+            // when focus moved) gets caught here. While isSwitching is set, this function returns early
+            // (the isSpaceSwitching/isSwitching guards at the top of this function), so switchWorkspace
+            // This doesn't recurse by detecting and re-firing on its own focus move.
+            if focused.id != lastFocusedWindowID {
+                lastFocusedWindowID = focused.id
+                switchWorkspaceIfWindowElsewhere(focused)
+            }
         }
 
         // Target only on-screen windows (i.e. windows in the current Space)
@@ -952,20 +968,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
             }
 
-            guard let targetWindow = targetWindow,
-                  let location = self.workspaceManager.workspaceLocation(for: targetWindow.id) else {
-                return
-            }
-
-            let currentWorkspace = self.workspaceManager.currentWorkspace(on: location.screen)
-            guard location.workspace != currentWorkspace else { return }
-
-            self.workspaceManager.switchWorkspace(
-                to: location.workspace,
-                on: location.screen,
-                focusWindowID: targetWindow.id
-            )
+            guard let targetWindow = targetWindow else { return }
+            self.switchWorkspaceIfWindowElsewhere(targetWindow)
         }
+    }
+
+    /// Whether the given window's workspace matches the "currently displayed workspace" of the monitor it belongs to
+    /// Only when it's in a different workspace, switch to that workspace and focus it.
+    /// The shared path called from both onActiveAppChanged (app-switch detection) and checkForWindowChanges (
+    /// focus-move detection).
+    /// - Windows for which workspaceLocation returns nil (unregistered windows, Axis's own panels, etc.) are ignored
+    /// - Do nothing if it's already in the current workspace (avoids a pointless switch)
+    private func switchWorkspaceIfWindowElsewhere(_ window: WindowInfo) {
+        guard let location = workspaceManager.workspaceLocation(for: window.id) else {
+            return
+        }
+
+        let currentWorkspace = workspaceManager.currentWorkspace(on: location.screen)
+        guard location.workspace != currentWorkspace else { return }
+
+        workspaceManager.switchWorkspace(
+            to: location.workspace,
+            on: location.screen,
+            focusWindowID: window.id
+        )
     }
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
