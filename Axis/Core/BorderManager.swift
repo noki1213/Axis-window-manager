@@ -31,6 +31,15 @@ class BorderManager: ObservableObject {
     /// Nothing is excluded currently (the policy is to show a border on popups too). Add exclusions here if needed.
     private let borderExcludedBundleIds: Set<String> = []
 
+    /// System overlays, like notification banners and Control Center, that temporarily steal the frontmost position but have no focus window of their own.
+    /// Don't hide the border even when these come to the front — keep showing the border on the previous window
+    private let transientOverlayBundleIds: Set<String> = [
+        "com.apple.notificationcenterui",
+        "com.apple.controlcenter",
+        "com.apple.Spotlight",
+        "com.apple.dock"
+    ]
+
     /// The frontmost app's pid seen on the last tick. Compared against it every tick in checkWindowFrame(), and
     /// Acts as a fallback for cases where the didActivateApplicationNotification notification doesn't fire or is delayed
     private var lastFrontmostPID: pid_t?
@@ -182,6 +191,15 @@ class BorderManager: ObservableObject {
         }
 
         guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else {
+            // Keep the border in place during transient system overlays or when the frontmost app is slow to respond (.cannotComplete)
+            if let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+               transientOverlayBundleIds.contains(bundleId) {
+                return
+            }
+            if AccessibilityManager.shared.lastFocusedWindowError == .cannotComplete {
+                return
+            }
+
             // Only log the moment a visible border disappears (not while it stays gone)
             if borderWindow != nil {
                 let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-"
