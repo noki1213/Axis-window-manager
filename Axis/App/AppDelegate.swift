@@ -518,7 +518,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // This doesn't recurse by detecting and re-firing on its own focus move.
             if focused.id != lastFocusedWindowID {
                 lastFocusedWindowID = focused.id
-                switchWorkspaceIfWindowElsewhere(focused)
+                // If a cross-workspace switch happens, switchWorkspace itself
+                // borderManager.updateBorder() is called at the end, so don't call it here
+                // (running twice in the same tick briefly snaps the border to the old, pre-switch position).
+                // Only focus moves within the same workspace (the case behind that one recurring symptom),
+                // Notify the border update from here
+                let didSwitchWorkspace = switchWorkspaceIfWindowElsewhere(focused)
+                if !didSwitchWorkspace {
+                    borderManager.notifyFocusedWindowChanged()
+                }
             }
         }
 
@@ -979,19 +987,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// focus-move detection).
     /// - Windows for which workspaceLocation returns nil (unregistered windows, Axis's own panels, etc.) are ignored
     /// - Do nothing if it's already in the current workspace (avoids a pointless switch)
-    private func switchWorkspaceIfWindowElsewhere(_ window: WindowInfo) {
+    /// - Returns: true if a workspace switch was actually started. The caller uses this to
+    ///   Only notify the border update ourselves when no switch occurred (switchWorkspace itself
+    ///   updates the border when the switch completes, avoiding a momentary glitch from a double update)
+    @discardableResult
+    private func switchWorkspaceIfWindowElsewhere(_ window: WindowInfo) -> Bool {
         guard let location = workspaceManager.workspaceLocation(for: window.id) else {
-            return
+            return false
         }
 
         let currentWorkspace = workspaceManager.currentWorkspace(on: location.screen)
-        guard location.workspace != currentWorkspace else { return }
+        guard location.workspace != currentWorkspace else { return false }
 
         workspaceManager.switchWorkspace(
             to: location.workspace,
             on: location.screen,
             focusWindowID: window.id
         )
+        return true
     }
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
