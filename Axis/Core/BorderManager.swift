@@ -31,10 +31,9 @@ class BorderManager: ObservableObject {
     /// Nothing is excluded currently (the policy is to show a border on popups too). Add exclusions here if needed.
     private let borderExcludedBundleIds: Set<String> = []
 
-    /// Whether the border is currently hidden because of an excluded app.
-    /// Even when an excluded app closes, the notification telling us focus returned to the original window
-    /// can fail to arrive, so while this flag is set, a watchdog timer watches for the return instead
-    private var hiddenForExcludedApp = false
+    /// The frontmost app's pid seen on the last tick. Compared against it every tick in checkWindowFrame(), and
+    /// Acts as a fallback for cases where the didActivateApplicationNotification notification doesn't fire or is delayed
+    private var lastFrontmostPID: pid_t?
 
     /// Whether to draw the border dashed. Since the border window is recreated on every focus move,
     /// State is held here and reflected in the view both at creation and on switches
@@ -48,6 +47,7 @@ class BorderManager: ObservableObject {
     }
 
     private init() {
+        lastFrontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         setupNotifications()
         setupMissionControlObserver()
         setupBorderWindow()
@@ -200,11 +200,8 @@ class BorderManager: ObservableObject {
         if let bundleId = focusedWindow.app.bundleIdentifier,
            borderExcludedBundleIds.contains(bundleId) {
             hideBorder()
-            hiddenForExcludedApp = true
             return
         }
-
-        hiddenForExcludedApp = false
 
         // Don't show the border on windows evacuated to another workspace or while the palette is showing
         if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
@@ -272,14 +269,14 @@ class BorderManager: ObservableObject {
         // Don't update while Mission Control is active
         if isInMissionControl { return }
 
-        // While the border is hidden because of an excluded app, watch for the frontmost app changing.
-        // Right after an excluded app closes, the notification sometimes doesn't arrive, so the border wouldn't come back on its own
-        if hiddenForExcludedApp {
-            let frontBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-            if frontBundleId == nil || !borderExcludedBundleIds.contains(frontBundleId!) {
-                hiddenForExcludedApp = false
-                scheduleUpdateBorder()
-            }
+        // Check whether the frontmost app's pid is unchanged from the last tick. Just a property read, so
+        // This doesn't trigger any AX query, so it's safe to check every tick regardless of the exclusion flag.
+        // Cases like launching via an external tool, where didActivateApplicationNotification doesn't arrive or is delayed, or
+        // A safety net for when an excluded app closes and focus returns to the original app (only updates when a change is detected)
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if frontmostPID != lastFrontmostPID {
+            lastFrontmostPID = frontmostPID
+            scheduleUpdateBorder()
             return
         }
 
@@ -292,11 +289,20 @@ class BorderManager: ObservableObject {
 
         let axElement = currentWindow.axElement
 
-        AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
-        AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
+        let posResult = AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
+        let sizeResult = AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
 
-        // Extract the value from AXValue (can't cast directly)
-        guard let posValue = positionRef, let szValue = sizeRef else { return }
+        // Extract the value from an AXValue (it can't be cast directly).
+        // If a tracked window is torn down by the app quitting or a close, an AX error comes back here
+        // (the pid check above can't catch it, since the foreground app itself doesn't change).
+        // Left alone, the border would keep sitting at a position with no window there, so clear it first, then
+        // Re-fetch the current focus
+        guard posResult == .success, sizeResult == .success,
+              let posValue = positionRef, let szValue = sizeRef else {
+            hideBorder()
+            scheduleUpdateBorder()
+            return
+        }
 
         var position = CGPoint.zero
         var size = CGSize.zero
