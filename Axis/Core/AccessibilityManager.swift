@@ -144,6 +144,9 @@ class AccessibilityManager: ObservableObject {
     private var cachedFocusedWindow: WindowInfo?
     private var cachedFocusedWindowTime: CFAbsoluteTime = 0
 
+    /// The reason the last getFocusedWindow() call failed (AXError)
+    private(set) var lastFocusedWindowError: AXError?
+
     /// Get the windows of a specific application
     func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
         let perfStart = CFAbsoluteTimeGetCurrent()
@@ -247,6 +250,7 @@ class AccessibilityManager: ObservableObject {
         }
 
         guard isAccessibilityEnabled else {
+            lastFocusedWindowError = nil
             return nil
         }
 
@@ -258,6 +262,7 @@ class AccessibilityManager: ObservableObject {
         }
 
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            lastFocusedWindowError = nil
             PerfLog.reportFocusLost(reason: "最前面アプリなし", app: "-")
             return nil
         }
@@ -274,6 +279,7 @@ class AccessibilityManager: ObservableObject {
         let axElapsed = CFAbsoluteTimeGetCurrent() - axStart
 
         guard result == .success, let axWindow = focusedWindowRef else {
+            lastFocusedWindowError = result
             // For tracking down the border-disappearing issue. Records the AX error code and elapsed time
             // (around 0.3 seconds means a timeout; -25204 is no response, -25212 is no such attribute)
             PerfLog.reportFocusLost(
@@ -286,10 +292,12 @@ class AccessibilityManager: ObservableObject {
         // Treat it as an AXUIElement
         let windowElement = axWindow as! AXUIElement
         guard let window = WindowInfo(axElement: windowElement, app: frontApp) else {
+            lastFocusedWindowError = nil
             // When AX returned a window but its window ID couldn't be obtained
             PerfLog.reportFocusLost(reason: "ウィンドウID取得不可", app: appName)
             return nil
         }
+        lastFocusedWindowError = nil
         PerfLog.reportFocusRecovered(app: appName)
         cachedFocusedWindow = window
         cachedFocusedWindowTime = CFAbsoluteTimeGetCurrent()
