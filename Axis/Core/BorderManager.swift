@@ -28,9 +28,8 @@ class BorderManager: ObservableObject {
     /// Apps that don't get a border.
     /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
     /// Also excluded because it flickers while the border returns to the original window right after a close.
-    private let borderExcludedBundleIds: Set<String> = [
-        "com.noki.TextToClipboard"
-    ]
+    /// Nothing is excluded currently (the policy is to show a border on popups too). Add exclusions here if needed.
+    private let borderExcludedBundleIds: Set<String> = []
 
     /// Whether the border is currently hidden because of an excluded app.
     /// Even when an excluded app closes, the notification telling us focus returned to the original window
