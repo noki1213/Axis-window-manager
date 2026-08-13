@@ -40,6 +40,24 @@ class ZenModeManager: ObservableObject {
 
     private init() {}
 
+    // MARK: - Diagnostics (pinning down what unintentionally cancels Zen mode)
+
+    /// Return the hidden window's "app name / title" (for logging)
+    func hiddenWindowDescription(for id: CGWindowID) -> String? {
+        guard let window = hiddenWindowList.first(where: { $0.id == id }) else { return nil }
+        return "\(window.app.localizedName ?? "?") / \(window.title)"
+    }
+
+    /// Read the hidden window's current position back from AX and return it (for logging)
+    /// Used to check whether the 1px-left-in-the-corner placement is being maintained
+    func hiddenWindowCurrentFrame(for id: CGWindowID) -> CGRect? {
+        guard let window = hiddenWindowList.first(where: { $0.id == id }) else { return nil }
+        guard let refreshed = WindowInfo(axElement: window.axElement, app: window.app) else {
+            return window.frame
+        }
+        return refreshed.frame
+    }
+
     func toggle() {
         if isActive {
             exit()
