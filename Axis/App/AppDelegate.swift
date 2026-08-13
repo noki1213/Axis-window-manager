@@ -545,11 +545,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let onScreenIDsZen = accessibilityManager.getOnScreenWindowIDs()
             let allWindowsZen = accessibilityManager.getAllWindows()
             let managedZen = allWindowsZen.filter { onScreenIDsZen.contains($0.id) && $0.shouldBeManaged() }
-            let currentCountZen = managedZen.count
+            let currentIDsZen = Set(managedZen.map { $0.id })
 
-            guard currentCountZen != lastWindowCount else {
+            guard currentIDsZen != lastWindowIDs else {
                 return
             }
+
+            // Gone from the accessibility list, but still showing up on screen (in CGWindowList)
+            // If the window is there, it's just a transient miss, so hold off on cancelling Zen mode
+            let vanishedZen = lastWindowIDs.subtracting(currentIDsZen)
+            let ghostsZen = vanishedZen.intersection(onScreenIDsZen)
+            if !ghostsZen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
+                consecutiveGhostSkips += 1
+                if PerfLog.enabled {
+                    PerfLog.logf("Zenモード中の一時的な取りこぼしとして見送り: %d件 (%d回目)",
+                                 ghostsZen.count, consecutiveGhostSkips)
+                }
+                accessibilityManager.invalidateWindowCache()
+                lastOnScreenIDSignature = []
+                return
+            }
+            consecutiveGhostSkips = 0
 
             // Diagnostic logging to pin down what unintentionally cancels Zen mode
             // A count change alone can't tell whether a window on another monitor was added or removed, or
@@ -558,7 +574,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             logZenAutoExitReason(
                 currentWindows: managedZen,
                 onScreenIDs: onScreenIDsZen,
-                currentCount: currentCountZen
+                currentCount: managedZen.count
             )
 
             // Window changed → exit Zen mode and return to normal tiling
