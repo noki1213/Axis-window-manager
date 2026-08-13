@@ -214,12 +214,6 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 
 	private let peekView = WorkspacePeekView()
 
-	/// Animation token (for handling re-entrancy)
-	private var animationToken: Int = 0
-
-	/// Whether a hide animation is currently in progress
-	private var isHiding: Bool = false
-
 	init() {
 		super.init(
 			contentRect: .zero,
@@ -242,17 +236,7 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 	override var canBecomeKey: Bool { return false }
 	override var canBecomeMain: Bool { return false }
 
-	/// Set the contentView's layer.anchorPoint to the center (0.5, 0.5) and correct the position accordingly
-	private func setupContentViewLayer() {
-		guard let contentView = self.contentView else { return }
-		contentView.wantsLayer = true
-		guard let layer = contentView.layer else { return }
-		let bounds = layer.bounds
-		layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-		layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
-	}
-
-	/// Show the peek preview centered on the given monitor (with a fade-in and scale-up animation)
+	/// Show the peek preview centered on the given monitor (with an appearance animation)
 	func show(on screen: NSScreen, leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem]) {
 		self.setFrame(screen.frame, display: true)
 		peekView.update(
@@ -263,56 +247,14 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 			screenSize: screen.frame.size
 		)
 
-		animationToken += 1
-		isHiding = false
-
-		setupContentViewLayer()
-
-		// If currently hidden or at alpha 0, start from the initial state (alpha: 0, scale: 0.96)
-		let isCurrentlyInvisible = !self.isVisible || self.alphaValue == 0
-		if isCurrentlyInvisible {
-			self.alphaValue = 0.0
-			self.contentView?.layer?.transform = CATransform3DMakeScale(0.96, 0.96, 1.0)
-		}
-
-		self.orderFront(nil)
-
-		NSAnimationContext.runAnimationGroup { context in
-			context.duration = 0.12
-			context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-			context.allowsImplicitAnimation = true
-			self.animator().alphaValue = 1.0
-			self.contentView?.animator().layer?.transform = CATransform3DIdentity
+		PopupAppearance.show(self) { [weak self] in
+			self?.orderFront(nil)
 		}
 	}
 
-	/// Hide the overlay (with a fade-out and scale-down animation)
+	/// Hide the overlay (dismiss it immediately, without animation)
 	func hide() {
-		guard self.isVisible && self.alphaValue > 0 else {
-			self.orderOut(nil)
-			return
-		}
-
-		animationToken += 1
-		let currentToken = animationToken
-		isHiding = true
-
-		setupContentViewLayer()
-
-		NSAnimationContext.runAnimationGroup({ context in
-			context.duration = 0.09
-			context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-			context.allowsImplicitAnimation = true
-			self.animator().alphaValue = 0.0
-			self.contentView?.animator().layer?.transform = CATransform3DMakeScale(0.98, 0.98, 1.0)
-		}, completionHandler: { [weak self] in
-			guard let self = self else { return }
-			if self.animationToken == currentToken && self.isHiding {
-				self.orderOut(nil)
-				self.isHiding = false
-				self.contentView?.layer?.transform = CATransform3DIdentity
-			}
-		})
+		PopupAppearance.hide(self)
 	}
 }
 
@@ -335,17 +277,11 @@ private class WorkspacePeekView: NSView {
 	private static let cardMinWidth: CGFloat = 132
 	/// The gap between the left and right panels (this space indicates the left/right direction)
 	private static let centerGap: CGFloat = 72
-	/// The panel's corner radius
-	private static let cornerRadius: CGFloat = 16
 	/// The minimum margin to leave at the screen's left and right edges
 	private static let screenMargin: CGFloat = 24
 
 	// MARK: Color scheme
 
-	/// The card's background (black #262427)
-	private static let cardBackgroundColor = NSColor(srgbRed: 0x26 / 255.0, green: 0x24 / 255.0, blue: 0x27 / 255.0, alpha: 0.55)
-	/// The card's border (light black #545252)
-	private static let cardBorderColor = NSColor(srgbRed: 0x54 / 255.0, green: 0x52 / 255.0, blue: 0x52 / 255.0, alpha: 0.9)
 	/// Label text (white, #c4c4c4)
 	private static let labelColor = NSColor(srgbRed: 0xc4 / 255.0, green: 0xc4 / 255.0, blue: 0xc4 / 255.0, alpha: 1.0)
 	/// The direction arrow (cyan, #4AAEC8)
@@ -402,12 +338,7 @@ private class WorkspacePeekView: NSView {
 		card.material = .hudWindow
 		card.state = .active
 		card.blendingMode = .behindWindow
-		card.wantsLayer = true
-		card.layer?.cornerRadius = cornerRadius
-		card.layer?.masksToBounds = true
-		card.layer?.backgroundColor = cardBackgroundColor.cgColor
-		card.layer?.borderWidth = 1
-		card.layer?.borderColor = cardBorderColor.cgColor
+		PopupAppearance.styleBackground(card)
 
 		// Label (left reads "‹ Space N", right reads "Space N ›").
 		// If some cards didn't fit, append "+N" at the end
