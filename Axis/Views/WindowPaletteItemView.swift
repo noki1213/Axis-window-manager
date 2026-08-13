@@ -14,9 +14,7 @@ class WindowPaletteItemView: NSView {
 	// MARK: - Properties
 
 	/// Whether this card is selected (highlighted)
-	var isSelected: Bool = false {
-		didSet { needsDisplay = true }
-	}
+	var isSelected: Bool = false
 
 	private let iconImageView = NSImageView()
 	private let appNameLabel = NSTextField(labelWithString: "")
@@ -94,19 +92,5 @@ class WindowPaletteItemView: NSView {
 		iconImageView.image = icon
 		appNameLabel.stringValue = appName
 		titleLabel.stringValue = windowTitle.isEmpty ? "No title" : windowTitle
-	}
-
-	// MARK: - Drawing
-
-	override func draw(_ dirtyRect: NSRect) {
-		super.draw(dirtyRect)
-
-		if isSelected {
-			// While selected: a translucent white background
-			let selectionColor = NSColor.white.withAlphaComponent(0.2)
-			selectionColor.setFill()
-			let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
-			path.fill()
-		}
 	}
 }

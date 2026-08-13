@@ -152,6 +152,61 @@ enum PopupAppearance {
 		}
 	}
 
+	// MARK: - Frame movement animation
+
+	/// Move the view to the target frame, with animation (or instantly)
+	/// - Parameters:
+	///   - view: the view being moved
+	///   - targetFrame: the destination frame
+	///   - animated: whether to animate (when false, it's placed instantly)
+	static func animateFrame(of view: NSView, to targetFrame: NSRect, animated: Bool = true) {
+		guard animated else {
+			view.layer?.removeAllAnimations()
+			view.frame = targetFrame
+			return
+		}
+
+		if reduceMotion {
+			NSAnimationContext.runAnimationGroup { context in
+				context.duration = 0.1
+				context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+				view.animator().frame = targetFrame
+			}
+			return
+		}
+
+		guard let layer = view.layer else {
+			view.frame = targetFrame
+			return
+		}
+
+		let oldPosition = layer.presentation()?.position ?? layer.position
+		let oldBoundsSize = layer.presentation()?.bounds.size ?? layer.bounds.size
+
+		// Update the model value
+		view.frame = targetFrame
+
+		let newPosition = layer.position
+		let newBoundsSize = layer.bounds.size
+
+		CATransaction.begin()
+
+		let positionAnim = CASpringAnimation(perceptualDuration: 0.28, bounce: 0)
+		positionAnim.keyPath = "position"
+		positionAnim.fromValue = oldPosition
+		positionAnim.toValue = newPosition
+
+		let boundsAnim = CASpringAnimation(perceptualDuration: 0.28, bounce: 0)
+		boundsAnim.keyPath = "bounds.size"
+		boundsAnim.fromValue = oldBoundsSize
+		boundsAnim.toValue = newBoundsSize
+
+		layer.add(positionAnim, forKey: "highlightPosition")
+		layer.add(boundsAnim, forKey: "highlightBoundsSize")
+
+		CATransaction.commit()
+	}
+
 	/// Dismiss it immediately, without animation
 	static func hide(_ window: NSWindow) {
 		if let layer = window.contentView?.layer {

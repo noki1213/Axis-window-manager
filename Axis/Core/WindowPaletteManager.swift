@@ -12,13 +12,13 @@ import AppKit
 /// Switch to the selected window's workspace and focus it
 ///
 /// Layout:
-///   Horizontal direction (columns) → Display (monitor)
-///   Vertical direction → Space (workspace)
+///   Vertical (rows) → Displays (monitors)
+///   Horizontal (sections) → Spaces (workspaces)
 ///   Horizontal (cards) → windows
 ///
 /// Operations:
-///   I/K → move up/down between Spaces (within the same Display)
-///   J/L → move left/right between windows (moves to the neighboring Display when it hits the edge)
+///   I/K → move up/down between Displays (wraps around)
+///   J/L → move left/right between windows (wraps to the next/previous Space on the same Display when hitting a Space edge)
 class WindowPaletteManager {
 	static let shared = WindowPaletteManager()
 
@@ -30,10 +30,10 @@ class WindowPaletteManager {
 	/// Data per Display
 	private var displays: [WindowPaletteDisplay] = []
 
-	/// The currently selected Display (monitor column)
+	/// The currently selected Display (monitor row)
 	private var selectedDisplayIndex: Int = 0
 
-	/// The currently selected Space (workspace row)
+	/// The currently selected Space (workspace column)
 	private var selectedSpaceIndex: Int = 0
 
 	/// The currently selected window
@@ -121,84 +121,76 @@ class WindowPaletteManager {
 		selectedItemIndex = 0
 	}
 
-	/// Move up (to the previous Space within the same Display)
+	/// Move up (wraps to the previous Display, clamping the Space/Item index within range)
 	func moveUp() {
 		guard !displays.isEmpty else { return }
-		let spaceCount = displays[selectedDisplayIndex].spaces.count
-		guard spaceCount > 0 else { return }
-		selectedSpaceIndex = (selectedSpaceIndex - 1 + spaceCount) % spaceCount
-		clampItemIndex()
+		let displayCount = displays.count
+		selectedDisplayIndex = (selectedDisplayIndex - 1 + displayCount) % displayCount
+		clampSelectionToCurrentDisplay()
 		notifyPanel()
 	}
 
-	/// Move down (to the next Space within the same Display)
+	/// Move down (wraps to the next Display, clamping the Space/Item index within range)
 	func moveDown() {
 		guard !displays.isEmpty else { return }
-		let spaceCount = displays[selectedDisplayIndex].spaces.count
-		guard spaceCount > 0 else { return }
-		selectedSpaceIndex = (selectedSpaceIndex + 1) % spaceCount
-		clampItemIndex()
+		let displayCount = displays.count
+		selectedDisplayIndex = (selectedDisplayIndex + 1) % displayCount
+		clampSelectionToCurrentDisplay()
 		notifyPanel()
 	}
 
-	/// Move left (to the previous window; moves to the previous Display if at the edge)
+	/// Move left (to the previous window within the same Display; wraps to the last window of the previous Space at the left edge)
 	func moveLeft() {
 		guard !displays.isEmpty else { return }
+		let spaces = displays[selectedDisplayIndex].spaces
+		guard !spaces.isEmpty else { return }
 
+		// Whether moving left within the current Space is possible
 		if selectedItemIndex > 0 {
-			// Move left within the same Space
 			selectedItemIndex -= 1
-		} else if selectedDisplayIndex > 0 {
-			// Move to the previous Display
-			selectedDisplayIndex -= 1
-			// Clamp the Space index to a valid range
-			let newSpaceCount = displays[selectedDisplayIndex].spaces.count
-			if selectedSpaceIndex >= newSpaceCount {
-				selectedSpaceIndex = max(newSpaceCount - 1, 0)
-			}
-			// Select the last window on the destination Space
-			let newItemCount = displays[selectedDisplayIndex].spaces[selectedSpaceIndex].items.count
-			selectedItemIndex = max(newItemCount - 1, 0)
-		} else {
-			// Already at the first Display, so wrap around (to the last Display)
-			selectedDisplayIndex = displays.count - 1
-			let newSpaceCount = displays[selectedDisplayIndex].spaces.count
-			if selectedSpaceIndex >= newSpaceCount {
-				selectedSpaceIndex = max(newSpaceCount - 1, 0)
-			}
-			let newItemCount = displays[selectedDisplayIndex].spaces[selectedSpaceIndex].items.count
-			selectedItemIndex = max(newItemCount - 1, 0)
+			notifyPanel()
+			return
 		}
-		notifyPanel()
+
+		// Reached the left edge, so look for the previous non-empty Space within the same Display (wrapping around)
+		var targetSpaceIndex = selectedSpaceIndex
+		for _ in 0..<spaces.count {
+			targetSpaceIndex = (targetSpaceIndex - 1 + spaces.count) % spaces.count
+			if !spaces[targetSpaceIndex].items.isEmpty {
+				selectedSpaceIndex = targetSpaceIndex
+				selectedItemIndex = spaces[targetSpaceIndex].items.count - 1
+				notifyPanel()
+				return
+			}
+		}
 	}
 
-	/// Move right (to the next window; moves to the next Display if at the edge)
+	/// Move right (to the next window within the same Display; wraps to the first window of the next Space at the right edge)
 	func moveRight() {
 		guard !displays.isEmpty else { return }
-		let itemCount = displays[selectedDisplayIndex].spaces[selectedSpaceIndex].items.count
+		let spaces = displays[selectedDisplayIndex].spaces
+		guard !spaces.isEmpty else { return }
 
-		if selectedItemIndex < itemCount - 1 {
-			// Move right within the same Space
+		let currentItemCount = spaces[selectedSpaceIndex].items.count
+
+		// Whether moving right within the current Space is possible
+		if selectedItemIndex < currentItemCount - 1 {
 			selectedItemIndex += 1
-		} else if selectedDisplayIndex < displays.count - 1 {
-			// Move to the next Display
-			selectedDisplayIndex += 1
-			// Clamp the Space index to a valid range
-			let newSpaceCount = displays[selectedDisplayIndex].spaces.count
-			if selectedSpaceIndex >= newSpaceCount {
-				selectedSpaceIndex = max(newSpaceCount - 1, 0)
-			}
-			selectedItemIndex = 0
-		} else {
-			// Already at the last Display, so wrap around (to the first Display)
-			selectedDisplayIndex = 0
-			let newSpaceCount = displays[selectedDisplayIndex].spaces.count
-			if selectedSpaceIndex >= newSpaceCount {
-				selectedSpaceIndex = max(newSpaceCount - 1, 0)
-			}
-			selectedItemIndex = 0
+			notifyPanel()
+			return
 		}
-		notifyPanel()
+
+		// Reached the right edge, so look for the next non-empty Space within the same Display (wrapping around)
+		var targetSpaceIndex = selectedSpaceIndex
+		for _ in 0..<spaces.count {
+			targetSpaceIndex = (targetSpaceIndex + 1) % spaces.count
+			if !spaces[targetSpaceIndex].items.isEmpty {
+				selectedSpaceIndex = targetSpaceIndex
+				selectedItemIndex = 0
+				notifyPanel()
+				return
+			}
+		}
 	}
 
 	/// Confirm the selection and switch to the window
@@ -275,11 +267,29 @@ class WindowPaletteManager {
 		)
 	}
 
-	/// Clamp the window index to the current Space's range
-	private func clampItemIndex() {
-		let itemCount = displays[selectedDisplayIndex].spaces[selectedSpaceIndex].items.count
-		if selectedItemIndex >= itemCount {
-			selectedItemIndex = max(itemCount - 1, 0)
+	/// Clamp the window/Space index within the current Display's range
+	private func clampSelectionToCurrentDisplay() {
+		guard !displays.isEmpty else { return }
+		let spaces = displays[selectedDisplayIndex].spaces
+		guard !spaces.isEmpty else {
+			selectedSpaceIndex = 0
+			selectedItemIndex = 0
+			return
+		}
+		if selectedSpaceIndex >= spaces.count {
+			selectedSpaceIndex = max(spaces.count - 1, 0)
+		}
+		// If the destination Space is empty the selection would vanish, so shift to a Space that has content
+		if spaces[selectedSpaceIndex].items.isEmpty,
+		   let nearest = spaces.indices
+			.filter({ !spaces[$0].items.isEmpty })
+			.min(by: { abs($0 - selectedSpaceIndex) < abs($1 - selectedSpaceIndex) }) {
+			selectedSpaceIndex = nearest
+			selectedItemIndex = 0
+		}
+		let items = spaces[selectedSpaceIndex].items
+		if selectedItemIndex >= items.count {
+			selectedItemIndex = max(items.count - 1, 0)
 		}
 	}
 

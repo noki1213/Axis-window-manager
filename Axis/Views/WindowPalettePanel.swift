@@ -31,7 +31,7 @@ struct WindowPaletteDisplay {
 }
 
 /// A translucent panel that shows the window list
-/// Display columns run left to right, with Spaces stacked vertically within each column
+/// Display rows are stacked from top to bottom, with Spaces laid out horizontally within each row
 class WindowPalettePanel: NSPanel {
 
 	// MARK: - Properties
@@ -52,8 +52,11 @@ class WindowPalettePanel: NSPanel {
 	/// cardViews[displayIndex][spaceIndex][itemIndex]
 	private var cardViews: [[[WindowPaletteItemView]]] = []
 
-	/// The main horizontal stack (lays Display columns out side by side)
-	private let mainHorizontalStack = NSStackView()
+	/// The sliding selection highlight view
+	private let highlightView = NSView()
+
+	/// The main vertical stack (lays out Display rows vertically)
+	private let mainVerticalStack = NSStackView()
 
 	/// The visual effect view used for the background blur
 	private let visualEffectView = NSVisualEffectView()
@@ -64,8 +67,8 @@ class WindowPalettePanel: NSPanel {
 	/// The spacing between Space sections
 	private let sectionSpacing: CGFloat = 10
 
-	/// Spacing between Display columns
-	private let displaySpacing: CGFloat = 20
+	/// The spacing between Display rows
+	private let displaySpacing: CGFloat = 16
 
 	/// The margin around the panel
 	private let panelPadding: CGFloat = 16
@@ -73,8 +76,14 @@ class WindowPalettePanel: NSPanel {
 	/// The height of the Space label
 	private let labelHeight: CGFloat = 18
 
+	/// The spacing between the Space label and the card row
+	private let labelSpacing: CGFloat = 4
+
 	/// The height of the Display title
 	private let displayTitleHeight: CGFloat = 22
+
+	/// The spacing between the Display title and the Space row
+	private let displayTitleSpacing: CGFloat = 6
 
 	// MARK: - Init
 
@@ -107,23 +116,31 @@ class WindowPalettePanel: NSPanel {
 		visualEffectView.state = .active
 		PopupAppearance.styleBackground(visualEffectView)
 
-		// Main stack (horizontal: Display columns)
-		mainHorizontalStack.orientation = .horizontal
-		mainHorizontalStack.alignment = .top
-		mainHorizontalStack.spacing = displaySpacing
-		mainHorizontalStack.translatesAutoresizingMaskIntoConstraints = false
+		// The sliding selection highlight view
+		highlightView.wantsLayer = true
+		highlightView.layer?.cornerRadius = 9
+		highlightView.layer?.cornerCurve = .continuous
+		highlightView.layer?.backgroundColor = NSColor(srgbRed: 0x33 / 255.0, green: 0xA5 / 255.0, blue: 0xA5 / 255.0, alpha: 0.30).cgColor
+		highlightView.isHidden = true
 
-		// Add the main stack directly to the visual effect view
-		visualEffectView.addSubview(mainHorizontalStack)
+		// The main stack (stacked vertically: Display rows)
+		mainVerticalStack.orientation = .vertical
+		mainVerticalStack.alignment = .leading
+		mainVerticalStack.spacing = displaySpacing
+		mainVerticalStack.translatesAutoresizingMaskIntoConstraints = false
+
+		// Add the main stack and highlight view to the visual effect view
+		visualEffectView.addSubview(mainVerticalStack)
+		visualEffectView.addSubview(highlightView, positioned: .below, relativeTo: mainVerticalStack)
 		visualEffectView.translatesAutoresizingMaskIntoConstraints = false
 
 		self.contentView = visualEffectView
 
 		NSLayoutConstraint.activate([
-			mainHorizontalStack.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
-			mainHorizontalStack.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -panelPadding),
-			mainHorizontalStack.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
-			mainHorizontalStack.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor, constant: -panelPadding),
+			mainVerticalStack.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
+			mainVerticalStack.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -panelPadding),
+			mainVerticalStack.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
+			mainVerticalStack.trailingAnchor.constraint(lessThanOrEqualTo: visualEffectView.trailingAnchor, constant: -panelPadding),
 		])
 	}
 
@@ -137,8 +154,9 @@ class WindowPalettePanel: NSPanel {
 		self.selectedItemIndex = itemIndex
 
 		rebuildViews()
-		updateSelection()
 		positionOnScreen()
+		visualEffectView.layoutSubtreeIfNeeded()
+		updateSelection(animated: false)
 
 		PopupAppearance.show(self) { [weak self] in
 			self?.orderFrontRegardless()
@@ -150,11 +168,13 @@ class WindowPalettePanel: NSPanel {
 		self.selectedDisplayIndex = displayIndex
 		self.selectedSpaceIndex = spaceIndex
 		self.selectedItemIndex = itemIndex
-		updateSelection()
+		updateSelection(animated: true)
 	}
 
 	/// Close the panel (dismiss it immediately, without animation)
 	func hidePanel() {
+		highlightView.isHidden = true
+		highlightView.layer?.removeAllAnimations()
 		PopupAppearance.hide(self)
 	}
 
@@ -186,26 +206,46 @@ class WindowPalettePanel: NSPanel {
 		}
 		cardViews.removeAll()
 
-		for view in mainHorizontalStack.arrangedSubviews {
-			mainHorizontalStack.removeArrangedSubview(view)
+		for view in mainVerticalStack.arrangedSubviews {
+			mainVerticalStack.removeArrangedSubview(view)
 			view.removeFromSuperview()
 		}
 
-		// Build each Display column
+		// Build each Display row
 		for display in displays {
-			// Container for the whole Display column (stacked vertically)
-			let displayColumn = NSStackView()
-			displayColumn.orientation = .vertical
-			displayColumn.alignment = .leading
-			displayColumn.spacing = sectionSpacing
-			displayColumn.translatesAutoresizingMaskIntoConstraints = false
+			// Add a separator between Display rows if present (a horizontal 1px line)
+			if !mainVerticalStack.arrangedSubviews.isEmpty {
+				let separator = NSView()
+				separator.wantsLayer = true
+				separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+				separator.translatesAutoresizingMaskIntoConstraints = false
+				NSLayoutConstraint.activate([
+					separator.heightAnchor.constraint(equalToConstant: 1),
+				])
+				mainVerticalStack.addArrangedSubview(separator)
+				separator.widthAnchor.constraint(equalTo: mainVerticalStack.widthAnchor).isActive = true
+			}
 
-			// Display title
+			// Container for the whole Display row (stacked vertically: title + Space row)
+			let displayRow = NSStackView()
+			displayRow.orientation = .vertical
+			displayRow.alignment = .leading
+			displayRow.spacing = displayTitleSpacing
+			displayRow.translatesAutoresizingMaskIntoConstraints = false
+
+			// Display title (top-left)
 			let displayTitle = NSTextField(labelWithString: "Display \(display.displayNumber)")
 			displayTitle.font = NSFont.systemFont(ofSize: 13, weight: .bold)
 			displayTitle.textColor = NSColor.white.withAlphaComponent(0.7)
 			displayTitle.translatesAutoresizingMaskIntoConstraints = false
-			displayColumn.addArrangedSubview(displayTitle)
+			displayRow.addArrangedSubview(displayTitle)
+
+			// Stack that lays Space sections out horizontally
+			let spacesRow = NSStackView()
+			spacesRow.orientation = .horizontal
+			spacesRow.alignment = .top
+			spacesRow.spacing = sectionSpacing
+			spacesRow.translatesAutoresizingMaskIntoConstraints = false
 
 			var displayCardViews: [[WindowPaletteItemView]] = []
 
@@ -251,76 +291,80 @@ class WindowPalettePanel: NSPanel {
 				let spaceSection = NSStackView()
 				spaceSection.orientation = .vertical
 				spaceSection.alignment = .leading
-				spaceSection.spacing = 4
+				spaceSection.spacing = labelSpacing
 				spaceSection.translatesAutoresizingMaskIntoConstraints = false
 
 				spaceSection.addArrangedSubview(spaceLabel)
 				spaceSection.addArrangedSubview(cardRow)
 
-				displayColumn.addArrangedSubview(spaceSection)
+				spacesRow.addArrangedSubview(spaceSection)
 			}
 
 			cardViews.append(displayCardViews)
-
-			// Set a minimum width for the Display column so the card doesn't shrink
-			let maxCards = display.spaces.map { $0.items.count }.max() ?? 1
-			let columnWidth = CGFloat(maxCards) * (WindowPaletteItemView.cardWidth + cardSpacing) - cardSpacing
-			displayColumn.widthAnchor.constraint(greaterThanOrEqualToConstant: columnWidth).isActive = true
-			displayColumn.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-			// Add a divider between Display columns if there is one
-			if !mainHorizontalStack.arrangedSubviews.isEmpty {
-				let separator = NSView()
-				separator.wantsLayer = true
-				separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
-				separator.translatesAutoresizingMaskIntoConstraints = false
-				NSLayoutConstraint.activate([
-					separator.widthAnchor.constraint(equalToConstant: 1),
-				])
-				mainHorizontalStack.addArrangedSubview(separator)
-			}
-
-			mainHorizontalStack.addArrangedSubview(displayColumn)
+			displayRow.addArrangedSubview(spacesRow)
+			mainVerticalStack.addArrangedSubview(displayRow)
 		}
 	}
 
-	/// Update the selection state
-	private func updateSelection() {
+	/// Update the selection state and highlight position
+	private func updateSelection(animated: Bool = true) {
+		var selectedCardView: WindowPaletteItemView?
+
 		for (dIndex, displayCards) in cardViews.enumerated() {
 			for (sIndex, spaceCards) in displayCards.enumerated() {
 				for (iIndex, card) in spaceCards.enumerated() {
-					card.isSelected = (dIndex == selectedDisplayIndex
+					let isSel = (dIndex == selectedDisplayIndex
 						&& sIndex == selectedSpaceIndex
 						&& iIndex == selectedItemIndex)
+					card.isSelected = isSel
+					if isSel {
+						selectedCardView = card
+					}
 				}
 			}
 		}
+
+		guard let card = selectedCardView, let contentView = self.contentView else {
+			highlightView.isHidden = true
+			return
+		}
+
+		highlightView.isHidden = false
+		let targetFrame = card.convert(card.bounds, to: contentView)
+		PopupAppearance.animateFrame(of: highlightView, to: targetFrame, animated: animated)
 	}
 
 	/// Center the panel on screen
 	private func positionOnScreen() {
 		guard let screen = NSScreen.main else { return }
 
-		// Calculate the width of each Display column
-		var totalWidth: CGFloat = 0
+		// Compute each Display row's width and take the widest one (width = the widest Display row)
+		var maxDisplayRowWidth: CGFloat = 0
 		for display in displays {
-			let maxCards = display.spaces.map { $0.items.count }.max() ?? 1
-			let columnWidth = CGFloat(maxCards) * (WindowPaletteItemView.cardWidth + cardSpacing) - cardSpacing
-			totalWidth += columnWidth
+			var rowWidth: CGFloat = 0
+			for (index, space) in display.spaces.enumerated() {
+				let cardCount = space.items.count
+				let spaceWidth = CGFloat(cardCount) * WindowPaletteItemView.cardWidth + CGFloat(max(cardCount - 1, 0)) * cardSpacing
+				rowWidth += spaceWidth
+				if index > 0 {
+					rowWidth += sectionSpacing
+				}
+			}
+			maxDisplayRowWidth = max(maxDisplayRowWidth, rowWidth)
 		}
-		// Spacing and divider between Display columns
-		if displays.count > 1 {
-			totalWidth += CGFloat(displays.count - 1) * (displaySpacing + 1)
+		if maxDisplayRowWidth == 0 {
+			maxDisplayRowWidth = WindowPaletteItemView.cardWidth
 		}
-		let panelWidth = min(totalWidth + panelPadding * 2, screen.frame.width)
+		let panelWidth = min(maxDisplayRowWidth + panelPadding * 2, screen.frame.width)
 
-		// Panel height: match whichever Display has the most Spaces
-		let maxSpaces = displays.map { $0.spaces.count }.max() ?? 1
-		let spaceHeight = labelHeight + 4 + WindowPaletteItemView.cardHeight
-		let contentHeight = displayTitleHeight + sectionSpacing
-			+ CGFloat(maxSpaces) * spaceHeight
-			+ CGFloat(max(maxSpaces - 1, 0)) * sectionSpacing
-		let panelHeight = min(contentHeight + panelPadding * 2, screen.frame.height * 0.7)
+		// Panel height: the sum of the heights of all Display rows (height = total of all Display rows)
+		let singleRowHeight = displayTitleHeight + displayTitleSpacing + labelHeight + labelSpacing + WindowPaletteItemView.cardHeight
+		var totalContentHeight = CGFloat(displays.count) * singleRowHeight
+		if displays.count > 1 {
+			// Since the stack spacing appears both above and below the 1px separator, count the spacing twice
+			totalContentHeight += CGFloat(displays.count - 1) * (displaySpacing * 2 + 1)
+		}
+		let panelHeight = min(totalContentHeight + panelPadding * 2, screen.frame.height * 0.85)
 
 		let panelFrame = NSRect(
 			x: screen.frame.midX - panelWidth / 2,
