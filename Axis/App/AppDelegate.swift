@@ -464,6 +464,71 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// Log the situation right before Zen mode gets automatically cancelled (for root-cause diagnosis)
+    /// Logged to ~/Library/Logs/Axis-perf.log
+    private func logZenAutoExitReason(
+        currentWindows: [WindowInfo],
+        onScreenIDs: Set<CGWindowID>,
+        currentCount: Int
+    ) {
+        guard PerfLog.enabled else { return }
+
+        let zen = ZenModeManager.shared
+        let currentIDs = Set(currentWindows.map { $0.id })
+        let vanishedIDs = lastWindowIDs.subtracting(currentIDs)
+        let appearedIDs = currentIDs.subtracting(lastWindowIDs)
+
+        // The name of the monitor Zen is active on (to distinguish changes coming from a different monitor)
+        let zenScreenName = zen.activeScreen?.localizedName ?? "?"
+
+        PerfLog.logf(
+            "ZEN自動解除: 前回=%d 今回=%d 消えた=%d 増えた=%d Zenモニター=%@",
+            lastWindowCount, currentCount, vanishedIDs.count, appearedIDs.count, zenScreenName
+        )
+
+        // A vanished window: was it hidden, or is it still showing in the on-screen list (i.e. an AX miss)?
+        for id in vanishedIDs {
+            let name = zen.hiddenWindowDescription(for: id) ?? "不明"
+            let wasHidden = zen.hiddenWindowIDs.contains(id)
+            let stillOnScreen = onScreenIDs.contains(id)
+            PerfLog.logf(
+                "  消えた: id=%u %@ Zenで隠したウィンドウ=%@ 画面一覧に残っている=%@",
+                id, name,
+                wasHidden ? "はい" : "いいえ",
+                stillOnScreen ? "はい" : "いいえ"
+            )
+        }
+
+        // A window that was added: which app, on which monitor
+        for window in currentWindows where appearedIDs.contains(window.id) {
+            let screenName = NSScreen.screens.first {
+                $0.frame.contains(CGPoint(x: window.frame.midX, y: window.frame.midY))
+            }?.localizedName ?? "?"
+            PerfLog.logf(
+                "  増えた: id=%u %@ / %@ モニター=%@",
+                window.id, window.app.localizedName ?? "?", window.title, screenName
+            )
+        }
+
+        // The number of hidden windows that dropped out of the on-screen list
+        // (direct evidence of whether the 1px-left-in-the-corner trick has broken down)
+        let hiddenIDs = zen.hiddenWindowIDs
+        let droppedHidden = hiddenIDs.subtracting(onScreenIDs)
+        PerfLog.logf(
+            "  隠したウィンドウ: 全%d枚 画面一覧から落ちた=%d枚",
+            hiddenIDs.count, droppedHidden.count
+        )
+        for id in droppedHidden {
+            let name = zen.hiddenWindowDescription(for: id) ?? "不明"
+            let frame = zen.hiddenWindowCurrentFrame(for: id)
+            PerfLog.logf(
+                "    落ちた: id=%u %@ 現在位置=(%.0f, %.0f) サイズ=(%.0f x %.0f)",
+                id, name, frame?.origin.x ?? -1, frame?.origin.y ?? -1,
+                frame?.width ?? -1, frame?.height ?? -1
+            )
+        }
+    }
+
     private func checkForWindowChanges() {
         // While a Space switch, workspace switch, monitor-change handling, or wake from sleep is in progress,
         // Skip while Mission Control is showing
@@ -479,11 +544,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if ZenModeManager.shared.isActive {
             let onScreenIDsZen = accessibilityManager.getOnScreenWindowIDs()
             let allWindowsZen = accessibilityManager.getAllWindows()
-            let currentCountZen = allWindowsZen.filter { onScreenIDsZen.contains($0.id) && $0.shouldBeManaged() }.count
+            let managedZen = allWindowsZen.filter { onScreenIDsZen.contains($0.id) && $0.shouldBeManaged() }
+            let currentCountZen = managedZen.count
 
             guard currentCountZen != lastWindowCount else {
                 return
             }
+
+            // Diagnostic logging to pin down what unintentionally cancels Zen mode
+            // A count change alone can't tell whether a window on another monitor was added or removed, or
+            // because there's no way to tell whether a window hidden in the corner just dropped out of the on-screen list,
+            // Record the diff's contents at the moment of cancellation
+            logZenAutoExitReason(
+                currentWindows: managedZen,
+                onScreenIDs: onScreenIDsZen,
+                currentCount: currentCountZen
+            )
 
             // Window changed → exit Zen mode and return to normal tiling
             ZenModeManager.shared.exit()
