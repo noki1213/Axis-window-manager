@@ -764,18 +764,7 @@ class WorkspaceManager: ObservableObject {
 		// 7. Hide the old windows
 		hideWindowsForWorkspace(currentWS, on: id)
 
-		// 8. Capture the post-switch screen and run the two-screen slide animation
-		if let oldImage = oldSnapshot,
-		   let newImage = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen) {
-			WorkspaceTransitionManager.shared.performSlideTransition(
-				oldSnapshot: oldImage,
-				newSnapshot: newImage,
-				isMovingNext: isMovingNext,
-				on: screen
-			)
-		}
-
-		// 9. Focus a window in the workspace (record the ID that actually got focus)
+		// 8. Focus a window in the workspace (record the ID that actually got focus)
 		let focusedID: CGWindowID?
 		if let windowID = focusWindowID {
 			focusedID = focusWindow(windowID, in: workspace, on: id)
@@ -783,13 +772,26 @@ class WorkspaceManager: ObservableObject {
 			focusedID = focusFirstWindow(in: workspace, on: id)
 		}
 
-		// 8. Update the border and move the cursor to the center of the focused window
-		syncBorderAndCursor(to: focusedID)
+		// 9. Capture the post-switch screen and run the two-screen slide animation
+		if let oldImage = oldSnapshot,
+		   let newImage = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen) {
+			WorkspaceTransitionManager.shared.performSlideTransition(
+				oldSnapshot: oldImage,
+				newSnapshot: newImage,
+				isMovingNext: isMovingNext,
+				on: screen,
+				completion: { [weak self] in
+					self?.syncBorderAndCursor(to: focusedID)
+				}
+			)
+		} else {
+			syncBorderAndCursor(to: focusedID)
+		}
 
-		// 9. Update the workspace number in the menu bar
+		// 10. Update the workspace number in the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
 
-		// 10. Clear the switching-in-progress flag after a short delay
+		// 11. Clear the switching-in-progress flag after a short delay
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
 			self?.isSwitching = false
 		}
