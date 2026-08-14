@@ -298,6 +298,9 @@ class ZenModeManager: ObservableObject {
         // (while it's on a secondary monitor, macOS constrains it to that monitor's size)
         window.setPosition(targetFrame.origin)
 
+        // Immediately start a slide animation of the border toward the large central frame (a springy expand)
+        BorderManager.shared.updateBorder(withExplicitTarget: targetFrame)
+
         let axElement = window.axElement
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             window.setFrame(targetFrame)
