@@ -340,46 +340,34 @@ class HotkeyManager: ObservableObject {
 		case .moveWindowLeft:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.moveWindow(direction: .left)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 		case .moveWindowRight:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.moveWindow(direction: .right)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 		case .moveWindowUp:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.moveWindow(direction: .up)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 		case .moveWindowDown:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.moveWindow(direction: .down)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 
 		// MARK: Merge/split (step move)
 		case .stepMoveLeft:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.stepMoveWindow(direction: .left)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 		case .stepMoveRight:
 			DispatchQueue.main.async { [weak self] in
 				self?.tilingEngine.stepMoveWindow(direction: .right)
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-					BorderManager.shared.updateBorder()
-				}
+				BorderManager.shared.updateBorder()
 			}
 
 		// MARK: Float (floating)

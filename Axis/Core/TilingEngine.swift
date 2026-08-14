@@ -516,6 +516,7 @@ class TilingEngine: ObservableObject {
         // Keep focus as is, and move the cursor too
         currentWindow.focus()
         moveCursorToWindow(currentWindow)
+        BorderManager.shared.updateBorder()
     }
 
     /// Move the focused window one step in the given direction (merge/split, equivalent to niri's/PaperWM's consume/expel)
@@ -569,6 +570,7 @@ class TilingEngine: ObservableObject {
         // Keep focus as is, and move the cursor too
         currentWindow.focus()
         moveCursorToWindow(currentWindow)
+        BorderManager.shared.updateBorder()
     }
 
     /// Insert a new window into the column structure at the position specified by the placement reservation (Ctrl+Opt+N)
@@ -1088,6 +1090,8 @@ class TilingEngine: ObservableObject {
 
         let columnSizes = columns.map { $0.count }
         let frames = slotFrames(columnSizes: columnSizes, on: screen)
+        let focusedID = accessibilityManager.getFocusedWindow()?.id
+        var focusedTargetFrame: CGRect?
 
         for (colIndex, column) in columns.enumerated() {
             guard colIndex < frames.count else { continue }
@@ -1097,7 +1101,14 @@ class TilingEngine: ObservableObject {
                 window.setFrame(newFrame)
                 // Also update the frame held by the column structure (so stale coordinates don't linger)
                 updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
+                if window.id == focusedID {
+                    focusedTargetFrame = newFrame
+                }
             }
+        }
+
+        if let target = focusedTargetFrame {
+            BorderManager.shared.updateBorder(withExplicitTarget: target)
         }
     }
 
@@ -1432,6 +1443,8 @@ class TilingEngine: ObservableObject {
         let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
 
         var currentX = visibleFrame.minX + screenPadding
+        let focusedID = accessibilityManager.getFocusedWindow()?.id
+        var focusedTargetFrame: CGRect?
 
         for (colIndex, column) in columns.enumerated() {
             guard !column.isEmpty else { continue }
@@ -1470,11 +1483,18 @@ class TilingEngine: ObservableObject {
                 window.setFrame(newFrame)
                 // Also update the frame held by the column structure (so stale coordinates don't linger)
                 updateCachedFrame(windowID: window.id, to: newFrame, on: screenID)
+                if window.id == focusedID {
+                    focusedTargetFrame = newFrame
+                }
 
                 currentY += rowHeight + windowGap
             }
 
             currentX += columnWidth + windowGap
+        }
+
+        if let target = focusedTargetFrame {
+            BorderManager.shared.updateBorder(withExplicitTarget: target)
         }
     }
 

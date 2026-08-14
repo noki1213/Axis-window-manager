@@ -187,7 +187,7 @@ class BorderManager: ObservableObject {
         scheduleUpdateBorder()
     }
 
-    func updateBorder() {
+    func updateBorder(withExplicitTarget explicitTarget: CGRect? = nil) {
         // Don't show the border while Mission Control is active
         if isInMissionControl {
             return
@@ -232,7 +232,8 @@ class BorderManager: ObservableObject {
         }
         
         let windowChanged = (currentWindowID != focusedWindow.id)
-        let targetRect = calculateBorderRect(for: focusedWindow.frame)
+        let rawFrame = explicitTarget ?? focusedWindow.frame
+        let targetRect = calculateBorderRect(for: rawFrame)
 
         self.currentWindow = focusedWindow
         self.currentWindowID = focusedWindow.id
@@ -350,12 +351,16 @@ class BorderManager: ObservableObject {
         let newFrame = CGRect(origin: position, size: size)
         let expectedBorderRect = calculateBorderRect(for: newFrame)
 
-        // Correct any positional drift (applied immediately)
-        if abs(borderWindow.frame.origin.x - expectedBorderRect.origin.x) > 1 ||
-           abs(borderWindow.frame.origin.y - expectedBorderRect.origin.y) > 1 ||
-           abs(borderWindow.frame.width - expectedBorderRect.width) > 1 ||
-           abs(borderWindow.frame.height - expectedBorderRect.height) > 1 {
+        let dx = abs(borderWindow.frame.origin.x - expectedBorderRect.origin.x)
+        let dy = abs(borderWindow.frame.origin.y - expectedBorderRect.origin.y)
+        let dw = abs(borderWindow.frame.width - expectedBorderRect.width)
+        let dh = abs(borderWindow.frame.height - expectedBorderRect.height)
 
+        if dx > 15 || dy > 15 || dw > 15 || dh > 15 {
+            // Large position/size changes (window moves, resizes) are followed with a slide animation
+            scheduleUpdateBorder()
+        } else if dx > 1 || dy > 1 || dw > 1 || dh > 1 {
+            // Correct small position drift (1-14px) immediately
             borderWindow.setFrame(expectedBorderRect, display: true)
             borderView?.frame = NSRect(origin: .zero, size: expectedBorderRect.size)
         }
