@@ -25,7 +25,7 @@ class BorderManager: ObservableObject {
 
     // Settings
     private let padding: CGFloat = 10.0 // 枠線のパディング
-    private let animationDuration: TimeInterval = 0.22 // スライドアニメーション時間
+    private let animationDuration: TimeInterval = 0.24 // スライドアニメーション時間
 
     /// Apps that don't get a border.
     /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
@@ -237,13 +237,20 @@ class BorderManager: ObservableObject {
         self.currentWindow = focusedWindow
         self.currentWindowID = focusedWindow.id
 
+        // The focused window changed = it left the empty monitor
         if windowChanged {
-            // The focused window changed = it left the empty monitor
             TilingEngine.shared.cursorScreen = nil
+        }
 
-            if let existingWindow = borderWindow, existingWindow.isVisible {
-                // If the border is already showing: move it smoothly with a slide animation
-                let oldFrame = existingWindow.frame
+        if let existingWindow = borderWindow, existingWindow.isVisible {
+            // If the border is already showing: slide-animate it if the position or size changed
+            let oldFrame = existingWindow.frame
+            let frameChanged = abs(oldFrame.origin.x - targetRect.origin.x) > 2 ||
+                               abs(oldFrame.origin.y - targetRect.origin.y) > 2 ||
+                               abs(oldFrame.width - targetRect.width) > 2 ||
+                               abs(oldFrame.height - targetRect.height) > 2
+
+            if frameChanged {
                 let centerDistance = hypot(targetRect.midX - oldFrame.midX, targetRect.midY - oldFrame.midY)
                 let isSameScreen = (centerDistance < 3000)
 
@@ -251,7 +258,7 @@ class BorderManager: ObservableObject {
                     self.isAnimating = true
                     NSAnimationContext.runAnimationGroup({ context in
                         context.duration = self.animationDuration
-                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)
                         existingWindow.animator().setFrame(targetRect, display: true)
                     }, completionHandler: { [weak self] in
                         self?.isAnimating = false
@@ -259,36 +266,18 @@ class BorderManager: ObservableObject {
                 } else {
                     existingWindow.setFrame(targetRect, display: true)
                 }
+            }
+            existingWindow.orderFront(nil)
+        } else {
+            // Returning from hidden: show it instantly, with no animation
+            if let existingWindow = borderWindow {
+                existingWindow.setFrame(targetRect, display: true)
                 existingWindow.orderFront(nil)
             } else {
-                // Returning from hidden: show it instantly, with no animation
-                if let existingWindow = borderWindow {
-                    existingWindow.setFrame(targetRect, display: true)
-                    existingWindow.orderFront(nil)
-                } else {
-                    let (newWindow, newView) = createBorderWindow(for: targetRect)
-                    self.borderWindow = newWindow
-                    self.borderView = newView
-                    newWindow.orderFront(nil)
-                }
-            }
-        } else {
-            // If it's the same window
-            if let existingWindow = borderWindow, existingWindow.isVisible {
-                // Update position only (applied immediately unless an animation is running)
-                if !isAnimating {
-                    existingWindow.setFrame(targetRect, display: true)
-                }
-            } else {
-                if let existingWindow = borderWindow {
-                    existingWindow.setFrame(targetRect, display: true)
-                    existingWindow.orderFront(nil)
-                } else {
-                    let (newWindow, newView) = createBorderWindow(for: targetRect)
-                    self.borderWindow = newWindow
-                    self.borderView = newView
-                    newWindow.orderFront(nil)
-                }
+                let (newWindow, newView) = createBorderWindow(for: targetRect)
+                self.borderWindow = newWindow
+                self.borderView = newView
+                newWindow.orderFront(nil)
             }
         }
     }

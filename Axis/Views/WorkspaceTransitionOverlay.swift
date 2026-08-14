@@ -13,7 +13,8 @@ class WorkspaceTransitionManager {
 	static let shared = WorkspaceTransitionManager()
 
 	private var overlayWindows: [ScreenIdentifier: NSWindow] = [:]
-	private let transitionDuration: TimeInterval = 0.28 // 自然なバネ・減衰時間
+	/// A relaxed, smooth decay time close to macOS's built-in Spaces switching
+	private let transitionDuration: TimeInterval = 0.36
 
 	private init() {}
 
@@ -52,11 +53,13 @@ class WorkspaceTransitionManager {
 	///   - newSnapshot: the screen capture after switching
 	///   - isMovingNext: true for the +1 direction (next), false for the -1 direction (previous)
 	///   - screen: the target monitor
+	///   - completion: handler called after the animation finishes
 	func performSlideTransition(
 		oldSnapshot: CGImage,
 		newSnapshot: CGImage,
 		isMovingNext: Bool,
-		on screen: NSScreen
+		on screen: NSScreen,
+		completion: (() -> Void)? = nil
 	) {
 		let screenFrame = screen.frame
 		let screenID = ScreenIdentifier(from: screen)
@@ -75,7 +78,7 @@ class WorkspaceTransitionManager {
 			defer: false
 		)
 		overlay.isOpaque = false
-		overlay.backgroundColor = .clear
+		overlay.backgroundColor = .black
 		overlay.level = .floating + 20
 		overlay.ignoresMouseEvents = true
 		overlay.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
@@ -83,40 +86,49 @@ class WorkspaceTransitionManager {
 
 		let width = screenFrame.width
 		let height = screenFrame.height
+		let gap: CGFloat = 16.0 // 画面間のわずかなセパレータ余白（macOS Spacesの立体感）
 
 		let contentView = NSView(frame: NSRect(origin: .zero, size: screenFrame.size))
 		contentView.wantsLayer = true
 		contentView.layer?.masksToBounds = true
 		overlay.contentView = contentView
 
-		// Container layer that lays the two screens side by side (width: width * 2)
+		// Container layer that lays the two screens side by side (width: (width + gap) * 2)
 		let containerLayer = CALayer()
-		containerLayer.frame = CGRect(x: 0, y: 0, width: width * 2, height: height)
+		containerLayer.frame = CGRect(x: 0, y: 0, width: (width + gap) * 2, height: height)
 
 		let leftLayer = CALayer()
 		leftLayer.frame = CGRect(x: 0, y: 0, width: width, height: height)
 		leftLayer.contentsScale = screen.backingScaleFactor
 		leftLayer.contentsGravity = .resizeAspectFill
+		leftLayer.shadowColor = NSColor.black.cgColor
+		leftLayer.shadowOpacity = 0.35
+		leftLayer.shadowRadius = 20
+		leftLayer.shadowOffset = CGSize(width: 0, height: 0)
 
 		let rightLayer = CALayer()
-		rightLayer.frame = CGRect(x: width, y: 0, width: width, height: height)
+		rightLayer.frame = CGRect(x: width + gap, y: 0, width: width, height: height)
 		rightLayer.contentsScale = screen.backingScaleFactor
 		rightLayer.contentsGravity = .resizeAspectFill
+		rightLayer.shadowColor = NSColor.black.cgColor
+		rightLayer.shadowOpacity = 0.35
+		rightLayer.shadowRadius = 20
+		rightLayer.shadowOffset = CGSize(width: 0, height: 0)
 
 		let startX: CGFloat
 		let endX: CGFloat
 
 		if isMovingNext {
-			// +1 (next): old on the left, new on the right. The container slides from 0 to -width
+			// +1 (next): old on the left, new on the right. The container slides from 0 to -(width + gap)
 			leftLayer.contents = oldSnapshot
 			rightLayer.contents = newSnapshot
 			startX = 0
-			endX = -width
+			endX = -(width + gap)
 		} else {
-			// -1 (previous): new on the left, old on the right. The container slides from -width to 0
+			// -1 (previous): new on the left, old on the right. The container slides from -(width + gap) to 0
 			leftLayer.contents = newSnapshot
 			rightLayer.contents = oldSnapshot
-			startX = -width
+			startX = -(width + gap)
 			endX = 0
 		}
 
@@ -132,20 +144,29 @@ class WorkspaceTransitionManager {
 		// Run the animation
 		CATransaction.begin()
 		CATransaction.setAnimationDuration(transitionDuration)
-		CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)) // 臨界減衰バネ
+		// A decay curve that accelerates smoothly from the initial velocity and eases softly down to zero at the end
+		CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.25, 1.0))
 
 		CATransaction.setCompletionBlock { [weak self, weak overlay] in
-			overlay?.orderOut(nil as Any?)
-			if let self = self {
-				self.overlayWindows.removeValue(forKey: screenID)
-			}
+			// Fade very slightly before handing off to the real window, to avoid a jarring landing
+			NSAnimationContext.runAnimationGroup({ context in
+				context.duration = 0.05
+				overlay?.animator().alphaValue = 0.0
+			}, completionHandler: {
+				overlay?.orderOut(nil as Any?)
+				overlay?.alphaValue = 1.0
+				if let self = self {
+					self.overlayWindows.removeValue(forKey: screenID)
+				}
+				completion?()
+			})
 		}
 
 		let anim = CABasicAnimation(keyPath: "transform.translation.x")
 		anim.fromValue = startX
 		anim.toValue = endX
 		anim.duration = transitionDuration
-		anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)
+		anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.25, 1.0)
 		anim.fillMode = .forwards
 		anim.isRemovedOnCompletion = false
 		containerLayer.add(anim, forKey: "slide")
