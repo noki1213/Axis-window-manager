@@ -735,6 +735,9 @@ class WorkspaceManager: ObservableObject {
 			ZenModeManager.shared.toggle()
 		}
 
+		// Start the slide animation for the workspace switch
+		WorkspaceTransitionManager.shared.startTransition(from: currentWS, to: workspace, on: screen)
+
 		// 1. Save the current workspace's TilingEngine state
 		saveTilingState(for: id, workspace: currentWS, on: screen)
 
