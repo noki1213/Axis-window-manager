@@ -76,4 +76,7 @@ fi
 rm -rf "$DEST"
 cp -R "$BUILT_APP" "$DEST"
 
-echo "==> Done. Installed $APP_NAME to /Applications."
+echo "==> Launching $APP_NAME ..."
+open "$DEST"
+
+echo "==> Done. Installed and launched $APP_NAME."
