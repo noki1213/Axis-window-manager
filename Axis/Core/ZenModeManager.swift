@@ -107,8 +107,11 @@ class ZenModeManager: ObservableObject {
         // Focus the window
         focusedWindow.focus()
 
-        // Update the border after centering finishes
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        // Have the border smoothly grow to follow the window right from the start of a resize
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            BorderManager.shared.updateBorder()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             BorderManager.shared.updateBorder()
         }
     }
@@ -124,12 +127,12 @@ class ZenModeManager: ObservableObject {
         // Move a window that ended up off-screen back to its original position
         restoreHiddenWindows()
         
-        // Retile after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Retiling puts it back in its original position
+        // Retile and update the border after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
             TilingEngine.shared.tileAllScreens()
-            
-            // Update the border
+            BorderManager.shared.updateBorder()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             BorderManager.shared.updateBorder()
         }
     }

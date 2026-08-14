@@ -735,18 +735,13 @@ class WorkspaceManager: ObservableObject {
 			ZenModeManager.shared.toggle()
 		}
 
-		let isMovingNext = (workspace > currentWS)
-
-		// 1. Capture the screen before switching
-		let oldSnapshot = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen)
-
-		// 2. Save the TilingEngine state for the current workspace
+		// 1. Save the current workspace's TilingEngine state
 		saveTilingState(for: id, workspace: currentWS, on: screen)
 
-		// 3. Update activeWorkspace
+		// 2. Update activeWorkspace
 		activeWorkspace[id] = workspace
 
-		// 4. Create the destination workspace if it doesn't exist yet
+		// 3. Create the destination workspace if it doesn't exist
 		if workspaceWindows[id]?[workspace] == nil {
 			if workspaceWindows[id] == nil {
 				workspaceWindows[id] = [:]
@@ -754,17 +749,14 @@ class WorkspaceManager: ObservableObject {
 			workspaceWindows[id]?[workspace] = []
 		}
 
-		// 5. Restore the TilingEngine state for the destination workspace
+		// 4. Restore the destination workspace's TilingEngine state
 		restoreTilingState(for: id, workspace: workspace, on: screen)
 
-		// 6. Restore the destination's windows first, then tile them
+		// 5. Restore and tile the destination windows first (so an empty screen never shows)
 		showWindowsForWorkspace(workspace, on: id)
 		tilingEngine.tile(on: screen)
 
-		// 7. Hide the old windows
-		hideWindowsForWorkspace(currentWS, on: id)
-
-		// 8. Focus a window in the workspace (record the ID that actually got focus)
+		// 6. Focus a window in the workspace (note down the ID actually focused)
 		let focusedID: CGWindowID?
 		if let windowID = focusWindowID {
 			focusedID = focusWindow(windowID, in: workspace, on: id)
@@ -772,26 +764,18 @@ class WorkspaceManager: ObservableObject {
 			focusedID = focusFirstWindow(in: workspace, on: id)
 		}
 
-		// 9. Capture the post-switch screen and run the two-screen slide animation
-		if let oldImage = oldSnapshot,
-		   let newImage = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen) {
-			WorkspaceTransitionManager.shared.performSlideTransition(
-				oldSnapshot: oldImage,
-				newSnapshot: newImage,
-				isMovingNext: isMovingNext,
-				on: screen,
-				completion: { [weak self] in
-					self?.syncBorderAndCursor(to: focusedID)
-				}
-			)
-		} else {
-			syncBorderAndCursor(to: focusedID)
+		// 7. Hide the old windows after a short delay (once the new windows have rendered on screen)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+			self?.hideWindowsForWorkspace(currentWS, on: id)
 		}
 
-		// 10. Update the workspace number in the menu bar
+		// 8. Update the border and move the cursor to the center of the focused window
+		syncBorderAndCursor(to: focusedID)
+
+		// 9. Update the workspace number in the menu bar
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
 
-		// 11. Clear the switching-in-progress flag after a short delay
+		// 10. Clear the switching-in-progress flag after a short delay
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
 			self?.isSwitching = false
 		}
