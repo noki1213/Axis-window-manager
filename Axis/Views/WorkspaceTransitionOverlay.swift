@@ -13,29 +13,22 @@ class WorkspaceTransitionManager {
 	static let shared = WorkspaceTransitionManager()
 
 	private var overlayWindows: [ScreenIdentifier: NSWindow] = [:]
-	private let transitionDuration: TimeInterval = 0.26 // 自然なバネ・減衰時間
+	private let transitionDuration: TimeInterval = 0.28 // 自然なバネ・減衰時間
 
 	private init() {}
 
-	/// Start the transition animation for a workspace switch
-	/// - Parameters:
-	///   - from: the workspace number being switched from
-	///   - to: the workspace number being switched to
-	///   - screen: the target monitor
-	func startTransition(from fromWS: Int, to toWS: Int, on screen: NSScreen) {
-		guard fromWS != toWS else { return }
-
-		let isMovingNext = (toWS > fromWS)
-		let screenFrame = screen.frame
-		let screenID = ScreenIdentifier(from: screen)
-
-		// Close any existing transition window
-		if let oldWindow = overlayWindows[screenID] {
-			oldWindow.orderOut(nil as Any?)
-			overlayWindows.removeValue(forKey: screenID)
+	/// Check and request screen recording permission (called at launch)
+	func checkScreenCaptureAccess() {
+		if #available(macOS 11.0, *) {
+			if !CGPreflightScreenCaptureAccess() {
+				CGRequestScreenCaptureAccess()
+			}
 		}
+	}
 
-		// Capture the screen before switching
+	/// Capture the current screen of the target monitor for the switch
+	func captureCurrentScreen(on screen: NSScreen) -> CGImage? {
+		let screenFrame = screen.frame
 		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 		let cgRect = CGRect(
 			x: screenFrame.origin.x,
@@ -45,13 +38,33 @@ class WorkspaceTransitionManager {
 		)
 
 		let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? CGMainDisplayID()
-		guard let snapshot = CGWindowListCreateImage(
+		return CGWindowListCreateImage(
 			cgRect,
 			[.optionOnScreenOnly],
 			kCGNullWindowID,
 			[.bestResolution]
-		) ?? CGDisplayCreateImage(displayID) else {
-			return
+		) ?? CGDisplayCreateImage(displayID)
+	}
+
+	/// Run a transition that lays the two screens side by side and slides them in/out
+	/// - Parameters:
+	///   - oldSnapshot: the screen capture before switching
+	///   - newSnapshot: the screen capture after switching
+	///   - isMovingNext: true for the +1 direction (next), false for the -1 direction (previous)
+	///   - screen: the target monitor
+	func performSlideTransition(
+		oldSnapshot: CGImage,
+		newSnapshot: CGImage,
+		isMovingNext: Bool,
+		on screen: NSScreen
+	) {
+		let screenFrame = screen.frame
+		let screenID = ScreenIdentifier(from: screen)
+
+		// Close any existing transition window
+		if let oldWindow = overlayWindows[screenID] {
+			oldWindow.orderOut(nil as Any?)
+			overlayWindows.removeValue(forKey: screenID)
 		}
 
 		// Create the overlay window
@@ -68,30 +81,58 @@ class WorkspaceTransitionManager {
 		overlay.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
 		overlay.isReleasedWhenClosed = false
 
+		let width = screenFrame.width
+		let height = screenFrame.height
+
 		let contentView = NSView(frame: NSRect(origin: .zero, size: screenFrame.size))
 		contentView.wantsLayer = true
 		contentView.layer?.masksToBounds = true
 		overlay.contentView = contentView
 
-		// Layer that holds the captured image
-		let snapshotLayer = CALayer()
-		snapshotLayer.frame = contentView.bounds
-		snapshotLayer.contentsScale = screen.backingScaleFactor
-		snapshotLayer.contents = snapshot
-		snapshotLayer.contentsGravity = .resizeAspectFill
-		contentView.layer?.addSublayer(snapshotLayer)
+		// Container layer that lays the two screens side by side (width: width * 2)
+		let containerLayer = CALayer()
+		containerLayer.frame = CGRect(x: 0, y: 0, width: width * 2, height: height)
 
+		let leftLayer = CALayer()
+		leftLayer.frame = CGRect(x: 0, y: 0, width: width, height: height)
+		leftLayer.contentsScale = screen.backingScaleFactor
+		leftLayer.contentsGravity = .resizeAspectFill
+
+		let rightLayer = CALayer()
+		rightLayer.frame = CGRect(x: width, y: 0, width: width, height: height)
+		rightLayer.contentsScale = screen.backingScaleFactor
+		rightLayer.contentsGravity = .resizeAspectFill
+
+		let startX: CGFloat
+		let endX: CGFloat
+
+		if isMovingNext {
+			// +1 (next): old on the left, new on the right. The container slides from 0 to -width
+			leftLayer.contents = oldSnapshot
+			rightLayer.contents = newSnapshot
+			startX = 0
+			endX = -width
+		} else {
+			// -1 (previous): new on the left, old on the right. The container slides from -width to 0
+			leftLayer.contents = newSnapshot
+			rightLayer.contents = oldSnapshot
+			startX = -width
+			endX = 0
+		}
+
+		containerLayer.addSublayer(leftLayer)
+		containerLayer.addSublayer(rightLayer)
+		contentView.layer?.addSublayer(containerLayer)
+
+		// Set the initial position
+		containerLayer.transform = CATransform3DMakeTranslation(startX, 0, 0)
 		overlay.orderFront(nil as Any?)
 		overlayWindows[screenID] = overlay
 
-		// Calculate the slide distance and direction
-		// +1 (next): the old screen slides out to the left (-width)
-		// -1 (previous): the old screen slides out to the right (+width)
-		let slideDistance = isMovingNext ? -screenFrame.width : screenFrame.width
-
+		// Run the animation
 		CATransaction.begin()
 		CATransaction.setAnimationDuration(transitionDuration)
-		CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)) // 減衰カーブ
+		CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)) // 臨界減衰バネ
 
 		CATransaction.setCompletionBlock { [weak self, weak overlay] in
 			overlay?.orderOut(nil as Any?)
@@ -100,35 +141,14 @@ class WorkspaceTransitionManager {
 			}
 		}
 
-		// Position animation (slide out)
-		let positionAnim = CABasicAnimation(keyPath: "transform.translation.x")
-		positionAnim.fromValue = 0
-		positionAnim.toValue = slideDistance
-		positionAnim.duration = transitionDuration
-		positionAnim.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.0, 0.36, 1.0)
-		positionAnim.fillMode = .forwards
-		positionAnim.isRemovedOnCompletion = false
-		snapshotLayer.add(positionAnim, forKey: "slideOut")
-
-		// A slight scale-down for a sense of depth
-		let scaleAnim = CABasicAnimation(keyPath: "transform.scale")
-		scaleAnim.fromValue = 1.0
-		scaleAnim.toValue = 0.98
-		scaleAnim.duration = transitionDuration
-		scaleAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-		scaleAnim.fillMode = .forwards
-		scaleAnim.isRemovedOnCompletion = false
-		snapshotLayer.add(scaleAnim, forKey: "scale")
-
-		// Opacity animation (fades slightly as it exits)
-		let opacityAnim = CABasicAnimation(keyPath: "opacity")
-		opacityAnim.fromValue = 1.0
-		opacityAnim.toValue = 0.85
-		opacityAnim.duration = transitionDuration
-		opacityAnim.timingFunction = CAMediaTimingFunction(name: .easeOut)
-		opacityAnim.fillMode = .forwards
-		opacityAnim.isRemovedOnCompletion = false
-		snapshotLayer.add(opacityAnim, forKey: "fade")
+		let anim = CABasicAnimation(keyPath: "transform.translation.x")
+		anim.fromValue = startX
+		anim.toValue = endX
+		anim.duration = transitionDuration
+		anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)
+		anim.fillMode = .forwards
+		anim.isRemovedOnCompletion = false
+		containerLayer.add(anim, forKey: "slide")
 
 		CATransaction.commit()
 	}
