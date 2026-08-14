@@ -21,9 +21,11 @@ class BorderManager: ObservableObject {
     private var isUpdating = false // 競合状態防止フラグ
     private var pendingUpdate = false // 更新中に新しいリクエストが来たかどうか
     private(set) var isInMissionControl = false // ミッションコントロール表示中フラグ（外部からは読み取りのみ）
+    private var isAnimating = false // フォーカス枠のスライドアニメーション中フラグ
 
     // Settings
     private let padding: CGFloat = 10.0 // 枠線のパディング
+    private let animationDuration: TimeInterval = 0.22 // スライドアニメーション時間
 
     /// Apps that don't get a border.
     /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
@@ -105,7 +107,7 @@ class BorderManager: ObservableObject {
         }
     }
     
-    // Helper method that creates a window (called on demand rather than reused)
+    // A reusable helper method for creating the window
     private func createBorderWindow(for frame: CGRect) -> (NSWindow, SelectionBorderView) {
         let overlay = NSWindow(
             contentRect: frame,
@@ -122,6 +124,7 @@ class BorderManager: ObservableObject {
         overlay.isReleasedWhenClosed = false // 明示的に閉じるまで保持
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
+        view.wantsLayer = true
         view.mainColor = .white // ノーマルモードは白
         view.showsFill = false // ノーマルモードは曇りなし！
         view.isDashed = isDashed // 待ち受け中に枠線が作り直されても点線のままにする
@@ -133,7 +136,7 @@ class BorderManager: ObservableObject {
     
     // Don't call setupBorderWindow during initialization (updateBorder creates it)
     private func setupBorderWindow() {
-        // Do nothing, or remove it
+        // Do nothing
     }
 
     /// Watch for Mission Control (Exposé) starting and ending
@@ -237,31 +240,55 @@ class BorderManager: ObservableObject {
         if windowChanged {
             // The focused window changed = it left the empty monitor
             TilingEngine.shared.cursorScreen = nil
-            // If the window changed: make sure to remove the old one before creating a new one!
-            if let oldWindow = borderWindow {
-                oldWindow.close()
+
+            if let existingWindow = borderWindow, existingWindow.isVisible {
+                // If the border is already showing: move it smoothly with a slide animation
+                let oldFrame = existingWindow.frame
+                let centerDistance = hypot(targetRect.midX - oldFrame.midX, targetRect.midY - oldFrame.midY)
+                let isSameScreen = (centerDistance < 3000)
+
+                if isSameScreen {
+                    self.isAnimating = true
+                    NSAnimationContext.runAnimationGroup({ context in
+                        context.duration = self.animationDuration
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        existingWindow.animator().setFrame(targetRect, display: true)
+                    }, completionHandler: { [weak self] in
+                        self?.isAnimating = false
+                    })
+                } else {
+                    existingWindow.setFrame(targetRect, display: true)
+                }
+                existingWindow.orderFront(nil)
+            } else {
+                // Returning from hidden: show it instantly, with no animation
+                if let existingWindow = borderWindow {
+                    existingWindow.setFrame(targetRect, display: true)
+                    existingWindow.orderFront(nil)
+                } else {
+                    let (newWindow, newView) = createBorderWindow(for: targetRect)
+                    self.borderWindow = newWindow
+                    self.borderView = newView
+                    newWindow.orderFront(nil)
+                }
             }
-            borderWindow = nil
-            borderView = nil
-            
-            let (newWindow, newView) = createBorderWindow(for: targetRect)
-            self.borderWindow = newWindow
-            self.borderView = newView
-            
-            // Show it synchronously (doing it async causes a race condition where two get shown)
-            newWindow.orderFront(nil)
         } else {
             // If it's the same window
-            if borderWindow == nil {
-                // Recreate it if we return to the same window after hideBorder() removed it
-                let (newWindow, newView) = createBorderWindow(for: targetRect)
-                self.borderWindow = newWindow
-                self.borderView = newView
-                newWindow.orderFront(nil)
+            if let existingWindow = borderWindow, existingWindow.isVisible {
+                // Update position only (applied immediately unless an animation is running)
+                if !isAnimating {
+                    existingWindow.setFrame(targetRect, display: true)
+                }
             } else {
-                // Update position only (don't recreate it, to avoid flicker)
-                borderWindow?.setFrame(targetRect, display: true)
-                borderWindow?.orderFront(nil)
+                if let existingWindow = borderWindow {
+                    existingWindow.setFrame(targetRect, display: true)
+                    existingWindow.orderFront(nil)
+                } else {
+                    let (newWindow, newView) = createBorderWindow(for: targetRect)
+                    self.borderWindow = newWindow
+                    self.borderView = newView
+                    newWindow.orderFront(nil)
+                }
             }
         }
     }
@@ -286,6 +313,9 @@ class BorderManager: ObservableObject {
 
         // Don't update while Mission Control is active
         if isInMissionControl { return }
+
+        // Skip position correction while a slide animation is running, to avoid interfering with it
+        if isAnimating { return }
 
         // Check whether the frontmost app's pid is unchanged from the last tick. Just a property read, so
         // This doesn't trigger any AX query, so it's safe to check every tick regardless of the exclusion flag.
@@ -395,12 +425,8 @@ class BorderManager: ObservableObject {
     }
 
     func hideBorder() {
-        // Make sure the window is destroyed (guards against a bug where two get shown)
-        if let oldWindow = borderWindow {
-            oldWindow.close()
-        }
-        borderWindow = nil
-        borderView = nil
+        isAnimating = false
+        borderWindow?.orderOut(nil)
         currentWindow = nil
         currentWindowID = nil
     }
