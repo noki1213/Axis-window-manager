@@ -735,16 +735,18 @@ class WorkspaceManager: ObservableObject {
 			ZenModeManager.shared.toggle()
 		}
 
-		// Start the slide animation for the workspace switch
-		WorkspaceTransitionManager.shared.startTransition(from: currentWS, to: workspace, on: screen)
+		let isMovingNext = (workspace > currentWS)
 
-		// 1. Save the current workspace's TilingEngine state
+		// 1. Capture the screen before switching
+		let oldSnapshot = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen)
+
+		// 2. Save the TilingEngine state for the current workspace
 		saveTilingState(for: id, workspace: currentWS, on: screen)
 
-		// 2. Update activeWorkspace
+		// 3. Update activeWorkspace
 		activeWorkspace[id] = workspace
 
-		// 3. Create the destination workspace if it doesn't exist
+		// 4. Create the destination workspace if it doesn't exist yet
 		if workspaceWindows[id]?[workspace] == nil {
 			if workspaceWindows[id] == nil {
 				workspaceWindows[id] = [:]
@@ -752,24 +754,33 @@ class WorkspaceManager: ObservableObject {
 			workspaceWindows[id]?[workspace] = []
 		}
 
-		// 4. Restore the destination workspace's TilingEngine state
+		// 5. Restore the TilingEngine state for the destination workspace
 		restoreTilingState(for: id, workspace: workspace, on: screen)
 
-		// 5. Restore and tile the destination windows first (so an empty screen never shows)
+		// 6. Restore the destination's windows first, then tile them
 		showWindowsForWorkspace(workspace, on: id)
 		tilingEngine.tile(on: screen)
 
-		// 6. Focus a window in the workspace (note down the ID actually focused)
+		// 7. Hide the old windows
+		hideWindowsForWorkspace(currentWS, on: id)
+
+		// 8. Capture the post-switch screen and run the two-screen slide animation
+		if let oldImage = oldSnapshot,
+		   let newImage = WorkspaceTransitionManager.shared.captureCurrentScreen(on: screen) {
+			WorkspaceTransitionManager.shared.performSlideTransition(
+				oldSnapshot: oldImage,
+				newSnapshot: newImage,
+				isMovingNext: isMovingNext,
+				on: screen
+			)
+		}
+
+		// 9. Focus a window in the workspace (record the ID that actually got focus)
 		let focusedID: CGWindowID?
 		if let windowID = focusWindowID {
 			focusedID = focusWindow(windowID, in: workspace, on: id)
 		} else {
 			focusedID = focusFirstWindow(in: workspace, on: id)
-		}
-
-		// 7. Hide the old windows after a short delay (once the new windows have rendered on screen)
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-			self?.hideWindowsForWorkspace(currentWS, on: id)
 		}
 
 		// 8. Update the border and move the cursor to the center of the focused window

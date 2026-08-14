@@ -70,6 +70,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             showStartupGuide()
         }
+
+        // Check screen recording permission (needed for the Space-switch animation)
+        WorkspaceTransitionManager.shared.checkScreenCaptureAccess()
         
         // Watch for the permission-granted notification
         NotificationCenter.default.addObserver(
