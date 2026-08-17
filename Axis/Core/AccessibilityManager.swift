@@ -12,7 +12,19 @@ import Combine
 /// Handles Accessibility permission management and window access
 class AccessibilityManager: ObservableObject {
     static let shared = AccessibilityManager()
-    
+
+    /// System UI that temporarily steals the frontmost position but has no focus window of its own.
+    /// Notification banners and Control Center, in order to catch clicks outside the banner,
+    /// Create a transparent catch-all window covering the whole screen. Treating this as a normal window
+    /// treating it that way causes problems like the border expanding to fill the whole screen, or wrongly concluding focus was lost
+    /// causes problems, so both BorderManager and Focus Follows Mouse reference this list to exclude them
+    static let transientOverlayBundleIds: Set<String> = [
+        "com.apple.notificationcenterui",
+        "com.apple.controlcenter",
+        "com.apple.Spotlight",
+        "com.apple.dock"
+    ]
+
     @Published var isAccessibilityEnabled: Bool = false
     
     private var pollTimer: Timer?

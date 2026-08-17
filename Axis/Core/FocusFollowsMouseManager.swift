@@ -201,6 +201,18 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// That overlay becomes frontmost, and focus-follows-mouse stops responding entirely
 	private static let maxHitTestLayer = 1000
 
+	/// A cache from pid to bundle id. Since focus-follows-mouse runs on every mouse move,
+	/// Avoid querying NSRunningApplication every single time.
+	/// Since the system UI process stays resident and its pid never changes, there's no risk of mixing it up
+	private var bundleIdCache: [pid_t: String] = [:]
+
+	private func bundleIdentifier(forPID pid: pid_t) -> String? {
+		if let cached = bundleIdCache[pid] { return cached }
+		guard let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { return nil }
+		bundleIdCache[pid] = bundleId
+		return bundleId
+	}
+
 	/// Return the frontmost window at the given coordinates (screen coordinates, bottom-left origin)
 	/// Since AccessibilityManager.getWindowAt returns the first hit in app order,
 	/// The correct frontmost window can't be picked when a floating window overlaps a tile.
@@ -232,18 +244,30 @@ class FocusFollowsMouseManager: ObservableObject {
 					  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
 					  let windowID = entry[kCGWindowNumber as String] as? CGWindowID else { continue }
 
+				// A fully transparent window is "invisible", so let it pass through.
+				// This is the case for full-screen catch-all windows created by things like notification banners
+				if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
+
 				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
 				// The border overlay always sits in front of the focused window, so
 				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
 				if let pid = entry[kCGWindowOwnerPID as String] as? pid_t {
 					if pid == ownPID { continue }
+
+					// Let system overlays like notification banners and Control Center pass through too.
+					// These have a catch-all window covering the entire screen, so letting them get hit
+					// focus and the border end up moving to the full-screen-sized window.
+					// Only resolve bundle IDs for hit candidates, so we don't add scanning overhead
 					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
 										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
-					if bounds.contains(cgPoint) {
-						hitWindowID = windowID
-						hitPID = pid
-						break
-					}
+					guard bounds.contains(cgPoint) else { continue }
+
+					if let bundleId = bundleIdentifier(forPID: pid),
+					   AccessibilityManager.transientOverlayBundleIds.contains(bundleId) { continue }
+
+					hitWindowID = windowID
+					hitPID = pid
+					break
 				}
 			}
 			guard let windowID = hitWindowID, let pid = hitPID else { return nil }
