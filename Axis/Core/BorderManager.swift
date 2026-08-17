@@ -34,13 +34,9 @@ class BorderManager: ObservableObject {
     private let borderExcludedBundleIds: Set<String> = []
 
     /// System overlays, like notification banners and Control Center, that temporarily steal the frontmost position but have no focus window of their own.
-    /// Don't hide the border even when these come to the front — keep showing the border on the previous window
-    private let transientOverlayBundleIds: Set<String> = [
-        "com.apple.notificationcenterui",
-        "com.apple.controlcenter",
-        "com.apple.Spotlight",
-        "com.apple.dock"
-    ]
+    /// Even when these come to the front, don't hide the border — keep showing the previous window's border.
+    /// Actually lives on the AccessibilityManager side (Focus Follows Mouse's hit test uses the same list too)
+    private var transientOverlayBundleIds: Set<String> { AccessibilityManager.transientOverlayBundleIds }
 
     /// The frontmost app's pid seen on the last tick. Compared against it every tick in checkWindowFrame(), and
     /// Acts as a fallback for cases where the didActivateApplicationNotification notification doesn't fire or is delayed
