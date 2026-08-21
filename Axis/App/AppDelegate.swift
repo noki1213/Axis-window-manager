@@ -529,6 +529,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Determine which monitor a window (in AX coordinates) is on
+    private func screenContainingWindow(_ window: WindowInfo) -> NSScreen? {
+        let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
+        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        for screen in NSScreen.screens {
+            let axFrame = CGRect(
+                x: screen.frame.minX,
+                y: mainScreenHeight - screen.frame.maxY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
+            if axFrame.contains(center) {
+                return screen
+            }
+        }
+        return NSScreen.screens.first
+    }
+
     private func checkForWindowChanges() {
         // While a Space switch, workspace switch, monitor-change handling, or wake from sleep is in progress,
         // Skip while Mission Control is showing
@@ -548,6 +566,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let currentIDsZen = Set(managedZen.map { $0.id })
 
             guard currentIDsZen != lastWindowIDs else {
+                // Reset the skip counter on cycles with no change
+                // (without resetting it, the sporadic AX misses that happen every few minutes accumulate and
+                //   the limit is hit and Zen mode gets cancelled for a window that never actually closed)
+                consecutiveGhostSkips = 0
                 return
             }
 
@@ -566,6 +588,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             consecutiveGhostSkips = 0
+
+            // Zen is a per-monitor feature, so on monitors where Zen isn't active,
+            // Don't cancel it just for a window count change (e.g. simply opening Finder on another monitor)
+            let appearedZen = currentIDsZen.subtracting(lastWindowIDs)
+            let zenScreen = ZenModeManager.shared.activeScreen
+            let appearedOnZenScreen = managedZen.contains { window in
+                appearedZen.contains(window.id) && screenContainingWindow(window) === zenScreen
+            }
+            let vanishedOnZenScreen = !vanishedZen.intersection(ZenModeManager.shared.hiddenWindowIDs).isEmpty
+            if !appearedOnZenScreen && !vanishedOnZenScreen {
+                if PerfLog.enabled {
+                    PerfLog.logf("Zenモード維持: 別モニターの増減のため解除しない (増えた=%d 消えた=%d)",
+                                 appearedZen.count, vanishedZen.count)
+                }
+                return
+            }
 
             // Diagnostic logging to pin down what unintentionally cancels Zen mode
             // A count change alone can't tell whether a window on another monitor was added or removed, or
