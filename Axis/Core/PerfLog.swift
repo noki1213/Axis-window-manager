@@ -22,38 +22,79 @@ enum PerfLog {
 
 	// MARK: - File output
 
-	/// Where the log is written (since NSLog doesn't always show up in the log stream depending on the environment,
+	/// The number of days to keep logs. Files older than this are deleted automatically
+	/// (Left unchecked, it would grow without bound. Measured at roughly 4-7MB per day)
+	private static let retentionDays = 7
+
+	/// Where the logs are kept (since NSLog doesn't always flow into the log stream depending on the environment,
 	/// Also write the same content to a file that's guaranteed to be readable)
-	private static let logFileURL: URL = {
+	private static let logDirectory: URL = {
 		let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
 			.appendingPathComponent("Logs", isDirectory: true)
 		try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-		return dir.appendingPathComponent("Axis-perf.log")
+		return dir
 	}()
 
 	/// Serialize file writes (so calls from multiple threads don't corrupt it)
 	private static let fileQueue = DispatchQueue(label: "com.noki.Axis.perflog")
 
-	/// Write one line with a timestamp
+	/// The current write destination. The following two are only touched from within fileQueue
+	private static var currentLogDay = ""
+	private static var currentLogFileURL: URL?
+
+	/// Split files by date. Also clean up old logs the moment the date changes
+	private static func logFileURL(for date: Date) -> URL {
+		let day = dayFormatter.string(from: date)
+		if day != currentLogDay || currentLogFileURL == nil {
+			currentLogDay = day
+			currentLogFileURL = logDirectory.appendingPathComponent("Axis-perf-\(day).log")
+			purgeOldLogs(referenceDate: date)
+		}
+		return currentLogFileURL ?? logDirectory.appendingPathComponent("Axis-perf-\(day).log")
+	}
+
+	/// Delete log files older than retentionDays
+	private static func purgeOldLogs(referenceDate: Date) {
+		guard let limit = Calendar.current.date(byAdding: .day, value: -retentionDays, to: referenceDate) else { return }
+		let names = (try? FileManager.default.contentsOfDirectory(atPath: logDirectory.path)) ?? []
+		for name in names {
+			guard name.hasPrefix("Axis-perf-"), name.hasSuffix(".log") else { continue }
+			let day = String(name.dropFirst("Axis-perf-".count).dropLast(".log".count))
+			guard let fileDate = dayFormatter.date(from: day), fileDate < limit else { continue }
+			try? FileManager.default.removeItem(at: logDirectory.appendingPathComponent(name))
+		}
+	}
+
+	/// Write out one line with a date
 	private static func write(_ message: String) {
-		let stamp = timeFormatter.string(from: Date())
+		let now = Date()
+		let stamp = timeFormatter.string(from: now)
 		let line = "\(stamp) [PERF] \(message)\n"
 		NSLog("[PERF] %@", message)
 		fileQueue.async {
 			guard let data = line.data(using: .utf8) else { return }
-			if let handle = try? FileHandle(forWritingTo: logFileURL) {
+			let url = logFileURL(for: now)
+			if let handle = try? FileHandle(forWritingTo: url) {
 				defer { try? handle.close() }
 				try? handle.seekToEnd()
 				try? handle.write(contentsOf: data)
 			} else {
-				try? data.write(to: logFileURL)
+				try? data.write(to: url)
 			}
 		}
 	}
 
+	/// The timestamp at the start of the line. Includes the date too, so the date is clear even when grepping across files
 	private static let timeFormatter: DateFormatter = {
 		let f = DateFormatter()
-		f.dateFormat = "HH:mm:ss.SSS"
+		f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+		return f
+	}()
+
+	/// The date used in the filename (only accessed from within fileQueue)
+	private static let dayFormatter: DateFormatter = {
+		let f = DateFormatter()
+		f.dateFormat = "yyyy-MM-dd"
 		return f
 	}()
 
