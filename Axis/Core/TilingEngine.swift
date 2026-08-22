@@ -49,12 +49,31 @@ class TilingEngine: ObservableObject {
         let workspaceIDs = getWorkspaceWindowIDs(on: screen)
 
 
+        // IDs of windows that genuinely exist on screen (from CGWindowList)
+        // A just-closed window can linger in the AX list for a while (this happens a lot with Ghostty).
+        // Tiling that as-is would assign a slot to a window that no longer really exists,
+        // Excluded because it would leave a gap as if there were an invisible extra window.
+        // Don't trust it and don't exclude anything when CGWindowList transiently returns an empty result.
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+
         // Filter down to managed windows
         // - shouldBeManaged(): excludes minimized, fullscreen, and non-standard windows
         // - shouldFloat(): excludes windows that should float
         // - workspaceIDs.contains(): targets only windows in the current workspace
-        let managedWindows = allWindows.filter { window in
+        let candidateWindows = allWindows.filter { window in
             window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isFloating(window.id)
+        }
+
+        let managedWindows: [WindowInfo]
+        if onScreenIDs.isEmpty {
+            managedWindows = candidateWindows
+        } else {
+            managedWindows = candidateWindows.filter { onScreenIDs.contains($0.id) }
+            if PerfLog.enabled && managedWindows.count != candidateWindows.count {
+                let ghosts = candidateWindows.filter { !onScreenIDs.contains($0.id) }
+                let names = ghosts.map { "\($0.app.localizedName ?? "?")/\($0.title)" }.joined(separator: ", ")
+                PerfLog.logf("★幽霊ウィンドウを除外（AXにだけ残っている）: %@", names)
+            }
         }
 
         // If there are no target windows, clear the column structure and return
