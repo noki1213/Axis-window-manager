@@ -31,6 +31,11 @@ xcodebuild -scheme "$SCHEME" -configuration Release \
 
 APP="$BUILD_DIR/Build/Products/Release/$APP_NAME"
 
+# Debug info embeds the source path of the machine that built it. To keep a personal folder
+# path out of the distributed build, it's stripped before signing.
+echo "==> Stripping debug symbols ..."
+strip -S -x "$APP/Contents/MacOS/$SCHEME"
+
 # A universal build loses the linker's automatic signature, so it's explicitly ad-hoc signed.
 # An app with no signature at all can't launch on Apple Silicon.
 echo "==> Ad-hoc signing ..."
