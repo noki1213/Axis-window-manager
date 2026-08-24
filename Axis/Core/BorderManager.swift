@@ -18,10 +18,10 @@ class BorderManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
 
-    private var isUpdating = false // Flag to prevent race conditions
-    private var pendingUpdate = false // Whether a new request arrived while updating
-    private(set) var isInMissionControl = false // Flag for when Mission Control is showing (read-only from outside)
-    private var isAnimating = false // Flag for when the focus border's slide animation is in progress
+    private var isUpdating = false // Guards against concurrent updates
+    private var pendingUpdate = false // Whether a new request arrived during an update
+    private(set) var isInMissionControl = false // True while Mission Control is showing (read-only externally)
+    private var isAnimating = false // True while the focus border slide animation is running
 
     // Settings
     private let padding: CGFloat = 10.0 // Border padding
@@ -117,13 +117,13 @@ class BorderManager: ObservableObject {
         overlay.level = .floating
         overlay.ignoresMouseEvents = true
         overlay.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        overlay.isReleasedWhenClosed = false // Kept until explicitly closed
+        overlay.isReleasedWhenClosed = false // Keep alive until explicitly closed
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.wantsLayer = true
         view.mainColor = .white // White in normal mode
-        view.showsFill = false // No blur in normal mode!
-        view.isDashed = isDashed // Keep the border dashed even if it gets recreated while idle
+        view.showsFill = false // No fill in normal mode!
+        view.isDashed = isDashed // Keep the dashed style even if the border is rebuilt while waiting
         view.autoresizingMask = [.width, .height]
         overlay.contentView?.addSubview(view)
         
@@ -383,7 +383,7 @@ class BorderManager: ObservableObject {
         borderView.fillColor = NSColor.white.withAlphaComponent(0.15)
         
         // Fade the fill out over 0.8 seconds (for a slower, softer fade)
-        let steps = 40 // Increase the step count for smoother motion
+        let steps = 40 // More steps for smoother animation
         let duration = 0.8 // Extended from 0.5s to 0.8s
         let interval = duration / Double(steps)
         let startAlpha: CGFloat = 0.15

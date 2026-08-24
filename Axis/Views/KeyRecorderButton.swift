@@ -177,7 +177,7 @@ class KeyRecorderNSView: NSView {
 
 	func updateDisplayText() {
 		let binding = HotkeyBinding(
-			action: .focusLeft, // Dummy (not used for generating the display name)
+			action: .focusLeft, // Dummy (not used to build the display name)
 			keyCode: currentKeyCode,
 			modifiers: currentModifiers
 		)
