@@ -182,7 +182,7 @@ struct WindowInfo: Identifiable, Equatable {
         AXUIElementCopyAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, &wasEnabled)
         let wasEnabledBool = (wasEnabled as? Bool) ?? false
         
-        // Temporarily disabled
+        // While it is on, AX frame changes animate and land on the wrong geometry, so turn it off for the duration
         if wasEnabledBool {
             AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
         }

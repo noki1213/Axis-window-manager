@@ -279,8 +279,6 @@ class BorderManager: ObservableObject {
         }
     }
     
-    // (triggerFlashAnimation method is no longer called and can be removed or ignored)
-    
     private func checkWindowFrame() {
         // Check Mission Control's state
         let missionControlActive = checkMissionControlActive()
