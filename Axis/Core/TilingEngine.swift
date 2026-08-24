@@ -72,7 +72,7 @@ class TilingEngine: ObservableObject {
             if PerfLog.enabled && managedWindows.count != candidateWindows.count {
                 let ghosts = candidateWindows.filter { !onScreenIDs.contains($0.id) }
                 let names = ghosts.map { "\($0.app.localizedName ?? "?")/\($0.title)" }.joined(separator: ", ")
-                PerfLog.logf("★幽霊ウィンドウを除外（AXにだけ残っている）: %@", names)
+                PerfLog.logf("★ Excluding ghost windows (still present only in AX): %@", names)
             }
         }
 
@@ -1142,7 +1142,7 @@ class TilingEngine: ObservableObject {
         guard PerfLog.enabled else { return }
         let total = columns.reduce(0) { $0 + $1.count }
         guard total == 1, let window = columns.first?.first else { return }
-        PerfLog.logf("★全画面割当: %@ / %@ (経路: %@, 画面幅: %.0f)",
+        PerfLog.logf("★ Full-screen assignment: %@ / %@ (path: %@, screen width: %.0f)",
                      window.app.localizedName ?? "?", window.title, caller, screen.visibleFrame.width)
     }
 
