@@ -18,7 +18,7 @@ struct WindowInfo: Identifiable, Equatable {
     var frame: CGRect
     var isMinimized: Bool
     var isFullscreen: Bool
-    var minSize: CGSize  // ウィンドウの最小サイズ
+    var minSize: CGSize  // Minimum window size
     
     // For determining floating status
     var subrole: String?

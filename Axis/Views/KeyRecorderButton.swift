@@ -127,7 +127,7 @@ class KeyRecorderNSView: NSView {
 		// Receive key input through a local event monitor
 		localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			self?.handleRecordedKey(event)
-			return nil // イベントを消費
+			return nil // Consume the event
 		}
 
 		// Also add a global event monitor (a fallback for when the app loses focus)
@@ -177,7 +177,7 @@ class KeyRecorderNSView: NSView {
 
 	func updateDisplayText() {
 		let binding = HotkeyBinding(
-			action: .focusLeft, // ダミー（表示名の生成には使わない）
+			action: .focusLeft, // Dummy (not used to build the display name)
 			keyCode: currentKeyCode,
 			modifiers: currentModifiers
 		)

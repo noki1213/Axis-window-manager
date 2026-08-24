@@ -18,14 +18,14 @@ class BorderManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var updateTimer: Timer?
 
-    private var isUpdating = false // 競合状態防止フラグ
-    private var pendingUpdate = false // 更新中に新しいリクエストが来たかどうか
-    private(set) var isInMissionControl = false // ミッションコントロール表示中フラグ（外部からは読み取りのみ）
-    private var isAnimating = false // フォーカス枠のスライドアニメーション中フラグ
+    private var isUpdating = false // Guards against concurrent updates
+    private var pendingUpdate = false // Whether a new request arrived during an update
+    private(set) var isInMissionControl = false // True while Mission Control is showing (read-only externally)
+    private var isAnimating = false // True while the focus border slide animation is running
 
     // Settings
-    private let padding: CGFloat = 10.0 // 枠線のパディング
-    private let animationDuration: TimeInterval = 0.24 // スライドアニメーション時間
+    private let padding: CGFloat = 10.0 // Border padding
+    private let animationDuration: TimeInterval = 0.24 // Slide animation duration
 
     /// Apps that don't get a border.
     /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
@@ -117,13 +117,13 @@ class BorderManager: ObservableObject {
         overlay.level = .floating
         overlay.ignoresMouseEvents = true
         overlay.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        overlay.isReleasedWhenClosed = false // 明示的に閉じるまで保持
+        overlay.isReleasedWhenClosed = false // Keep alive until explicitly closed
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.wantsLayer = true
-        view.mainColor = .white // ノーマルモードは白
-        view.showsFill = false // ノーマルモードは曇りなし！
-        view.isDashed = isDashed // 待ち受け中に枠線が作り直されても点線のままにする
+        view.mainColor = .white // White in normal mode
+        view.showsFill = false // No fill in normal mode!
+        view.isDashed = isDashed // Keep the dashed style even if the border is rebuilt while waiting
         view.autoresizingMask = [.width, .height]
         overlay.contentView?.addSubview(view)
         
@@ -383,8 +383,8 @@ class BorderManager: ObservableObject {
         borderView.fillColor = NSColor.white.withAlphaComponent(0.15)
         
         // Fade the fill out over 0.8 seconds (for a slower, softer fade)
-        let steps = 40 // ステップ数を増やしてより滑らかに
-        let duration = 0.8 // 0.5秒から0.8秒に延長
+        let steps = 40 // More steps for smoother animation
+        let duration = 0.8 // Extended from 0.5s to 0.8s
         let interval = duration / Double(steps)
         let startAlpha: CGFloat = 0.15
         

@@ -9,11 +9,11 @@ import AppKit
 
 /// The kind of placement reservation (corresponds to the key pressed after Ctrl+Option+N)
 enum PlacementReservationKind {
-	case aboveInColumn   // I: フォーカス列の同じ列の上に積む
-	case belowInColumn   // K: フォーカス列の同じ列の下に積む
-	case newColumnLeft   // J: フォーカス列の左に新規列
-	case newColumnRight  // L: フォーカス列の右に新規列
-	case float           // F: Float で開く
+	case aboveInColumn   // I: stack above in the focused column
+	case belowInColumn   // K: stack below in the focused column
+	case newColumnLeft   // J: new column left of the focused column
+	case newColumnRight  // L: new column right of the focused column
+	case float           // F: open as floating
 }
 
 /// The class that manages the "placement reservation" feature
@@ -170,7 +170,7 @@ class PlacementReservationManager {
 		}
 
 		isLayoutApplied = false
-		cancel() // 一度きりの予約なので消費したら解除する（プレビューも消える）
+		cancel() // One-shot reservation: clear once consumed (the preview disappears too)
 		return true
 	}
 
@@ -235,7 +235,7 @@ class PlacementReservationManager {
 			let width: CGFloat = 640
 			let height: CGFloat = 480
 			let x = visibleFrame.midX - width / 2
-			let yBottom = visibleFrame.midY - height / 2 // NSScreen座標系（左下原点）
+			let yBottom = visibleFrame.midY - height / 2 // NSScreen coordinates (bottom-left origin)
 			let yAX = mainScreenHeight - yBottom - height
 			return CGRect(x: x, y: yAX, width: width, height: height)
 		}
@@ -282,7 +282,7 @@ class PlacementReservationManager {
 			return CGRect(x: x, y: screenTopInAX + padding, width: colWidth, height: visibleFrame.height - padding * 2)
 
 		case .float:
-			return .zero // 到達しない
+			return .zero // Unreachable
 		}
 	}
 

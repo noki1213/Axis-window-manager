@@ -163,11 +163,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let iconName: String
         switch mode {
         case .normal:
-            iconName = "rectangle.split.3x1" // 通常のタイリングアイコン
+            iconName = "rectangle.split.3x1" // Normal tiling icon
         case .gapSelect:
-            iconName = "arrow.left.and.right" // ギャップ選択
+            iconName = "arrow.left.and.right" // Gap selection
         case .windowPalette:
-            iconName = "rectangle.grid.2x2" // ウィンドウパレット
+            iconName = "rectangle.grid.2x2" // Window palette
         }
         
         button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: mode.rawValue)

@@ -142,7 +142,7 @@ class HotkeyManager: ObservableObject {
 
 			// Handle the event and return nil if it should be consumed
 			if hotkeyManager.handleKeyEvent(nsEvent) {
-				return nil // イベントを消費
+				return nil // Consume the event
 			}
 
 			return Unmanaged.passRetained(event)
@@ -550,25 +550,25 @@ class HotkeyManager: ObservableObject {
 
 		// Specify the edge directly with JKLI (plain = grow, Shift = shrink)
 		switch Int(event.keyCode) {
-		case kVK_ANSI_J: // 左辺
+		case kVK_ANSI_J: // Left edge
 			DispatchQueue.main.async { [weak self] in
 				self?.gapSelectManager.resizeFocusedEdge(.left, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_L: // 右辺
+		case kVK_ANSI_L: // Right edge
 			DispatchQueue.main.async { [weak self] in
 				self?.gapSelectManager.resizeFocusedEdge(.right, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_I: // 上辺
+		case kVK_ANSI_I: // Top edge
 			DispatchQueue.main.async { [weak self] in
 				self?.gapSelectManager.resizeFocusedEdge(.up, widen: !hasShift)
 			}
 			return true
 
-		case kVK_ANSI_K: // 下辺
+		case kVK_ANSI_K: // Bottom edge
 			DispatchQueue.main.async { [weak self] in
 				self?.gapSelectManager.resizeFocusedEdge(.down, widen: !hasShift)
 			}
@@ -634,25 +634,25 @@ class HotkeyManager: ObservableObject {
 		}
 
 		switch Int(event.keyCode) {
-		case kVK_ANSI_I: // 上に移動（前のワークスペースへ）
+		case kVK_ANSI_I: // Move up (to the previous workspace)
 			DispatchQueue.main.async { [weak self] in
 				self?.windowPaletteManager.moveUp()
 			}
 			return true
 
-		case kVK_ANSI_K: // 下に移動（次のワークスペースへ）
+		case kVK_ANSI_K: // Move down (to the next workspace)
 			DispatchQueue.main.async { [weak self] in
 				self?.windowPaletteManager.moveDown()
 			}
 			return true
 
-		case kVK_ANSI_J: // 左に移動（前のウィンドウへ）
+		case kVK_ANSI_J: // Move left (to the previous window)
 			DispatchQueue.main.async { [weak self] in
 				self?.windowPaletteManager.moveLeft()
 			}
 			return true
 
-		case kVK_ANSI_L: // 右に移動（次のウィンドウへ）
+		case kVK_ANSI_L: // Move right (to the next window)
 			DispatchQueue.main.async { [weak self] in
 				self?.windowPaletteManager.moveRight()
 			}

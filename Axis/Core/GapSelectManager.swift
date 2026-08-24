@@ -23,7 +23,7 @@ struct GapInfo: Equatable {
 	/// vertical: the index of the left column (0 = between column 0 and column 1)
 	/// horizontal: (column index, the row index of the window above)
 	let columnIndex: Int
-	let rowIndex: Int? // horizontal の場合のみ使用
+	let rowIndex: Int? // Used only for horizontal
 	/// The gap's on-screen rect (where the line is drawn)
 	var frame: CGRect
 

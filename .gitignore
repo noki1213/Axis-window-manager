@@ -1,4 +1,4 @@
-# AI設定ファイル
+# AI assistant config files
 .claude/
 agent.md
 .github/copilot-instructions.md
@@ -56,6 +56,6 @@ Carthage/Build
 reference/
 ref/
 
-# ローカル設定（署名用の Team ID など）
+# Local settings (e.g. Team ID for code signing)
 .env
 dist/
