@@ -350,7 +350,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start watching for Focus Follows Mouse (auto-focus the window under the cursor)
         FocusFollowsMouseManager.shared.start()
         // A startup marker to confirm the measurement logging is running
-        PerfLog.log("=== Axis 起動 / FFM有効=\(FocusFollowsMouseManager.shared.isEnabled) ===")
+        PerfLog.log("=== Axis launched / FFM enabled=\(FocusFollowsMouseManager.shared.isEnabled) ===")
 
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
@@ -482,20 +482,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let zenScreenName = zen.activeScreen?.localizedName ?? "?"
 
         PerfLog.logf(
-            "ZEN自動解除: 前回=%d 今回=%d 消えた=%d 増えた=%d Zenモニター=%@",
+            "Zen auto-cancel: previous=%d current=%d vanished=%d appeared=%d Zen monitor=%@",
             lastWindowCount, currentCount, vanishedIDs.count, appearedIDs.count, zenScreenName
         )
 
         // A vanished window: was it hidden, or is it still showing in the on-screen list (i.e. an AX miss)?
         for id in vanishedIDs {
-            let name = zen.hiddenWindowDescription(for: id) ?? "不明"
+            let name = zen.hiddenWindowDescription(for: id) ?? "unknown"
             let wasHidden = zen.hiddenWindowIDs.contains(id)
             let stillOnScreen = onScreenIDs.contains(id)
             PerfLog.logf(
-                "  消えた: id=%u %@ Zenで隠したウィンドウ=%@ 画面一覧に残っている=%@",
+                "  vanished: id=%u %@ hiddenByZen=%@ stillOnScreen=%@",
                 id, name,
-                wasHidden ? "はい" : "いいえ",
-                stillOnScreen ? "はい" : "いいえ"
+                wasHidden ? "yes" : "no",
+                stillOnScreen ? "yes" : "no"
             )
         }
 
@@ -505,7 +505,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 $0.frame.contains(CGPoint(x: window.frame.midX, y: window.frame.midY))
             }?.localizedName ?? "?"
             PerfLog.logf(
-                "  増えた: id=%u %@ / %@ モニター=%@",
+                "  appeared: id=%u %@ / %@ monitor=%@",
                 window.id, window.app.localizedName ?? "?", window.title, screenName
             )
         }
@@ -515,14 +515,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hiddenIDs = zen.hiddenWindowIDs
         let droppedHidden = hiddenIDs.subtracting(onScreenIDs)
         PerfLog.logf(
-            "  隠したウィンドウ: 全%d枚 画面一覧から落ちた=%d枚",
+            "  hidden windows: total=%d droppedFromOnScreenList=%d",
             hiddenIDs.count, droppedHidden.count
         )
         for id in droppedHidden {
-            let name = zen.hiddenWindowDescription(for: id) ?? "不明"
+            let name = zen.hiddenWindowDescription(for: id) ?? "unknown"
             let frame = zen.hiddenWindowCurrentFrame(for: id)
             PerfLog.logf(
-                "    落ちた: id=%u %@ 現在位置=(%.0f, %.0f) サイズ=(%.0f x %.0f)",
+                "    dropped: id=%u %@ position=(%.0f, %.0f) size=(%.0f x %.0f)",
                 id, name, frame?.origin.x ?? -1, frame?.origin.y ?? -1,
                 frame?.width ?? -1, frame?.height ?? -1
             )
@@ -580,7 +580,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if !ghostsZen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
                 consecutiveGhostSkips += 1
                 if PerfLog.enabled {
-                    PerfLog.logf("Zenモード中の一時的な取りこぼしとして見送り: %d件 (%d回目)",
+                    PerfLog.logf("Skipping as a transient AX miss during Zen mode: %d windows (attempt %d)",
                                  ghostsZen.count, consecutiveGhostSkips)
                 }
                 accessibilityManager.invalidateWindowCache()
@@ -599,7 +599,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let vanishedOnZenScreen = !vanishedZen.intersection(ZenModeManager.shared.hiddenWindowIDs).isEmpty
             if !appearedOnZenScreen && !vanishedOnZenScreen {
                 if PerfLog.enabled {
-                    PerfLog.logf("Zenモード維持: 別モニターの増減のため解除しない (増えた=%d 消えた=%d)",
+                    PerfLog.logf("Keeping Zen mode: changes are on another monitor (appeared=%d vanished=%d)",
                                  appearedZen.count, vanishedZen.count)
                 }
                 return
@@ -728,7 +728,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !vanishedButStillOnScreen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
             consecutiveGhostSkips += 1
             if PerfLog.enabled {
-                PerfLog.logf("一時的な取りこぼしとして見送り: %d件 (%d回目)",
+                PerfLog.logf("Skipping as a transient AX miss: %d windows (attempt %d)",
                              vanishedButStillOnScreen.count, consecutiveGhostSkips)
             }
             // Discard the cache and the previous window set so the next cycle is guaranteed to re-fetch

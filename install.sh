@@ -55,7 +55,7 @@ EOF
 	BUILT_APP="$EXPORT_DIR/$APP_NAME"
 else
 	echo "==> Archiving (Release, unsigned)..."
-	echo "    .env に TEAM_ID が無いため署名なしでビルドします。"
+	echo "    No TEAM_ID in .env; building unsigned."
 	BUILD_DIR="/tmp/Axis_build"
 	rm -rf "$BUILD_DIR"
 	xcodebuild -scheme "$SCHEME" -configuration Release \

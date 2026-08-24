@@ -202,7 +202,7 @@ class BorderManager: ObservableObject {
             // Only log the moment a visible border disappears (not while it stays gone)
             if borderWindow != nil {
                 let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-"
-                PerfLog.log("枠線を消した: フォーカス取得に失敗 front=\(front)")
+                PerfLog.log("Border hidden: failed to get focus front=\(front)")
             }
             hideBorder()
             return
