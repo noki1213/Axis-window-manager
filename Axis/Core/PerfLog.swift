@@ -148,7 +148,7 @@ enum PerfLog {
 		guard enabled, let start = keyPressStart else { return }
 		let elapsed = CFAbsoluteTimeGetCurrent() - start
 		if elapsed >= 0.005 {
-			write(String(format: "キー押下→処理開始(%@): %.1fms", keyPressLabel ?? "?", elapsed * 1000))
+			write(String(format: "key press -> handling started (%@): %.1fms", keyPressLabel ?? "?", elapsed * 1000))
 		}
 	}
 
@@ -170,7 +170,7 @@ enum PerfLog {
 	static func reportKeyPressToFocusConfirmed(_ claimed: (label: String, start: CFAbsoluteTime)?) {
 		guard enabled, let claimed else { return }
 		let elapsed = CFAbsoluteTimeGetCurrent() - claimed.start
-		write(String(format: "キー押下→フォーカス確定(%@): %.1fms", claimed.label, elapsed * 1000))
+		write(String(format: "key press -> focus confirmed (%@): %.1fms", claimed.label, elapsed * 1000))
 	}
 
 	// MARK: - Focus-retrieval failure (tracking the disappearing-border symptom)
@@ -201,14 +201,14 @@ enum PerfLog {
 			focusLostCount = 1
 			focusLostStart = now
 			focusLostLastLogged = now
-			write("フォーカス取得失敗: \(reason) app=\(app)")
+			write("focus fetch failed: \(reason) app=\(app)")
 			return
 		}
 
 		focusLostCount += 1
 		if now - focusLostLastLogged >= 1.0 {
 			focusLostLastLogged = now
-			write(String(format: "フォーカス取得失敗が継続: %@ app=%@ 連続%d回 %.1fs",
+			write(String(format: "focus fetch still failing: %@ app=%@ %d in a row %.1fs",
 			             reason, app, focusLostCount, now - focusLostStart))
 		}
 	}
@@ -222,7 +222,7 @@ enum PerfLog {
 		guard focusLostActive else { return }
 		let elapsed = CFAbsoluteTimeGetCurrent() - focusLostStart
 		focusLostActive = false
-		write(String(format: "フォーカス取得が復帰: app=%@ 失われていた時間 %.1fs（連続%d回）",
+		write(String(format: "focus fetch recovered: app=%@ lost for %.1fs (%d failures in a row)",
 		             app, elapsed, focusLostCount))
 		focusLostCount = 0
 	}

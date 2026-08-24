@@ -84,7 +84,7 @@ class FocusFollowsMouseManager: ObservableObject {
 				let drift = actualDelay - perfExpectedDelay
 				// A congested main thread should show up as a bigger drift, so just watch the drift
 				if drift >= 0.005 {
-					PerfLog.logf("FFM onMouseMoved遅延: 予定%.1fms 実測%.1fms (ズレ+%.1fms)",
+					PerfLog.logf("FFM onMouseMoved delay: expected %.1fms actual %.1fms (drift +%.1fms)",
 						  perfExpectedDelay * 1000, actualDelay * 1000, drift * 1000)
 				}
 			}
@@ -108,7 +108,7 @@ class FocusFollowsMouseManager: ObservableObject {
 			if PerfLog.enabled {
 				let elapsed = CFAbsoluteTimeGetCurrent() - perfOverallStart
 				if elapsed >= 0.005 {
-					PerfLog.logf("FFM.focusWindowUnderMouse 全体: %.1fms", elapsed * 1000)
+					PerfLog.logf("FFM.focusWindowUnderMouse total: %.1fms", elapsed * 1000)
 				}
 			}
 		}
@@ -137,24 +137,24 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		let mouseLocation = NSEvent.mouseLocation
 		guard let window = topmostWindowAt(mouseLocation) else {
-			logSkipReason("ヒットなし")
+			logSkipReason("no hit")
 			return
 		}
 
 		// Excludes Axis's own windows (border overlay, palette, settings screen)
 		guard window.app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-			logSkipReason("Axis自身")
+			logSkipReason("Axis itself")
 			return
 		}
 
 		// Windows currently stashed in a hidden corner by the workspace or palette are excluded
 		// (Prevents focus from jumping when the mouse touches the 1px sliver of a hidden window)
 		guard !WorkspaceManager.shared.isWindowHidden(window.id) else {
-			logSkipReason("隠しウィンドウ(workspace)")
+			logSkipReason("hidden window (workspace)")
 			return
 		}
 		guard !WindowPaletteManager.shared.isWindowHidden(window.id) else {
-			logSkipReason("隠しウィンドウ(palette)")
+			logSkipReason("hidden window (palette)")
 			return
 		}
 
@@ -163,7 +163,7 @@ class FocusFollowsMouseManager: ObservableObject {
 			AccessibilityManager.shared.getFocusedWindow()
 		}
 		if let focused, focused.id == window.id {
-			logSkipReason("すでにフォーカス済み")
+			logSkipReason("already focused")
 			return
 		}
 

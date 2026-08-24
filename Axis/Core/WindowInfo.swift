@@ -242,7 +242,7 @@ struct WindowInfo: Identifiable, Equatable {
         applyFocusOnce(useAppActivate: false)
         let perfSyncElapsed = CFAbsoluteTimeGetCurrent() - perfSyncStart
         if PerfLog.enabled && perfSyncElapsed >= 0.005 {
-            PerfLog.logf("WindowInfo.focus()同期部分: %.1fms", perfSyncElapsed * 1000)
+            PerfLog.logf("WindowInfo.focus() sync part: %.1fms", perfSyncElapsed * 1000)
         }
 
         // If this focus change came from a key press, pick up that record to measure end-to-end time
@@ -296,7 +296,7 @@ struct WindowInfo: Identifiable, Equatable {
         // Only log when the result differs from last time (logging on every pass after startup would be noisy)
         if PerfLog.enabled && Self.lastSetFrontProcessResult != result {
             Self.lastSetFrontProcessResult = result
-            PerfLog.logf("setFrontProcessWithThisWindow: %@", result ? "成功（非公開API使用）" : "失敗（activate()にフォールバック）")
+            PerfLog.logf("setFrontProcessWithThisWindow: %@", result ? "succeeded (using private API)" : "failed (falling back to activate())")
         }
 
         return result
@@ -356,7 +356,7 @@ struct WindowInfo: Identifiable, Equatable {
         guard attempt < Self.focusRetryDelays.count else {
             if PerfLog.enabled {
                 let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
-                PerfLog.logf("WindowInfo.verifyFocus: 5回とも失敗 (%.1fms)", elapsed * 1000)
+                PerfLog.logf("WindowInfo.verifyFocus: all 5 attempts failed (%.1fms)", elapsed * 1000)
             }
             PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
             return
@@ -367,7 +367,7 @@ struct WindowInfo: Identifiable, Equatable {
             if AccessibilityManager.shared.getFocusedWindowID() == self.id {
                 if PerfLog.enabled {
                     let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
-                    PerfLog.logf("WindowInfo.verifyFocus: %d回目の確認で成功 (%.1fms)", attempt + 1, elapsed * 1000)
+                    PerfLog.logf("WindowInfo.verifyFocus: succeeded on check %d (%.1fms)", attempt + 1, elapsed * 1000)
                 }
                 PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
                 return

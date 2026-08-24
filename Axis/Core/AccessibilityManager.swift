@@ -113,7 +113,7 @@ class AccessibilityManager: ObservableObject {
             let disappeared = previousScanWindows.filter { !currentIDs.contains($0.key) }
             if !disappeared.isEmpty {
                 let names = disappeared.values.joined(separator: ", ")
-                PerfLog.logf("★ウィンドウ消失: %@ (%d件 → %d件)", names, previousScanWindows.count, windows.count)
+                PerfLog.logf("★ Windows vanished: %@ (%d -> %d)", names, previousScanWindows.count, windows.count)
             }
             previousScanWindows = Dictionary(uniqueKeysWithValues: windows.map {
                 ($0.id, "\($0.app.localizedName ?? "?")/\($0.title)")
@@ -185,7 +185,7 @@ class AccessibilityManager: ObservableObject {
             // This app's windows get reported downstream as "not existing," and
             // This can break the layout, so always log when it happens
             if PerfLog.enabled {
-                PerfLog.logf("★AX取りこぼし: %@ (result=%d)", app.localizedName ?? "?", result.rawValue)
+                PerfLog.logf("★ AX miss: %@ (result=%d)", app.localizedName ?? "?", result.rawValue)
             }
             return []
         }
@@ -196,7 +196,7 @@ class AccessibilityManager: ObservableObject {
 
         // Also counts as a miss when AX returned a window but a WindowInfo couldn't be built for it
         if PerfLog.enabled && windows.count < axWindows.count {
-            PerfLog.logf("★AX取りこぼし(情報取得失敗): %@ (%d件中 %d件のみ)",
+            PerfLog.logf("★ AX miss (info fetch failed): %@ (%d windows, only %d usable)",
                          app.localizedName ?? "?", axWindows.count, windows.count)
         }
 
@@ -275,7 +275,7 @@ class AccessibilityManager: ObservableObject {
 
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
             lastFocusedWindowError = nil
-            PerfLog.reportFocusLost(reason: "最前面アプリなし", app: "-")
+            PerfLog.reportFocusLost(reason: "no frontmost app", app: "-")
             return nil
         }
 
@@ -295,7 +295,7 @@ class AccessibilityManager: ObservableObject {
             // For tracking down the border-disappearing issue. Records the AX error code and elapsed time
             // (around 0.3 seconds means a timeout; -25204 is no response, -25212 is no such attribute)
             PerfLog.reportFocusLost(
-                reason: String(format: "AXエラー %d (%.0fms)", result.rawValue, axElapsed * 1000),
+                reason: String(format: "AX error %d (%.0fms)", result.rawValue, axElapsed * 1000),
                 app: appName
             )
             return nil
@@ -306,7 +306,7 @@ class AccessibilityManager: ObservableObject {
         guard let window = WindowInfo(axElement: windowElement, app: frontApp) else {
             lastFocusedWindowError = nil
             // When AX returned a window but its window ID couldn't be obtained
-            PerfLog.reportFocusLost(reason: "ウィンドウID取得不可", app: appName)
+            PerfLog.reportFocusLost(reason: "could not get window ID", app: appName)
             return nil
         }
         lastFocusedWindowError = nil
