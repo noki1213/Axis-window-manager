@@ -9,11 +9,11 @@ import AppKit
 
 /// The kind of placement reservation (corresponds to the key pressed after Ctrl+Option+N)
 enum PlacementReservationKind {
-	case aboveInColumn   // I: stack above, in the same column as the focused column
-	case belowInColumn   // K: stack below, in the same column as the focused column
-	case newColumnLeft   // J: new column to the left of the focused column
-	case newColumnRight  // L: new column to the right of the focused column
-	case float           // F: open as Float
+	case aboveInColumn   // I: stack above in the focused column
+	case belowInColumn   // K: stack below in the focused column
+	case newColumnLeft   // J: new column left of the focused column
+	case newColumnRight  // L: new column right of the focused column
+	case float           // F: open as floating
 }
 
 /// The class that manages the "placement reservation" feature
@@ -170,7 +170,7 @@ class PlacementReservationManager {
 		}
 
 		isLayoutApplied = false
-		cancel() // A one-shot reservation, so it clears once consumed (the preview disappears too)
+		cancel() // One-shot reservation: clear once consumed (the preview disappears too)
 		return true
 	}
 
@@ -235,7 +235,7 @@ class PlacementReservationManager {
 			let width: CGFloat = 640
 			let height: CGFloat = 480
 			let x = visibleFrame.midX - width / 2
-			let yBottom = visibleFrame.midY - height / 2 // NSScreen coordinate system (origin at bottom-left)
+			let yBottom = visibleFrame.midY - height / 2 // NSScreen coordinates (bottom-left origin)
 			let yAX = mainScreenHeight - yBottom - height
 			return CGRect(x: x, y: yAX, width: width, height: height)
 		}

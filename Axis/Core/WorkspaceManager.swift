@@ -95,7 +95,7 @@ private struct DisconnectedScreenData {
 	let tilingSnapshots: [Int: PerScreenSnapshot]
 	let activeWorkspace: Int
 	let migratedToScreenID: ScreenIdentifier
-	let migratedWorkspaceNumbers: [Int]  // The workspace number newly created on the MacBook side
+	let migratedWorkspaceNumbers: [Int]  // Workspace numbers newly created on the MacBook side
 }
 
 // MARK: - WorkspaceManager
@@ -1898,7 +1898,7 @@ class WorkspaceManager: ObservableObject {
 			}
 
 			// Step 1: exact match
-			var matchResults: [Int: WindowInfo] = [:] // matchRequests index -> WindowInfo
+			var matchResults: [Int: WindowInfo] = [:] // index into matchRequests -> WindowInfo
 			for (reqIndex, req) in matchRequests.enumerated() {
 				let exactKey = req.identity.bundleID + "||" + req.identity.title
 				if var candidates = exactMatchPool[exactKey], !candidates.isEmpty {
