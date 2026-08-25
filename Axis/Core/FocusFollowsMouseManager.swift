@@ -3,8 +3,7 @@
 //  Axis
 //
 //  Automatically focuses and raises the window under the mouse (focus follows mouse).
-//  Built into Axis as a replacement for a separate AutoRaise-style tool.
-//  The advantage is that it can auto-pause based on Axis's own state (mid Space-switch, mid selection mode, etc.).
+//  Handled in-process so it can auto-pause based on Axis's own state (mid Space-switch, mid selection mode, etc.).
 //
 
 import AppKit

@@ -1054,7 +1054,7 @@ class WorkspaceManager: ObservableObject {
 	/// Detect ones that are "different" and stash them in the hidden corner.
 	///
 	/// A window that exited native fullscreen isn't unregistered, and instead
-	/// Keeps the original workspace registration (after this document's revision). Axis's workspaces are
+	/// Keeps the original workspace registration. Axis's workspaces are
 	/// Since this is implemented by stashing the window in a corner within the same real Space, after exiting fullscreen
 	/// The window always returns to the same real Space, and if the original workspace is inactive
 	/// It ends up appearing overlapped with the currently shown workspace. This reclaims it.
