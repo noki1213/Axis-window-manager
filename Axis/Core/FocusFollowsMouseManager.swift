@@ -40,6 +40,10 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// For measurement: the reason for the most recent early return (logging is suppressed while the reason stays the same)
 	private var lastSkipReason: String?
 
+	/// For measurement: why the last hit test gave up, when that was for a reason more specific than
+	/// "nothing under the mouse". Cleared at the start of every hit test
+	private var hitTestSkipReason: String?
+
 	private init() {
 		// Default: enabled, 50ms (same as the AutoRaise setting)
 		if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
@@ -136,7 +140,7 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		let mouseLocation = NSEvent.mouseLocation
 		guard let window = topmostWindowAt(mouseLocation) else {
-			logSkipReason("no hit")
+			logSkipReason(hitTestSkipReason ?? "no hit")
 			return
 		}
 
@@ -224,6 +228,7 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// Focus jumps to the tile underneath even while touching the panel. So a negative layer
 	/// Everything except things like the desktop is subject to hit testing.
 	private func topmostWindowAt(_ point: CGPoint) -> WindowInfo? {
+		hitTestSkipReason = nil
 		return PerfLog.measure("FFM.topmostWindowAt", threshold: 0.005) {
 			// CGWindowList uses a top-left origin, so convert it
 			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -235,7 +240,6 @@ class FocusFollowsMouseManager: ObservableObject {
 			let ownPID = ProcessInfo.processInfo.processIdentifier
 
 			// Hit-test from front to back
-			let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 			for entry in windowList {
 				guard let layer = entry[kCGWindowLayer as String] as? Int,
 					  layer >= 0, layer < Self.maxHitTestLayer,
@@ -275,13 +279,16 @@ class FocusFollowsMouseManager: ObservableObject {
 				// A background app's HUD/toast panel (non-activating, so it can never become the focused window)
 				// must not be focused: activating its app only makes focus fetching fail until the user
 				// clicks elsewhere, and the border disappears meanwhile.
-				// Such panels are often tall, mostly transparent strips along a screen edge, so pass through
-				// to whatever tile lies beneath. When the panel belongs to the frontmost app (a launcher that
-				// is open right now), stay silent instead of pulling focus away from it
+				// Stay silent while the mouse is on it, the same as for a panel outside AX management above.
+				// Passing through to the tile beneath instead would take focus off a panel the mouse is
+				// sitting on, and a non-activating panel never gets it back: clicking one doesn't front its
+				// app, so the next mouse move takes focus straight back to the tile and the panel can no
+				// longer be used at all
 				if Self.isNonFocusablePanel(window) {
-					if pid == frontmostPID { return nil }
-					logSkipReason("passing through non-focusable panel \(PerfLog.describe(window))")
-					continue
+					if PerfLog.enabled {
+						hitTestSkipReason = "non-focusable panel under the mouse \(PerfLog.describe(window))"
+					}
+					return nil
 				}
 
 				return window
@@ -290,11 +297,15 @@ class FocusFollowsMouseManager: ObservableObject {
 		}
 	}
 
-	/// A window that cannot take keyboard focus: not a standard window, not a dialog, and without a close button
-	/// (borderless NSPanels report AXSystemDialog / AXFloatingWindow / AXUnknown here)
+	/// A window that cannot take keyboard focus: not a standard window, not a dialog, without a close
+	/// button, and not holding focus in its own app right now.
+	/// Borderless NSPanels report AXSystemDialog / AXFloatingWindow / AXUnknown here, so the subrole alone
+	/// cannot tell a passive HUD from a panel the user types into (a launcher, a file picker). A panel that
+	/// holds focus has already proved it can take it, so it counts as focusable whatever its subrole says
 	private static func isNonFocusablePanel(_ window: WindowInfo) -> Bool {
 		if window.subrole == kAXStandardWindowSubrole as String { return false }
 		if window.subrole == kAXDialogSubrole as String { return false }
-		return !window.hasCloseButton
+		if window.hasCloseButton { return false }
+		return !window.isFocusedInApp
 	}
 }
