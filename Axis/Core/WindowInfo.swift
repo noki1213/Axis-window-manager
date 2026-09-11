@@ -111,6 +111,8 @@ struct WindowInfo: Identifiable, Equatable {
             return
         }
 
+        PerfLog.event("frame: \(PerfLog.describe(self)) \(BorderManager.describe(frame)) -> \(BorderManager.describe(newFrame))")
+
         // Moving a window makes the cached frame stale, so discard it
         AccessibilityManager.shared.invalidateWindowCache()
 
@@ -233,6 +235,8 @@ struct WindowInfo: Identifiable, Equatable {
     /// Focus falls back to another window that same app had just prior.
     /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
+        PerfLog.event("focus: -> \(PerfLog.describe(self))")
+
         // Discard the cache since focus and frontmost state are changing
         AccessibilityManager.shared.invalidateWindowCache()
 

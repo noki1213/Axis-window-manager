@@ -113,7 +113,7 @@ class AccessibilityManager: ObservableObject {
             let disappeared = previousScanWindows.filter { !currentIDs.contains($0.key) }
             if !disappeared.isEmpty {
                 let names = disappeared.values.joined(separator: ", ")
-                PerfLog.logf("★ Windows vanished: %@ (%d -> %d)", names, previousScanWindows.count, windows.count)
+                PerfLog.logf("★ Windows vanished: %@ (%d -> %d) load=%@", names, previousScanWindows.count, windows.count, PerfLog.loadAverage())
             }
             previousScanWindows = Dictionary(uniqueKeysWithValues: windows.map {
                 ($0.id, "\($0.app.localizedName ?? "?")/\($0.title)")

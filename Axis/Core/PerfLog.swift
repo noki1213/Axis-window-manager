@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import AppKit
 
 /// A helper for measurement logging
 enum PerfLog {
@@ -66,11 +67,11 @@ enum PerfLog {
 	}
 
 	/// Write out one line with a date
-	private static func write(_ message: String) {
+	private static func write(_ message: String, tag: String = "PERF") {
 		let now = Date()
 		let stamp = timeFormatter.string(from: now)
-		let line = "\(stamp) [PERF] \(message)\n"
-		NSLog("[PERF] %@", message)
+		let line = "\(stamp) [\(tag)] \(message)\n"
+		NSLog("[%@] %@", tag, message)
 		fileQueue.async {
 			guard let data = line.data(using: .utf8) else { return }
 			let url = logFileURL(for: now)
@@ -125,6 +126,38 @@ enum PerfLog {
 	static func logf(_ format: String, _ args: CVarArg...) {
 		guard enabled else { return }
 		write(String(format: format, arguments: args))
+	}
+
+	// MARK: - Event log (what the app did, and why)
+
+	/// Records a state change or an action taken, as opposed to a timing measurement.
+	/// Written to the same file so events line up with the timings around them, but
+	/// tagged [EVENT] so `grep EVENT` gives a readable timeline of what happened
+	static func event(_ message: String) {
+		guard enabled else { return }
+		write(message, tag: "EVENT")
+	}
+
+	/// System load average over the last minute, for correlating misbehavior with CPU pressure
+	static func loadAverage() -> String {
+		var loads = [Double](repeating: 0, count: 3)
+		guard getloadavg(&loads, 3) == 3 else { return "?" }
+		return String(format: "%.1f", loads[0])
+	}
+
+	/// Short one-line description of a window for event lines: "App/Title#id"
+	static func describe(_ window: WindowInfo) -> String {
+		"\(window.app.localizedName ?? "?")/\(window.title)#\(window.id)"
+	}
+
+	/// Comma-separated descriptions of several windows
+	static func describe(_ windows: [WindowInfo]) -> String {
+		windows.map { describe($0) }.joined(separator: ", ")
+	}
+
+	/// Short description of a screen for event lines
+	static func describe(_ screen: NSScreen) -> String {
+		screen.localizedName
 	}
 
 	// MARK: - End-to-end measurement from key press to focus confirmation

@@ -255,6 +255,7 @@ class WorkspaceManager: ObservableObject {
 			workspaceWindows[id]?[workspace] = []
 		}
 		workspaceWindows[id]?[workspace]?.insert(windowID)
+		PerfLog.event("workspace: registered #\(windowID) -> \(PerfLog.describe(screen)) ws\(workspace + 1)")
 	}
 
 	/// Check whether even a single window is registered across all spaces
@@ -297,6 +298,7 @@ class WorkspaceManager: ObservableObject {
 	                if workspaceWindows[screenID]?[workspace]?.contains(windowID) == true {
 
 	                    workspaceWindows[screenID]?[workspace]?.remove(windowID)
+	                    PerfLog.event("workspace: unregistered #\(windowID) from display\(screenID.displayID) ws\(workspace + 1)")
 
 	                    needsCleanup = true
 
@@ -583,6 +585,7 @@ class WorkspaceManager: ObservableObject {
 		guard cache.cachedWindowIDs.contains(detectedWindowID) else { return false }
 
 		// Restore everything from the cache
+		PerfLog.event("workspace: restored from close-cache (trigger #\(detectedWindowID), \(cache.cachedWindowIDs.count) windows)")
 
 		workspaceWindows = cache.workspaceWindows
 		savedFrames = cache.savedFrames
@@ -689,6 +692,7 @@ class WorkspaceManager: ObservableObject {
 	/// Force re-initialization if the state is broken (for the watchdog)
 	/// Reset didRestoreStateFromDisk and re-register every window to workspace 0
 	func forceReinitialize() {
+		PerfLog.event("workspace: force reinitialize (all registrations dropped)")
 
 		// Clear the state
 		didRestoreStateFromDisk = false
@@ -724,6 +728,8 @@ class WorkspaceManager: ObservableObject {
 
 		// Set the switching-in-progress flag (prevents checkForWindowChanges from misfiring)
 		isSwitching = true
+		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(currentWS + 1) -> ws\(workspace + 1)"
+			+ (focusWindowID.map { " (focus #\($0))" } ?? ""))
 
 		// Reset the cache since this is a user action
 		resetClosedWindowsCache()
@@ -817,6 +823,7 @@ class WorkspaceManager: ObservableObject {
 
 		// Set the switching-in-progress flag
 		isSwitching = true
+		PerfLog.event("workspace: move #\(windowID) \(PerfLog.describe(screen)) ws\(currentWS + 1) -> ws\(workspace + 1)")
 
 		// Reset the cache since this is a user action
 		resetClosedWindowsCache()
@@ -1080,6 +1087,7 @@ class WorkspaceManager: ObservableObject {
 			// (Required guard, since hidden windows on inactive workspaces are still visible on-screen by 1px)
 			guard !isWindowHidden(window.id) else { continue }
 
+			PerfLog.event("workspace: stray \(PerfLog.describe(window)) belongs to ws\(location.workspace + 1) (active ws\(activeWS + 1)); hiding")
 			hideWindow(window.id)
 			hiddenIDs.insert(window.id)
 		}

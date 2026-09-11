@@ -352,6 +352,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // A startup marker to confirm the measurement logging is running
         PerfLog.log("=== Axis launched / FFM enabled=\(FocusFollowsMouseManager.shared.isEnabled) ===")
 
+        // Periodic system load line, so misbehavior can be checked against CPU pressure at that moment
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            PerfLog.event("load: \(PerfLog.loadAverage())")
+        }
+
         // Record the current monitor list (for detecting monitor connect/disconnect)
         knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
 
@@ -693,6 +698,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if currentCount > 0 {
             let hasRegisteredWindows = workspaceManager.hasAnyRegisteredWindows()
             if !hasRegisteredWindows {
+                PerfLog.event("watchdog: \(currentCount) windows on screen but none registered; restoring")
                 // First try restoring from closedWindowsCache
                 var restoredFromCache = false
                 for window in currentWindows {
@@ -781,6 +787,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs).subtracting(stillHiddenWindowIDs)
+                PerfLog.event("windows: closed \(Self.describeIDs(reallyClosedWindowIDs))"
+                    + (fullscreenWindowIDs.isEmpty ? "" : " fullscreen \(Self.describeIDs(fullscreenWindowIDs))")
+                    + (stillHiddenWindowIDs.isEmpty ? "" : " hidden \(Self.describeIDs(stillHiddenWindowIDs))")
+                    + " (\(lastWindowCount) -> \(currentCount), load=\(PerfLog.loadAverage()))")
 
                 // Only do the cache save, unregister, and focus handling if a window was genuinely closed
                 if !reallyClosedWindowIDs.isEmpty {
@@ -811,6 +821,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // When a window was added
             if currentCount > lastWindowCount {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
+                PerfLog.event("windows: appeared \(PerfLog.describe(currentWindows.filter { newWindowIDs.contains($0.id) }))"
+                    + " (\(lastWindowCount) -> \(currentCount), focus screen=\(lastFocusedScreen.map { PerfLog.describe($0) } ?? "-"))")
 
                 // Try to restore from the cache
                 // Restore a vanished window if it comes back after unlock or wake from sleep
@@ -948,6 +960,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             //   a case where a window gets swapped for a different window)
             let closedWindowIDs = lastWindowIDs.subtracting(currentWindowIDs)
             let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
+            PerfLog.event("windows: swapped \(Self.describeIDs(closedWindowIDs)) -> \(PerfLog.describe(currentWindows.filter { newWindowIDs.contains($0.id) }))")
 
             // Unregister the closed window from the workspace
             workspaceManager.cacheCurrentStateOnWindowClose()
@@ -987,6 +1000,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// "#id, #id" for windows that can no longer be looked up by name
+    private static func describeIDs(_ ids: Set<CGWindowID>) -> String {
+        ids.sorted().map { "#\($0)" }.joined(separator: ", ")
+    }
+
     /// Retile once a new window has settled down
     /// With Ghostty's Cmd+N and similar, a window is still at its initial size right after detection, and
     /// A single tiling pass can sometimes settle on a size smaller than the assigned area
@@ -1085,6 +1103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if activatedApp.bundleIdentifier == Bundle.main.bundleIdentifier {
             return
         }
+        PerfLog.event("app activated: \(activatedApp.localizedName ?? activatedApp.bundleIdentifier ?? "?")")
 
         // The focused window can be undetermined right after an app switch, so wait a bit before deciding
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -1138,6 +1157,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func onActiveSpaceChanged(_ notification: Notification) {
+        PerfLog.event("system: active space changed")
         // Skip while monitor-change handling is in progress
         // (a Space-switch notification also arrives on monitor connect/disconnect, but that's handled by processScreenChange)
         guard !isHandlingScreenChange else {
@@ -1240,10 +1260,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Screen lock handling
 
     @objc private func onScreenLocked() {
+        PerfLog.event("system: screen locked")
         wasScreenLocked = true
     }
 
     @objc private func onScreenUnlocked() {
+        PerfLog.event("system: screen unlocked")
         wasScreenLocked = false
 
         // If unlocked after waking from sleep, run the recovery logic here
@@ -1255,6 +1277,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Sleep/wake handling
 
     @objc private func onSystemWillSleep() {
+        PerfLog.event("system: will sleep")
         // Set a flag so window checks don't run during sleep
         isWaking = true
         // Save workspace state before sleep
@@ -1262,6 +1285,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func onSystemWake() {
+        PerfLog.event("system: woke up")
 
         // If the screen is locked, wait for it to unlock before running the recovery logic
         // (the Accessibility API is unavailable while locked)
@@ -1325,6 +1349,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func onScreenParametersChanged() {
         // Debounce rapid successive notifications (this can fire multiple times on monitor changes)
         guard !isHandlingScreenChange else { return }
+        PerfLog.event("system: screen parameters changed (\(NSScreen.screens.map { PerfLog.describe($0) }.joined(separator: ", ")))")
         isHandlingScreenChange = true
 
         // Wait for macOS to fully update the monitor info before proceeding
