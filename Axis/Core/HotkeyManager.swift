@@ -293,6 +293,7 @@ class HotkeyManager: ObservableObject {
 
 	/// Execute the action found in the lookup table
 	private func executeAction(_ action: HotkeyAction) {
+		PerfLog.event("key: \(action.rawValue)")
 		switch action {
 		// MARK: Focus movement
 		case .focusLeft:

@@ -204,32 +204,35 @@ class BorderManager: ObservableObject {
                 let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-"
                 PerfLog.log("Border hidden: failed to get focus front=\(front)")
             }
-            hideBorder()
+            hideBorder(reason: "no focused window")
             return
         }
 
         if GapSelectManager.shared.isActive {
-            hideBorder()
+            hideBorder(reason: "gap select mode")
             return
         }
 
         // Don't show the border on windows of excluded apps
         if let bundleId = focusedWindow.app.bundleIdentifier,
            borderExcludedBundleIds.contains(bundleId) {
-            hideBorder()
+            hideBorder(reason: "excluded app \(bundleId)")
             return
         }
 
         // Don't show the border on windows evacuated to another workspace or while the palette is showing
         if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
            WindowPaletteManager.shared.isWindowHidden(focusedWindow.id) {
-            hideBorder()
+            hideBorder(reason: "focused window is evacuated #\(focusedWindow.id)")
             return
         }
         
         let windowChanged = (currentWindowID != focusedWindow.id)
         let rawFrame = explicitTarget ?? focusedWindow.frame
         let targetRect = calculateBorderRect(for: rawFrame)
+        if windowChanged || borderWindow?.isVisible != true {
+            PerfLog.event("border: show on \(PerfLog.describe(focusedWindow)) at \(Self.describe(rawFrame))")
+        }
 
         self.currentWindow = focusedWindow
         self.currentWindowID = focusedWindow.id
@@ -287,10 +290,12 @@ class BorderManager: ObservableObject {
             isInMissionControl = missionControlActive
             if isInMissionControl {
                 // Mission Control starts → hide the border
+                PerfLog.event("border: hidden (mission control started)")
                 borderWindow?.orderOut(nil)
                 return
             } else {
                 // Mission Control ends → show the border again
+                PerfLog.event("border: re-shown (mission control ended)")
                 borderWindow?.orderFront(nil)
             }
         }
@@ -412,11 +417,20 @@ class BorderManager: ObservableObject {
         scheduleUpdateBorder()
     }
 
-    func hideBorder() {
+    /// - Parameter reason: why it was hidden. Only logged when the border was actually showing
+    func hideBorder(reason: String = #function) {
+        if borderWindow?.isVisible == true {
+            PerfLog.event("border: hidden (\(reason), was on #\(currentWindowID.map(String.init) ?? "-"))")
+        }
         isAnimating = false
         borderWindow?.orderOut(nil)
         currentWindow = nil
         currentWindowID = nil
+    }
+
+    /// "x,y w×h" with integer values, for log lines
+    static func describe(_ rect: CGRect) -> String {
+        String(format: "%.0f,%.0f %.0fx%.0f", rect.origin.x, rect.origin.y, rect.width, rect.height)
     }
 }
 

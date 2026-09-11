@@ -235,13 +235,13 @@ class FocusFollowsMouseManager: ObservableObject {
 			let ownPID = ProcessInfo.processInfo.processIdentifier
 
 			// Hit-test from front to back
-			var hitWindowID: CGWindowID? = nil
-			var hitPID: pid_t? = nil
+			let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 			for entry in windowList {
 				guard let layer = entry[kCGWindowLayer as String] as? Int,
 					  layer >= 0, layer < Self.maxHitTestLayer,
 					  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
-					  let windowID = entry[kCGWindowNumber as String] as? CGWindowID else { continue }
+					  let windowID = entry[kCGWindowNumber as String] as? CGWindowID,
+					  let pid = entry[kCGWindowOwnerPID as String] as? pid_t else { continue }
 
 				// A fully transparent window is "invisible", so let it pass through.
 				// This is the case for full-screen catch-all windows created by things like notification banners
@@ -250,35 +250,51 @@ class FocusFollowsMouseManager: ObservableObject {
 				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
 				// The border overlay always sits in front of the focused window, so
 				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
-				if let pid = entry[kCGWindowOwnerPID as String] as? pid_t {
-					if pid == ownPID { continue }
+				if pid == ownPID { continue }
 
-					// Let system overlays like notification banners and Control Center pass through too.
-					// These have a catch-all window covering the entire screen, so letting them get hit
-					// focus and the border end up moving to the full-screen-sized window.
-					// Only resolve bundle IDs for hit candidates, so we don't add scanning overhead
-					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
-										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
-					guard bounds.contains(cgPoint) else { continue }
+				let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+									width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+				guard bounds.contains(cgPoint) else { continue }
 
-					if let bundleId = bundleIdentifier(forPID: pid),
-					   AccessibilityManager.transientOverlayBundleIds.contains(bundleId) { continue }
+				// Let system overlays like notification banners and Control Center pass through too.
+				// These have a catch-all window covering the entire screen, so letting them get hit
+				// focus and the border end up moving to the full-screen-sized window.
+				// Only resolve bundle IDs for hit candidates, so we don't add scanning overhead
+				if let bundleId = bundleIdentifier(forPID: pid),
+				   AccessibilityManager.transientOverlayBundleIds.contains(bundleId) { continue }
 
-					hitWindowID = windowID
-					hitPID = pid
-					break
+				// Map it to the AX WindowInfo.
+				// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
+				// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
+				// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
+				let appWindows = PerfLog.measure("FFM.topmostWindowAt/getWindowsForPID", threshold: 0.005) {
+					AccessibilityManager.shared.getWindows(forPID: pid)
 				}
-			}
-			guard let windowID = hitWindowID, let pid = hitPID else { return nil }
+				guard let window = appWindows.first(where: { $0.id == windowID }) else { return nil }
 
-			// Map it to the AX WindowInfo.
-			// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
-			// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
-			// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
-			let appWindows = PerfLog.measure("FFM.topmostWindowAt/getWindowsForPID", threshold: 0.005) {
-				AccessibilityManager.shared.getWindows(forPID: pid)
+				// A background app's HUD/toast panel (non-activating, so it can never become the focused window)
+				// must not be focused: activating its app only makes focus fetching fail until the user
+				// clicks elsewhere, and the border disappears meanwhile.
+				// Such panels are often tall, mostly transparent strips along a screen edge, so pass through
+				// to whatever tile lies beneath. When the panel belongs to the frontmost app (a launcher that
+				// is open right now), stay silent instead of pulling focus away from it
+				if Self.isNonFocusablePanel(window) {
+					if pid == frontmostPID { return nil }
+					logSkipReason("passing through non-focusable panel \(PerfLog.describe(window))")
+					continue
+				}
+
+				return window
 			}
-			return appWindows.first { $0.id == windowID }
+			return nil
 		}
+	}
+
+	/// A window that cannot take keyboard focus: not a standard window, not a dialog, and without a close button
+	/// (borderless NSPanels report AXSystemDialog / AXFloatingWindow / AXUnknown here)
+	private static func isNonFocusablePanel(_ window: WindowInfo) -> Bool {
+		if window.subrole == kAXStandardWindowSubrole as String { return false }
+		if window.subrole == kAXDialogSubrole as String { return false }
+		return !window.hasCloseButton
 	}
 }
