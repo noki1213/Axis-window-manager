@@ -41,7 +41,8 @@ class TilingEngine: ObservableObject {
     // MARK: - Public Methods
     
     /// Run tiling on the given screen
-    func tile(on screen: NSScreen) {
+    /// - Parameter reason: what triggered this pass (defaults to the caller's function name)
+    func tile(on screen: NSScreen, reason: String = #function) {
         let screenID = ScreenIdentifier(from: screen)
         let allWindows = accessibilityManager.getAllWindows()
 
@@ -78,6 +79,9 @@ class TilingEngine: ObservableObject {
 
         // If there are no target windows, clear the column structure and return
         guard !managedWindows.isEmpty else {
+            if !(tiledWindows[screenID] ?? []).isEmpty {
+                PerfLog.event("tile: \(PerfLog.describe(screen)) now empty (via \(reason))")
+            }
             tiledWindows[screenID] = []
             return
         }
@@ -124,6 +128,15 @@ class TilingEngine: ObservableObject {
                 }
                 columns.insert([window], at: insertIndex)
             }
+        }
+
+        // Log the layout only when the column structure actually changed
+        // (the same layout gets re-applied every 0.3s cycle, so logging every pass would bury the real changes)
+        let previousLayout = (tiledWindows[screenID] ?? []).map { $0.map { $0.id } }
+        let newLayout = columns.map { $0.map { $0.id } }
+        if previousLayout != newLayout {
+            let layout = columns.map { PerfLog.describe($0) }.joined(separator: " | ")
+            PerfLog.event("tile: \(PerfLog.describe(screen)) [\(layout)] (via \(reason))")
         }
 
         // Update the state
@@ -189,9 +202,10 @@ class TilingEngine: ObservableObject {
     }
 
     /// Run tiling across all screens
-    func tileAllScreens() {
+    /// - Parameter reason: what triggered this pass (defaults to the caller's function name)
+    func tileAllScreens(reason: String = #function) {
         for screen in NSScreen.screens {
-            tile(on: screen)
+            tile(on: screen, reason: reason)
         }
     }
     

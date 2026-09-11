@@ -94,6 +94,7 @@ class ZenModeManager: ObservableObject {
         focusedWindowID = focusedWindow.id
         activeScreen = screen
         isActive = true
+        PerfLog.event("zen: enter \(PerfLog.describe(focusedWindow)) on \(PerfLog.describe(screen))")
 
         // Move only the other windows on the same monitor off-screen
         hideOtherWindows(exceptWindowID: focusedWindow.id, on: screen)
@@ -117,6 +118,7 @@ class ZenModeManager: ObservableObject {
     }
     
     func exit() {
+        PerfLog.event("zen: exit (was #\(focusedWindowID.map(String.init) ?? "-"))")
 
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
