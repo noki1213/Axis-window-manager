@@ -71,8 +71,15 @@ struct WindowInfo: Identifiable, Equatable {
         self.hasCloseButton = (closeResult == .success && closeButtonRef != nil)
     }
     
+    /// Whether the window holds keyboard focus within its own app.
+    /// Read live rather than cached at init: it changes on every click, with nothing about the window list
+    /// changing along with it. A panel that can never become key reads false at all times
+    var isFocusedInApp: Bool {
+        Self.getBool(from: axElement, attribute: kAXFocusedAttribute) ?? false
+    }
+
     // MARK: - Equatable
-    
+
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool {
         lhs.id == rhs.id
     }
