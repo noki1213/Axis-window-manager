@@ -1287,6 +1287,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
+
+            // Take whatever is focused now as the baseline for focus-move detection.
+            // On a switch to an empty workspace nothing gets focused, so macOS keeps the previous
+            // window (now stashed in the corner) as focused. Without resetting the baseline, the next
+            // cycle would read that as "focus moved to a window in another workspace" and
+            // switch straight back, making the windows seem to vanish and reappear
+            self.lastFocusedWindowID = self.accessibilityManager.getFocusedWindow()?.id
         }
     }
 
