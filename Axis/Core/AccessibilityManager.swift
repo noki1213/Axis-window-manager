@@ -94,16 +94,24 @@ class AccessibilityManager: ObservableObject {
         // Running them in parallel cuts the wait down to just the slowest single app.
         // Write results back by index to preserve the original app order
         var results = [[WindowInfo]](repeating: [], count: runningApps.count)
+        var failedPIDs = Set<pid_t>()
         if !runningApps.isEmpty {
             let lock = NSLock()
             DispatchQueue.concurrentPerform(iterations: runningApps.count) { index in
-                let appWindows = self.getWindows(for: runningApps[index])
+                let appWindows = self.fetchWindows(for: runningApps[index])
                 lock.lock()
-                results[index] = appWindows
+                results[index] = appWindows ?? []
+                if appWindows == nil {
+                    failedPIDs.insert(runningApps[index].processIdentifier)
+                }
                 lock.unlock()
             }
         }
         let windows = results.flatMap { $0 }
+        lastScanFailedPIDs = failedPIDs
+        for window in windows {
+            knownWindowOwners[window.id] = window.app.processIdentifier
+        }
 
         // Record windows that disappeared since the last scan (for diagnostics).
         // A genuine close also shows up here, but if it appears right before "assigned the whole screen,"
@@ -159,8 +167,33 @@ class AccessibilityManager: ObservableObject {
     /// The reason the last getFocusedWindow() call failed (AXError)
     private(set) var lastFocusedWindowError: AXError?
 
-    /// Get the windows of a specific application
+    /// Apps whose window list could not be read in the last full scan (usually an AX timeout under heavy CPU load).
+    /// Their windows are missing from that scan's result without having been closed
+    private(set) var lastScanFailedPIDs: Set<pid_t> = []
+
+    /// Owner process of every window seen in any scan so far, so a window that has since vanished
+    /// from the AX list can still be traced back to its app
+    private var knownWindowOwners: [CGWindowID: pid_t] = [:]
+
+    /// Of the given windows, those whose app failed to answer in the last scan.
+    /// Such windows have merely become unreadable, not closed
+    func windowsUnreadableInLastScan(_ windowIDs: Set<CGWindowID>) -> Set<CGWindowID> {
+        guard !lastScanFailedPIDs.isEmpty else { return [] }
+        return windowIDs.filter { id in
+            guard let pid = knownWindowOwners[id] else { return false }
+            return lastScanFailedPIDs.contains(pid)
+        }
+    }
+
+    /// Get the windows of a specific application (an unreadable app is reported as having no windows)
     func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
+        return fetchWindows(for: app) ?? []
+    }
+
+    /// Get the windows of a specific application.
+    /// - Returns: nil when the app's window list could not be read at all (timeout etc.),
+    ///   as opposed to an empty array for an app that genuinely has no windows
+    private func fetchWindows(for app: NSRunningApplication) -> [WindowInfo]? {
         let perfStart = CFAbsoluteTimeGetCurrent()
         defer {
             let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
@@ -187,7 +220,7 @@ class AccessibilityManager: ObservableObject {
             if PerfLog.enabled {
                 PerfLog.logf("★ AX miss: %@ (result=%d)", app.localizedName ?? "?", result.rawValue)
             }
-            return []
+            return nil
         }
 
         let windows = axWindows.compactMap { axWindow -> WindowInfo? in

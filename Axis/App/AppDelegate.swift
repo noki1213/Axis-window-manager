@@ -37,6 +37,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// The monitor of the window that had focus on the previous timer cycle
     /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
     private var lastFocusedScreen: NSScreen?
+    /// Windows last reported as unreadable, so the same situation is logged once instead of every 0.3s
+    private var lastUnreadableWindowIDs: Set<CGWindowID> = []
     /// The window ID that had focus on the previous cycle (for detecting focus moving to
     /// Used to detect focus movement and automatically switch workspaces.
     /// (fills the gap, since onActiveAppChanged only fires on app switches)
@@ -581,6 +583,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Gone from the accessibility list, but still showing up on screen (in CGWindowList)
             // If the window is there, it's just a transient miss, so hold off on cancelling Zen mode
             let vanishedZen = lastWindowIDs.subtracting(currentIDsZen)
+            if skipCycleIfAppsUnreadable(vanished: vanishedZen) { return }
             let ghostsZen = vanishedZen.intersection(onScreenIDsZen)
             if !ghostsZen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
                 consecutiveGhostSkips += 1
@@ -730,6 +733,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Misreading it as "closed" dropped the registration, and the one remaining window ended up assigned the whole screen
         // (Arc comes back after this and ends up fullscreen instead).
         // But cap the number of consecutive skips, so a misjudgment doesn't cause it to be skipped forever
+        if skipCycleIfAppsUnreadable(vanished: lastWindowIDs.subtracting(currentWindowIDs)) { return }
         let vanishedButStillOnScreen = lastWindowIDs.subtracting(currentWindowIDs).intersection(onScreenIDs)
         if !vanishedButStillOnScreen.isEmpty && consecutiveGhostSkips < Self.maxConsecutiveGhostSkips {
             consecutiveGhostSkips += 1
@@ -786,7 +790,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     HiddenWindowManager.shared.isHidden($0) && allWindowsByID[$0] != nil
                 }
 
+                // A window that was never registered to a workspace was never tiled, so its disappearance
+                // must not move focus or retile (only the tracked set is updated below)
                 let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs).subtracting(stillHiddenWindowIDs)
+                    .filter { workspaceManager.isWindowInAnyWorkspace($0) }
                 PerfLog.event("windows: closed \(Self.describeIDs(reallyClosedWindowIDs))"
                     + (fullscreenWindowIDs.isEmpty ? "" : " fullscreen \(Self.describeIDs(fullscreenWindowIDs))")
                     + (stillHiddenWindowIDs.isEmpty ? "" : " hidden \(Self.describeIDs(stillHiddenWindowIDs))")
@@ -1000,6 +1007,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// Whether the cycle was skipped because a vanished window's app simply failed to answer.
+    /// Under heavy CPU load (measured: load average 70 while an AI coding agent was running) the AX
+    /// queries of many apps time out at once, so their windows drop out of the list for several seconds
+    /// even though nothing was closed. Treating that as a close would move focus and retile, and then
+    /// undo it all when the windows come back. The transient-miss counter isn't touched here, since an
+    /// app that is merely slow can stay slow for longer than that counter allows
+    private func skipCycleIfAppsUnreadable(vanished: Set<CGWindowID>) -> Bool {
+        guard !vanished.isEmpty else { return false }
+        let unreadable = accessibilityManager.windowsUnreadableInLastScan(vanished)
+        guard !unreadable.isEmpty else {
+            lastUnreadableWindowIDs = []
+            return false
+        }
+        if unreadable != lastUnreadableWindowIDs {
+            lastUnreadableWindowIDs = unreadable
+            PerfLog.event("windows: \(Self.describeIDs(unreadable)) unreadable (app AX timed out, load=\(PerfLog.loadAverage())); not treating as closed")
+        }
+        accessibilityManager.invalidateWindowCache()
+        lastOnScreenIDSignature = []
+        return true
+    }
+
     /// "#id, #id" for windows that can no longer be looked up by name
     private static func describeIDs(_ ids: Set<CGWindowID>) -> String {
         ids.sorted().map { "#\($0)" }.joined(separator: ", ")
@@ -1247,11 +1276,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Update window tracking after a workspace switch
         // (delayed slightly to wait for the position change to take effect)
+        // Apply the same shouldBeManaged() filter as checkForWindowChanges. Without it, an app's
+        // invisible helper window (e.g. a 1x1 window parked in a screen corner) slips into the tracked set
+        // here, and since such windows come and go from the accessibility list, its next disappearance
+        // is handled as a real close: focus jumps to a neighbor and every screen is retiled
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
             let allWindows = self.accessibilityManager.getAllWindows()
-            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) }
+            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
         }
