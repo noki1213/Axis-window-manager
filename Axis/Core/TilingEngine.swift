@@ -186,7 +186,7 @@ class TilingEngine: ObservableObject {
             return accessibilityManager.getWindows(forPIDs: targetPIDs)
         }
 
-        /// Whether a tiled window overlaps this one from above
+        /// Whether a tiled window overlaps this one from above (a window on a higher level never is)
         func isBuriedUnderTile(_ window: WindowInfo) -> Bool {
             guard let index = stackingOrder.firstIndex(where: { $0.id == window.id }) else { return false }
             let bounds = stackingOrder[index].bounds
@@ -197,7 +197,7 @@ class TilingEngine: ObservableObject {
             }
         }
 
-        // Windows that reject kAXRaiseAction and are actually hidden under a tile
+        // Windows that reject kAXRaiseAction
         var needsActivation: [WindowInfo] = []
 
         for window in targetWindows {
@@ -219,17 +219,21 @@ class TilingEngine: ObservableObject {
             // Only the ones on this screen (judged by window center)
             let center = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
             guard screen.frame.contains(center) else { continue }
+            // Only windows that are actually under a tile. kAXRaiseAction runs makeKeyAndOrderFront in
+            // the target app, and on a non-activating panel that makes it the key window without
+            // activating its app: keyboard input silently goes to the panel while the focused tile
+            // still looks focused. Windows already on top (or on a higher window level) are left alone
+            guard isBuriedUnderTile(window) else { continue }
 
             let result = AXUIElementPerformAction(window.axElement, kAXRaiseAction as CFString)
             // System Settings answers kAXRaiseAction with attributeUnsupported (-25205) rather than actionUnsupported
-            if allowActivation, result == .actionUnsupported || result == .attributeUnsupported,
-               isBuriedUnderTile(window) {
+            if allowActivation, result == .actionUnsupported || result == .attributeUnsupported {
                 needsActivation.append(window)
             }
         }
 
         // Fallback for windows that can't be raised through AX: activating the app is the only
-        // way to bring them forward. Only done when the window is actually under a tile
+        // way to bring them forward
         for window in needsActivation {
             PerfLog.event("raiseFloating: activating \(PerfLog.describe(window)) (AXRaise unsupported)")
             _ = window.activateBringingToFront()
