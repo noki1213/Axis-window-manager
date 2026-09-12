@@ -665,6 +665,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if !didSwitchWorkspace {
                     borderManager.notifyFocusedWindowChanged()
                 }
+
+                // Whenever a tiled window takes focus, macOS raises it over everything, which
+                // buries any floating window overlapping it. Tiling only re-raises floats when
+                // the layout changes, and focus-follows-mouse only covers hover, so keyboard
+                // focus moves, Cmd+Tab, and clicks would otherwise leave floats hidden.
+                // Re-raise the floats on that screen here (raise only, focus is untouched).
+                let isTiled = workspaceManager.isWindowInAnyWorkspace(focused.id)
+                    && !workspaceManager.isFloating(focused.id)
+                    && !focused.shouldFloat()
+                if isTiled, let screen = workspaceManager.screenForWindow(focused.id) {
+                    PerfLog.measure("focusChange.raiseFloatingWindows", threshold: 0.005) {
+                        TilingEngine.shared.raiseFloatingWindows(on: screen)
+                    }
+                }
             }
         }
 

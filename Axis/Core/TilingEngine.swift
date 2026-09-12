@@ -161,6 +161,8 @@ class TilingEngine: ObservableObject {
         // For converting AX coordinates (top-left origin) to NSScreen coordinates (bottom-left origin)
         let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
 
+        // Front-to-back list of the normal-layer windows on this screen (CGWindowList is ordered front first)
+        var stackingOrder: [(id: CGWindowID, bounds: CGRect)] = []
         let targetWindows = PerfLog.measure("TilingEngine.raiseFloatingWindows/getWindowsForPIDs", threshold: 0.005) { () -> [WindowInfo] in
             let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
             var targetPIDs = Set<pid_t>()
@@ -172,10 +174,28 @@ class TilingEngine: ObservableObject {
                 let center = CGPoint(x: bounds.midX, y: mainScreenHeight - bounds.midY)
                 if screen.frame.contains(center) {
                     targetPIDs.insert(pid)
+                    if let id = entry[kCGWindowNumber as String] as? CGWindowID,
+                       (entry[kCGWindowLayer as String] as? Int ?? 0) == 0 {
+                        stackingOrder.append((id: id, bounds: bounds))
+                    }
                 }
             }
             return accessibilityManager.getWindows(forPIDs: targetPIDs)
         }
+
+        /// Whether a tiled window overlaps this one from above
+        func isBuriedUnderTile(_ window: WindowInfo) -> Bool {
+            guard let index = stackingOrder.firstIndex(where: { $0.id == window.id }) else { return false }
+            let bounds = stackingOrder[index].bounds
+            return stackingOrder[..<index].contains { above in
+                WorkspaceManager.shared.isWindowInAnyWorkspace(above.id)
+                    && !WorkspaceManager.shared.isFloating(above.id)
+                    && above.bounds.intersects(bounds)
+            }
+        }
+
+        // Windows that reject kAXRaiseAction and are actually hidden under a tile
+        var needsActivation: [WindowInfo] = []
 
         for window in targetWindows {
             // Axis's own windows are excluded
@@ -197,7 +217,29 @@ class TilingEngine: ObservableObject {
             let center = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
             guard screen.frame.contains(center) else { continue }
 
-            window.raise()
+            let result = AXUIElementPerformAction(window.axElement, kAXRaiseAction as CFString)
+            // System Settings answers kAXRaiseAction with attributeUnsupported (-25205) rather than actionUnsupported
+            if result == .actionUnsupported || result == .attributeUnsupported, isBuriedUnderTile(window) {
+                needsActivation.append(window)
+            }
+        }
+
+        guard !needsActivation.isEmpty else { return }
+
+        // Fallback for windows that can't be raised through AX: activating the app is the only
+        // way to bring them forward, so do that and then hand focus straight back to where it was
+        // (without reordering, so the floating window stays on top).
+        // Only done when the window is actually buried, since the round trip moves focus briefly
+        let previousFocus = accessibilityManager.getFocusedWindow()
+        for window in needsActivation {
+            PerfLog.event("raiseFloating: activating \(PerfLog.describe(window)) (AXRaise unsupported)")
+            _ = window.activateBringingToFront()
+        }
+        if let previousFocus, previousFocus.app.processIdentifier != myPID,
+           !needsActivation.contains(where: { $0.app.processIdentifier == previousFocus.app.processIdentifier }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                _ = previousFocus.restoreFocusWithoutRaising()
+            }
         }
     }
 
