@@ -319,18 +319,12 @@ struct WindowInfo: Identifiable, Equatable {
         return setFrontProcess(options: 0x200)
     }
 
-    /// Bring this window to the front by activating its app (the app's own ordering puts it on top).
-    /// Used for windows that reject kAXRaiseAction (System Settings answers it with actionUnsupported).
-    /// This does move focus; pair it with restoreFocusWithoutRaising() on the previous window
+    /// Bring this window to the front by activating its app with all of its windows.
+    /// Used for windows that reject kAXRaiseAction (System Settings answers it with attributeUnsupported);
+    /// the private front-process call leaves such windows where they are, but a full activate reorders them.
+    /// This moves focus to the app as well
     func activateBringingToFront() -> Bool {
-        return setFrontProcess(options: 0x200)
-    }
-
-    /// Hand focus back to this window while leaving the window ordering untouched.
-    /// kCPSNoWindows (0x400) activates the process without bringing its windows forward,
-    /// so a floating window that was just brought to the front stays there
-    func restoreFocusWithoutRaising() -> Bool {
-        return setFrontProcess(options: 0x400)
+        return app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     }
 
     /// Activate this window's process with the given kCPS* options and designate this window as the key window
