@@ -152,7 +152,10 @@ class TilingEngine: ObservableObject {
     /// Raise the floating windows (explicitly marked Float, or shouldFloat) on the given screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
     /// Doesn't steal focus.
-    func raiseFloatingWindows(on screen: NSScreen) {
+    /// - Parameter allowActivation: for windows that reject kAXRaiseAction (System Settings), also allow
+    ///   bringing them forward by activating their app. That moves focus to the floating window, so it's
+    ///   reserved for the explicit hotkey; the automatic passes stay silent
+    func raiseFloatingWindows(on screen: NSScreen, allowActivation: Bool = false) {
         let accessibilityManager = AccessibilityManager.shared
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
@@ -219,27 +222,17 @@ class TilingEngine: ObservableObject {
 
             let result = AXUIElementPerformAction(window.axElement, kAXRaiseAction as CFString)
             // System Settings answers kAXRaiseAction with attributeUnsupported (-25205) rather than actionUnsupported
-            if result == .actionUnsupported || result == .attributeUnsupported, isBuriedUnderTile(window) {
+            if allowActivation, result == .actionUnsupported || result == .attributeUnsupported,
+               isBuriedUnderTile(window) {
                 needsActivation.append(window)
             }
         }
 
-        guard !needsActivation.isEmpty else { return }
-
         // Fallback for windows that can't be raised through AX: activating the app is the only
-        // way to bring them forward, so do that and then hand focus straight back to where it was
-        // (without reordering, so the floating window stays on top).
-        // Only done when the window is actually buried, since the round trip moves focus briefly
-        let previousFocus = accessibilityManager.getFocusedWindow()
+        // way to bring them forward. Only done when the window is actually under a tile
         for window in needsActivation {
             PerfLog.event("raiseFloating: activating \(PerfLog.describe(window)) (AXRaise unsupported)")
             _ = window.activateBringingToFront()
-        }
-        if let previousFocus, previousFocus.app.processIdentifier != myPID,
-           !needsActivation.contains(where: { $0.app.processIdentifier == previousFocus.app.processIdentifier }) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                _ = previousFocus.restoreFocusWithoutRaising()
-            }
         }
     }
 
@@ -321,6 +314,15 @@ class TilingEngine: ObservableObject {
         }
 
         guard let (columnIndex, rowIndex) = findWindowPosition(window: focusedWindow, in: columns) else {
+            // The focused window isn't part of the layout (a dialog, System Settings, or anything else
+            // that floats on its own without being marked Float). Rather than leaving the key dead,
+            // jump to the nearest tile in the requested direction, or the nearest tile at all
+            let candidates = columns.flatMap { $0 }.filter { $0.id != focusedWindow.id }
+            if let target = nearestWindow(from: focusedWindow, in: direction, among: candidates) {
+                target.focus()
+                moveCursorToWindow(target)
+                return target.id
+            }
             return nil
         }
 
@@ -384,6 +386,25 @@ class TilingEngine: ObservableObject {
             return target.id
         }
         return nil
+    }
+
+    /// The window closest to `origin` whose center lies in the given direction;
+    /// falls back to the closest window in any direction when none lies that way
+    private func nearestWindow(from origin: WindowInfo, in direction: Direction, among candidates: [WindowInfo]) -> WindowInfo? {
+        let from = CGPoint(x: origin.frame.midX, y: origin.frame.midY)
+        func distance(_ window: WindowInfo) -> CGFloat {
+            hypot(window.frame.midX - from.x, window.frame.midY - from.y)
+        }
+        // AX coordinates have their origin at the top-left, so "up" means a smaller Y
+        let inDirection = candidates.filter { window in
+            switch direction {
+            case .left:  return window.frame.midX < from.x
+            case .right: return window.frame.midX > from.x
+            case .up:    return window.frame.midY < from.y
+            case .down:  return window.frame.midY > from.y
+            }
+        }
+        return (inDirection.isEmpty ? candidates : inDirection).min { distance($0) < distance($1) }
     }
 
     /// When the neighboring monitor is empty, move the mouse cursor to its center
