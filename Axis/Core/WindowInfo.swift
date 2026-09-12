@@ -315,6 +315,26 @@ struct WindowInfo: Identifiable, Equatable {
 
     /// The actual implementation of setFrontProcessWithThisWindow()
     private func setFrontProcessWithThisWindowImpl() -> Bool {
+        // kCPSUserGenerated = 0x200 (makes it count as a user-initiated raise)
+        return setFrontProcess(options: 0x200)
+    }
+
+    /// Bring this window to the front by activating its app (the app's own ordering puts it on top).
+    /// Used for windows that reject kAXRaiseAction (System Settings answers it with actionUnsupported).
+    /// This does move focus; pair it with restoreFocusWithoutRaising() on the previous window
+    func activateBringingToFront() -> Bool {
+        return setFrontProcess(options: 0x200)
+    }
+
+    /// Hand focus back to this window while leaving the window ordering untouched.
+    /// kCPSNoWindows (0x400) activates the process without bringing its windows forward,
+    /// so a floating window that was just brought to the front stays there
+    func restoreFocusWithoutRaising() -> Bool {
+        return setFrontProcess(options: 0x400)
+    }
+
+    /// Activate this window's process with the given kCPS* options and designate this window as the key window
+    private func setFrontProcess(options: UInt32) -> Bool {
         guard let processForPID = FrontProcessAPI.processForPID,
               let setFrontProcess = FrontProcessAPI.setFrontProcess,
               FrontProcessAPI.postEventRecord != nil else {
@@ -324,8 +344,7 @@ struct WindowInfo: Identifiable, Equatable {
         var psn = ProcessSerialNumber()
         guard processForPID(app.processIdentifier, &psn) == noErr else { return false }
 
-        // kCPSUserGenerated = 0x200 (makes it count as a user-initiated raise)
-        guard setFrontProcess(&psn, id, 0x200) == .success else { return false }
+        guard setFrontProcess(&psn, id, options) == .success else { return false }
 
         // Send the signal designating the target window as the key window (a pair of calls)
         postKeyWindowEvent(psn: &psn, marker: 0x01)
