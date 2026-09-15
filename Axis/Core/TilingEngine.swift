@@ -69,11 +69,25 @@ class TilingEngine: ObservableObject {
         if onScreenIDs.isEmpty {
             managedWindows = candidateWindows
         } else {
-            managedWindows = candidateWindows.filter { onScreenIDs.contains($0.id) }
-            if PerfLog.enabled && managedWindows.count != candidateWindows.count {
-                let ghosts = candidateWindows.filter { !onScreenIDs.contains($0.id) }
-                let names = ghosts.map { "\($0.app.localizedName ?? "?")/\($0.title)" }.joined(separator: ", ")
-                PerfLog.logf("★ Excluding ghost windows (still present only in AX): %@", names)
+            let onScreenCandidates = candidateWindows.filter { onScreenIDs.contains($0.id) }
+            if onScreenCandidates.isEmpty && !candidateWindows.isEmpty {
+                // CGWindowList can also momentarily miss windows that are genuinely still open
+                // (observed right after closing one Ghostty tab: the sibling Ghostty windows briefly
+                // drop out of CGWindowList too). Excluding them all here would wipe the whole screen's
+                // column structure and strand the survivors at their pre-close frames, so don't trust
+                // this reading when every AX candidate would otherwise be excluded at once.
+                managedWindows = candidateWindows
+                if PerfLog.enabled {
+                    PerfLog.logf("★ CGWindowList momentarily missed all %d AX windows on %@; falling back to AX list",
+                                 candidateWindows.count, screen.localizedName)
+                }
+            } else {
+                managedWindows = onScreenCandidates
+                if PerfLog.enabled && managedWindows.count != candidateWindows.count {
+                    let ghosts = candidateWindows.filter { !onScreenIDs.contains($0.id) }
+                    let names = ghosts.map { "\($0.app.localizedName ?? "?")/\($0.title)" }.joined(separator: ", ")
+                    PerfLog.logf("★ Excluding ghost windows (still present only in AX): %@", names)
+                }
             }
         }
 
