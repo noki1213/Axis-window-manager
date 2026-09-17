@@ -445,11 +445,6 @@ struct WindowInfo: Identifiable, Equatable {
     
     /// Whether it should float (e.g. dialogs)
     func shouldFloat() -> Bool {
-        // If already managed as a tiled window in a workspace, it must not float
-        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) && !WorkspaceManager.shared.isFloating(id) {
-            return false
-        }
-
         // Dialogs float
         if subrole == kAXDialogSubrole as String {
             return true
@@ -460,19 +455,30 @@ struct WindowInfo: Identifiable, Equatable {
             return true
         }
         
-        // Small non-standard windows float (modeled on Amethyst/AeroSpace dialog heuristics).
-        // Standard windows should not float just because they are tiled into small sizes.
-        if subrole != (kAXStandardWindowSubrole as String) && frame.width < 500 && frame.height < 500 {
-            return true
-        }
-        
-        // Exclude specific apps (to be made configurable later)
+        // Exclude specific apps (system settings, preferences, etc.)
         let floatingBundleIds = [
             "com.apple.systempreferences",
-            "com.apple.SystemPreferences"
+            "com.apple.SystemPreferences",
+            "com.apple.systemsettings",
+            "com.apple.SystemSettings"
         ]
-        
         if let bundleId = app.bundleIdentifier, floatingBundleIds.contains(bundleId) {
+            return true
+        }
+
+        // Explicitly marked as floating by user
+        if WorkspaceManager.shared.isFloating(id) {
+            return true
+        }
+
+        // If already managed as a tiled window in a workspace, do not float it just because
+        // tiling or column stacking resized it into smaller dimensions
+        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) {
+            return false
+        }
+
+        // Small windows float initially (modeled on Amethyst dialog heuristics)
+        if frame.width < 500 && frame.height < 500 {
             return true
         }
         

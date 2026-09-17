@@ -870,6 +870,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                         if let window = currentWindows.first(where: { $0.id == newID }) {
+                            guard !window.shouldFloat() else { continue }
                             let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
                             let centerX = window.frame.midX
                             let centerY = mainScreenHeight - window.frame.midY
@@ -913,10 +914,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
+                    guard let window = currentWindows.first(where: { $0.id == newID }),
+                          !window.shouldFloat() else {
+                        continue
+                    }
+
                     // If a placement reservation (Ctrl+Opt+N) is active, prefer that.
                     // If the reservation was consumed, both workspace registration and placement are already done, so skip the normal path
-                    if let window = currentWindows.first(where: { $0.id == newID }),
-                       PlacementReservationManager.shared.consumeIfApplicable(newWindow: window) {
+                    if PlacementReservationManager.shared.consumeIfApplicable(newWindow: window) {
                         continue
                     }
 
@@ -926,26 +931,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
-                    if let window = currentWindows.first(where: { $0.id == newID }) {
-                        // Fall back to physical position when there's no focus information
-                        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-                        let centerX = window.frame.midX
-                        let centerY = mainScreenHeight - window.frame.midY
-                        let center = CGPoint(x: centerX, y: centerY)
+                    // Fall back to physical position when there's no focus information
+                    let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+                    let centerX = window.frame.midX
+                    let centerY = mainScreenHeight - window.frame.midY
+                    let center = CGPoint(x: centerX, y: centerY)
 
-                        var assigned = false
-                        for screen in NSScreen.screens {
-                            if screen.frame.contains(center) {
-                                workspaceManager.registerWindow(newID, on: screen)
-                                assigned = true
-                                break
-                            }
+                    var assigned = false
+                    for screen in NSScreen.screens {
+                        if screen.frame.contains(center) {
+                            workspaceManager.registerWindow(newID, on: screen)
+                            assigned = true
+                            break
                         }
-                        if !assigned {
-                            // If it doesn't fall inside any monitor, register it to the nearest one
-                            if let nearest = self.closestScreen(to: center) {
-                                workspaceManager.registerWindow(newID, on: nearest)
-                            }
+                    }
+                    if !assigned {
+                        // If it doesn't fall inside any monitor, register it to the nearest one
+                        if let nearest = self.closestScreen(to: center) {
+                            workspaceManager.registerWindow(newID, on: nearest)
                         }
                     }
                 }
@@ -993,6 +996,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             for newID in newWindowIDs {
                 if workspaceManager.isWindowInAnyWorkspace(newID) { continue }
                 if let window = currentWindows.first(where: { $0.id == newID }) {
+                    guard !window.shouldFloat() else { continue }
                     let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
                     let centerX = window.frame.midX
                     let centerY = mainScreenHeight - window.frame.midY
@@ -1244,6 +1248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.workspaceManager.isWindowInAnyWorkspace(window.id) {
                     continue
                 }
+                guard !window.shouldFloat() else { continue }
                 let centerX = window.frame.midX
                 let centerY = mainScreenHeight - window.frame.midY
                 let center = CGPoint(x: centerX, y: centerY)
