@@ -445,6 +445,11 @@ struct WindowInfo: Identifiable, Equatable {
     
     /// Whether it should float (e.g. dialogs)
     func shouldFloat() -> Bool {
+        // If already managed as a tiled window in a workspace, it must not float
+        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) && !WorkspaceManager.shared.isFloating(id) {
+            return false
+        }
+
         // Dialogs float
         if subrole == kAXDialogSubrole as String {
             return true
@@ -455,8 +460,9 @@ struct WindowInfo: Identifiable, Equatable {
             return true
         }
         
-        // Small windows float (modeled on Amethyst)
-        if frame.width < 500 && frame.height < 500 {
+        // Small non-standard windows float (modeled on Amethyst/AeroSpace dialog heuristics).
+        // Standard windows should not float just because they are tiled into small sizes.
+        if subrole != (kAXStandardWindowSubrole as String) && frame.width < 500 && frame.height < 500 {
             return true
         }
         

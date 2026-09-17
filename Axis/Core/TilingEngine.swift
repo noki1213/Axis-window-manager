@@ -1181,21 +1181,23 @@ class TilingEngine: ObservableObject {
 
         // Use the existing ratio if there is one
         if let existingRatios = columnWidthRatios[screenID], existingRatios.count == columns.count {
-            // Also check the row ratios and reset them if the window count changed
-            var needsRowRatioReset = false
-            if let allRowRatios = rowHeightRatios[screenID] {
-                for (colIndex, column) in columns.enumerated() {
-                    if let ratios = allRowRatios[colIndex], ratios.count != column.count {
-                        needsRowRatioReset = true
-                        break
-                    }
-                }
-            }
-            if needsRowRatioReset {
-                rowHeightRatios[screenID] = nil
-            }
             applyColumnTilingWithRatios(columns: columns, ratios: existingRatios, on: screen)
             return
+        }
+
+        // If row height ratios exist for columns whose window count matches, preserve them with even column widths
+        if let allRowRatios = rowHeightRatios[screenID], !allRowRatios.isEmpty {
+            let hasValidRowRatio = columns.indices.contains { colIndex in
+                if let ratios = allRowRatios[colIndex], ratios.count == columns[colIndex].count {
+                    return true
+                }
+                return false
+            }
+            if hasValidRowRatio {
+                let evenRatios = Array(repeating: 1.0 / CGFloat(columns.count), count: columns.count)
+                applyColumnTilingWithRatios(columns: columns, ratios: evenRatios, on: screen)
+                return
+            }
         }
 
         // Reset the ratios if the number of columns changed
