@@ -222,6 +222,29 @@ class WorkspaceManager: ObservableObject {
 		PerfLog.event("workspace: registered #\(windowID) -> \(PerfLog.describe(screen)) ws\(workspace + 1)")
 	}
 
+	/// The first workspace nothing is on yet, just past the last one in use on
+	/// `screen`. Workspaces in use are kept contiguous from 0, so this is the
+	/// only empty one to the right.
+	func firstUnusedWorkspace(on screen: NSScreen) -> Int {
+		let id = screenIdentifier(for: screen)
+		let active = activeWorkspace[id] ?? 0
+		let inUse = (workspaceWindows[id] ?? [:])
+			.filter { $0.key >= 0 && (!$0.value.isEmpty || $0.key == active) }
+			.keys
+		return (inUse.max() ?? -1) + 1
+	}
+
+	/// Register a window on `workspace` of `screen` and move it out of sight,
+	/// leaving the workspace on screen and its tiling as they are.
+	func registerWindowOutOfSight(_ windowID: CGWindowID, on screen: NSScreen, workspace: Int) {
+		let id = screenIdentifier(for: screen)
+		if workspaceWindows[id] == nil {
+			workspaceWindows[id] = [:]
+		}
+		workspaceWindows[id]?[workspace, default: []].insert(windowID)
+		hideWindow(windowID)
+	}
+
 	/// Check whether even a single window is registered across all spaces
 	/// - Returns: true if any space has a window
 	func hasAnyRegisteredWindows() -> Bool {

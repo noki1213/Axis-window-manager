@@ -1,0 +1,23 @@
+#!/bin/bash
+# Open an app without disturbing the workspace on screen.
+#
+# With Axis running, the app's windows go to an empty workspace of their own,
+# out of sight, and focus stays where it is. Without Axis, the app opens
+# normally.
+#
+# usage: open-aside /Applications/Some.app
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: open-aside <path to .app>" >&2
+	exit 2
+fi
+
+app="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+
+if pgrep -xq Axis; then
+	encoded="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$app")"
+	open -g "axis://launch-aside?path=$encoded"
+else
+	open "$app"
+fi
