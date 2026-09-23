@@ -1462,7 +1462,7 @@ class WorkspaceManager: ObservableObject {
 			tilingSnapshots[reconnectedScreenID] = savedData.tilingSnapshots
 			activeWorkspace[reconnectedScreenID] = savedData.activeWorkspace
 
-			// Restore TilingEngine's column structure (Bug fix: column order getting scrambled after reconnecting)
+			// Restore TilingEngine's column structure (avoids the column order getting scrambled after reconnecting)
 			// Since tiledWindows[E] has already been cleared by cleanupDisconnectedScreens(),
 			// Calling tile() as-is would treat every window as "new" and break the ordering.
 			// Rebuild TilingEngine's state from the restored tilingSnapshots.
@@ -1474,8 +1474,8 @@ class WorkspaceManager: ObservableObject {
 			// Delete the migrated workspace on the MacBook side
 			let migTargetID = savedData.migratedToScreenID
 
-			// Bug fix: if the migrated workspace was active on the MacBook side,
-			// Fixes the issue where that workspace's windows stay visible.
+			// If the migrated workspace was active on the MacBook side,
+			// its windows would otherwise stay visible after deletion.
 			// Hide the "currently shown windows" before deletion, then return to ws0.
 			let currentActiveMigWS = activeWorkspace[migTargetID] ?? 0
 			if savedData.migratedWorkspaceNumbers.contains(currentActiveMigWS) {
@@ -1490,7 +1490,7 @@ class WorkspaceManager: ObservableObject {
 
 			disconnectedScreenData.removeValue(forKey: oldKey)
 
-			// Bug fix: the border disappearing issue
+			// Avoids the focus border disappearing
 			// tile() places windows directly but doesn't clear savedFrames.
 			// If an entry remains in savedFrames, isWindowHidden() keeps returning true, and
 			// The focus border stops showing up.
