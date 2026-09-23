@@ -144,85 +144,18 @@ class ZenModeManager: ObservableObject {
     /// Return the monitor the window belongs to
     /// Find the NSScreen containing the window's center point. Returns the primary monitor if none is found
     private func screenContaining(_ window: WindowInfo) -> NSScreen? {
-        // The window's center point in the AX coordinate system
-        let windowCenter = CGPoint(
-            x: window.frame.midX,
-            y: window.frame.midY
-        )
-
-        // Convert from the AX coordinate system to NSScreen's Cocoa coordinate system before deciding
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-
-        for screen in NSScreen.screens {
-            // Convert NSScreen's frame into the AX coordinate system
-            let axFrame = CGRect(
-                x: screen.frame.minX,
-                y: mainScreenHeight - screen.frame.maxY,
-                width: screen.frame.width,
-                height: screen.frame.height
-            )
-            if axFrame.contains(windowCenter) {
-                return screen
-            }
-        }
-
-        // Return the primary monitor if none is found
-        return NSScreen.screens.first
+        window.screen ?? NSScreen.screens.first
     }
 
     // MARK: - Hide Corner (the AeroSpace approach)
 
     /// The corner used to hide a window
-    private enum HideCorner {
-        case bottomLeft
-        case bottomRight
-    }
-
-    /// Determine the best hidden corner for the given monitor
-    /// Avoid the side that has a neighboring monitor
     private func optimalHideCorner(for screen: NSScreen) -> HideCorner {
-        let screenFrame = screen.frame
-
-        // Check whether there's another monitor to the right
-        var hasMonitorOnRight = false
-        for otherScreen in NSScreen.screens {
-            if otherScreen == screen { continue }
-
-            // If another monitor's left edge is near this monitor's right edge, treat it as being "to the right"
-            if otherScreen.frame.minX >= screenFrame.maxX - 10 {
-                hasMonitorOnRight = true
-                break
-            }
-        }
-
-        // Bottom-left if there's a monitor to the right, otherwise bottom-right (default)
-        return hasMonitorOnRight ? .bottomLeft : .bottomRight
+        HideCorner.best(for: screen)
     }
 
-    /// Compute the position for hiding a window (AX coordinates: top-left origin, Y increases downward)
-    /// Position it at the monitor's corner, leaving just 1 pixel inside the monitor
     private func hidePosition(for window: WindowInfo, corner: HideCorner, on screen: NSScreen) -> CGPoint {
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let visibleFrame = screen.visibleFrame
-
-        // Convert visibleFrame to AX coordinates
-        let axVisibleBottom = mainScreenHeight - visibleFrame.minY
-
-        switch corner {
-        case .bottomLeft:
-            // Position it so the window's right edge sits 1px inside visibleFrame's left edge
-            let x = visibleFrame.minX - window.frame.width + 1
-            // Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
-            let y = axVisibleBottom - 1
-            return CGPoint(x: x, y: y)
-
-        case .bottomRight:
-            // Position it so the window's left edge sits 1px inside visibleFrame's right edge
-            let x = visibleFrame.maxX - 1
-            // Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
-            let y = axVisibleBottom - 1
-            return CGPoint(x: x, y: y)
-        }
+        corner.position(forWindowWidth: window.frame.width, on: screen)
     }
 
     private func hideOtherWindows(exceptWindowID: CGWindowID, on screen: NSScreen) {

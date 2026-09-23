@@ -97,11 +97,6 @@ struct WindowInfo: Identifiable, Equatable {
     /// Skip the AX write entirely when it's "already meant to be there, and actually is there"
     private static var lastAppliedFrames: [CGWindowID: CGRect] = [:]
 
-    /// Discard the record of the applied frame (e.g. when a window closes)
-    static func forgetAppliedFrame(_ windowID: CGWindowID) {
-        lastAppliedFrames.removeValue(forKey: windowID)
-    }
-
     /// Set the window's position and size
     /// Modeled on AeroSpace's implementation: set size → position → size, in that order.
     /// Except that when enlarging a window, the position is decided first (see the ordering note below).
@@ -324,7 +319,7 @@ struct WindowInfo: Identifiable, Equatable {
     /// the private front-process call leaves such windows where they are, but a full activate reorders them.
     /// This moves focus to the app as well
     func activateBringingToFront() -> Bool {
-        return app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return app.activate(options: [.activateAllWindows])
     }
 
     /// Activate this window's process with the given kCPS* options and designate this window as the key window
@@ -571,8 +566,21 @@ enum FrontProcessAPI {
     static let postEventRecord = lookup("SLPSPostEventRecordTo", as: PostEventRecord.self)
     static let processForPID = lookup("GetProcessForPID", as: ProcessForPID.self)
 
-    /// Whether all three are present (fall back to the conventional approach if even one is missing)
-    static var isAvailable: Bool {
-        setFrontProcess != nil && postEventRecord != nil && processForPID != nil
+}
+
+extension WindowInfo {
+    /// The window's center in screen coordinates. Window frames come from
+    /// Accessibility, with the origin at the top-left of the primary display;
+    /// NSScreen frames put it at the bottom-left.
+    var centerInScreenCoordinates: CGPoint {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return CGPoint(x: frame.midX, y: primaryHeight - frame.midY)
+    }
+
+    /// The screen holding the window's center, or nil when the center is off
+    /// every screen.
+    var screen: NSScreen? {
+        let center = centerInScreenCoordinates
+        return NSScreen.screens.first { $0.frame.contains(center) }
     }
 }

@@ -378,34 +378,6 @@ class BorderManager: ObservableObject {
         )
     }
     
-    /// Trigger the "glow and fade out" animation
-    private func triggerFlashAnimation() {
-        guard let borderView = borderView else { return }
-        
-        // Initial state: the fill is visible
-        borderView.fillColor = NSColor.white.withAlphaComponent(0.15)
-        
-        // Fade the fill out over 0.8 seconds (for a slower, softer fade)
-        let steps = 40 // More steps for smoother animation
-        let duration = 0.8 // Extended from 0.5s to 0.8s
-        let interval = duration / Double(steps)
-        let startAlpha: CGFloat = 0.15
-        
-        var currentStep = 0
-        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
-            currentStep += 1
-            let progress = CGFloat(currentStep) / CGFloat(steps)
-            let newAlpha = startAlpha * (1.0 - progress)
-            
-            borderView.fillColor = NSColor.white.withAlphaComponent(newAlpha)
-            
-            if currentStep >= steps {
-                timer.invalidate()
-                borderView.fillColor = .clear
-            }
-        }
-    }
-    
     /// AppDelegate's 0.3-second poll (checkForWindowChanges), when focus moves within the same app,
     /// The notification hook called when a change in the focused window is detected.
     /// AppDelegate already calls getFocusedWindow() every tick, so here

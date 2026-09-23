@@ -147,8 +147,4 @@ class HotkeyStore: ObservableObject {
 		return table
 	}
 
-	/// Return every modifier-key combination used in the lookup table (used for the EventTap filter)
-	func allUsedModifiers() -> Set<HotkeyModifiers> {
-		return Set(bindings.map { $0.modifiers })
-	}
 }

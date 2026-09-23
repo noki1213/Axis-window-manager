@@ -20,9 +20,6 @@ class TilingEngine: ObservableObject {
     /// The padding from the screen edge (in pixels)
     @Published var screenPadding: CGFloat = 12
     
-    /// The menu bar's height (normally 25pt)
-    var menuBarHeight: CGFloat = 25
-    
     // MARK: - State
 
     /// The windows currently tiled (per screen, per column)
@@ -939,112 +936,6 @@ class TilingEngine: ObservableObject {
         case right
     }
 
-    /// Move multiple windows in the given direction (for window-selection mode)
-    func moveWindows(windowIDs: Set<CGWindowID>, direction: Direction) {
-
-        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
-              let screen = getScreen(for: focusedWindow) else {
-            return
-        }
-        let screenID = ScreenIdentifier(from: screen)
-
-        var columns = tiledWindows[screenID] ?? []
-
-        // Get the position of the selected window
-        var selectedPositions: [(columnIndex: Int, rowIndex: Int, window: WindowInfo)] = []
-        for (colIdx, column) in columns.enumerated() {
-            for (rowIdx, window) in column.enumerated() {
-                if windowIDs.contains(window.id) {
-                    selectedPositions.append((colIdx, rowIdx, window))
-                }
-            }
-        }
-
-
-        guard !selectedPositions.isEmpty else {
-            return
-        }
-
-        // Get the indices of the columns containing the selected windows (deduplicated, sorted)
-        let selectedColumnIndices = Array(Set(selectedPositions.map { $0.columnIndex })).sorted()
-
-        switch direction {
-        case .left:
-            // Move left: swap the selected column with the unselected column to its left
-            guard let firstSelectedIdx = selectedColumnIndices.first, firstSelectedIdx > 0 else {
-                return
-            }
-
-            // Find the unselected column to the left
-            var swapTargetIdx = firstSelectedIdx - 1
-            while swapTargetIdx >= 0 && selectedColumnIndices.contains(swapTargetIdx) {
-                swapTargetIdx -= 1
-            }
-
-            if swapTargetIdx >= 0 {
-                // Move the selected column to the left (swap column order)
-                // Example: with [1,2,3,4], selecting 3,4 (index 2,3) → swapTargetIdx=1
-                // Result: [1,3,4,2]
-                let targetColumn = columns[swapTargetIdx]
-                columns.remove(at: swapTargetIdx)
-                // Insert at the last position of the selected column
-                let insertIdx = selectedColumnIndices.last!
-                columns.insert(targetColumn, at: insertIdx)
-            }
-
-        case .right:
-            // Move right: swap the selected column with the unselected column to its right
-            guard let lastSelectedIdx = selectedColumnIndices.last, lastSelectedIdx < columns.count - 1 else {
-                return
-            }
-
-            // Find the unselected column to the right
-            var swapTargetIdx = lastSelectedIdx + 1
-            while swapTargetIdx < columns.count && selectedColumnIndices.contains(swapTargetIdx) {
-                swapTargetIdx += 1
-            }
-
-            if swapTargetIdx < columns.count {
-                // Move the selected column to the right (swap column order)
-                // Example: with [1,2,3,4], selecting 1,2 (index 0,1) → swapTargetIdx=2
-                // Result: [3,1,2,4]
-                let targetColumn = columns[swapTargetIdx]
-                columns.remove(at: swapTargetIdx)
-                // Insert at the first position of the selected column
-                let insertIdx = selectedColumnIndices.first!
-                columns.insert(targetColumn, at: insertIdx)
-            }
-        case .up:
-            // Move up: up within the same column
-            for pos in selectedPositions {
-                if pos.rowIndex > 0 {
-                    if let rowIdx = columns[pos.columnIndex].firstIndex(of: pos.window),
-                       rowIdx > 0 && !windowIDs.contains(columns[pos.columnIndex][rowIdx - 1].id) {
-                        columns[pos.columnIndex].swapAt(rowIdx, rowIdx - 1)
-                    }
-                }
-            }
-        case .down:
-            // Move down: down within the same column
-            selectedPositions.sort { $0.rowIndex > $1.rowIndex }
-            for pos in selectedPositions {
-                if let rowIdx = columns[pos.columnIndex].firstIndex(of: pos.window),
-                   rowIdx < columns[pos.columnIndex].count - 1 && !windowIDs.contains(columns[pos.columnIndex][rowIdx + 1].id) {
-                    columns[pos.columnIndex].swapAt(rowIdx, rowIdx + 1)
-                }
-            }
-        }
-
-        // Remove empty columns
-        columns = columns.filter { !$0.isEmpty }
-
-        tiledWindows[screenID] = columns
-        applyColumnTiling(columns: columns, on: screen)
-
-        // Keep focus as is
-        focusedWindow.focus()
-    }
-
     /// Put every window back into its own column (reset the vertical split)
     func resetToSingleWindowColumns() {
 
@@ -1068,128 +959,6 @@ class TilingEngine: ObservableObject {
         focusedWindow.focus()
     }
 
-    /// Merge the selected windows into a single column (stack them vertically)
-    func mergeWindowsIntoColumn(windowIDs: Set<CGWindowID>) {
-
-        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
-              let screen = getScreen(for: focusedWindow) else {
-            return
-        }
-        let screenID = ScreenIdentifier(from: screen)
-
-        var columns = tiledWindows[screenID] ?? []
-
-        // Collect the selected windows (preserving their original order)
-        var selectedWindows: [WindowInfo] = []
-        var targetColumnIndex: Int? = nil
-
-        for (colIdx, column) in columns.enumerated() {
-            for window in column {
-                if windowIDs.contains(window.id) {
-                    selectedWindows.append(window)
-                    // Use the column of the first selected window as the merge target
-                    if targetColumnIndex == nil {
-                        targetColumnIndex = colIdx
-                    }
-                }
-            }
-        }
-
-        guard !selectedWindows.isEmpty, let targetCol = targetColumnIndex else {
-            return
-        }
-
-
-        // Remove the selected windows from all columns
-        for colIdx in 0..<columns.count {
-            columns[colIdx] = columns[colIdx].filter { !windowIDs.contains($0.id) }
-        }
-
-        // Remove empty columns (though targetCol needs to be adjusted)
-        var newTargetCol = targetCol
-        var newColumns: [[WindowInfo]] = []
-        for (idx, column) in columns.enumerated() {
-            if !column.isEmpty {
-                newColumns.append(column)
-            } else if idx < targetCol {
-                newTargetCol -= 1
-            }
-        }
-        columns = newColumns
-
-        // Insert the new column at the merge target's position
-        let insertIndex = min(newTargetCol, columns.count)
-        columns.insert(selectedWindows, at: insertIndex)
-
-        tiledWindows[screenID] = columns
-        applyColumnTiling(columns: columns, on: screen)
-
-        // Keep focus as is
-        focusedWindow.focus()
-    }
-
-    /// Split the selected windows into individual columns (undo the vertical split)
-    func splitWindowsToColumns(windowIDs: Set<CGWindowID>) {
-
-        guard let focusedWindow = accessibilityManager.getFocusedWindow(),
-              let screen = getScreen(for: focusedWindow) else {
-            return
-        }
-        let screenID = ScreenIdentifier(from: screen)
-
-        var columns = tiledWindows[screenID] ?? []
-
-        // Collect the selected windows (preserving their original order)
-        var selectedWindows: [WindowInfo] = []
-        var firstColumnIndex: Int? = nil
-
-        for (colIdx, column) in columns.enumerated() {
-            for window in column {
-                if windowIDs.contains(window.id) {
-                    selectedWindows.append(window)
-                    // Record the column of the first selected window we find
-                    if firstColumnIndex == nil {
-                        firstColumnIndex = colIdx
-                    }
-                }
-            }
-        }
-
-        guard !selectedWindows.isEmpty, let insertIndex = firstColumnIndex else {
-            return
-        }
-
-
-        // Remove the selected windows from all columns
-        for colIdx in 0..<columns.count {
-            columns[colIdx] = columns[colIdx].filter { !windowIDs.contains($0.id) }
-        }
-
-        // Remove empty columns (the insertion index needs adjusting too)
-        var adjustedInsertIndex = insertIndex
-        var newColumns: [[WindowInfo]] = []
-        for (idx, column) in columns.enumerated() {
-            if !column.isEmpty {
-                newColumns.append(column)
-            } else if idx < insertIndex {
-                adjustedInsertIndex -= 1
-            }
-        }
-        columns = newColumns
-
-        // Insert each selected window as its own column
-        for (offset, window) in selectedWindows.enumerated() {
-            let newInsertIndex = min(adjustedInsertIndex + offset, columns.count)
-            columns.insert([window], at: newInsertIndex)
-        }
-
-        tiledWindows[screenID] = columns
-        applyColumnTiling(columns: columns, on: screen)
-
-        // Keep focus as is
-        focusedWindow.focus()
-    }
-    
     // MARK: - Private Methods
 
     /// Apply tiling using the column structure
@@ -1274,38 +1043,6 @@ class TilingEngine: ObservableObject {
         }
     }
 
-    /// Compute each window's width (accounting for the minimum size)
-    private func calculateWindowWidths(windows: [WindowInfo], availableWidth: CGFloat, idealWidth: CGFloat) -> [CGFloat] {
-        var widths = [CGFloat](repeating: idealWidth, count: windows.count)
-        
-        // Apply the minimum width if it's smaller than that
-        var totalMinWidthExcess: CGFloat = 0
-        var flexibleCount = 0
-        
-        for (index, window) in windows.enumerated() {
-            if idealWidth < window.minSize.width {
-                widths[index] = window.minSize.width
-                totalMinWidthExcess += (window.minSize.width - idealWidth)
-            } else {
-                flexibleCount += 1
-            }
-        }
-        
-        // If a window had the minimum width applied, shrink the other windows to compensate
-        if totalMinWidthExcess > 0 && flexibleCount > 0 {
-            let reductionPerWindow = totalMinWidthExcess / CGFloat(flexibleCount)
-            for (index, window) in windows.enumerated() {
-                if widths[index] == idealWidth && idealWidth >= window.minSize.width {
-                    let newWidth = idealWidth - reductionPerWindow
-                    // Don't let it shrink below the minimum size
-                    widths[index] = max(newWidth, window.minSize.width)
-                }
-            }
-        }
-        
-        return widths
-    }
-    
     /// Adjust so the frame fits within the screen (modeled on Rectangle's BestEffortWindowMover)
     private func adjustFrameToFitScreen(frame: CGRect, visibleFrame: CGRect, mainScreenHeight: CGFloat) -> CGRect {
         var adjusted = frame
@@ -1345,19 +1082,7 @@ class TilingEngine: ObservableObject {
     
     /// Get the screen the window belongs to
     private func getScreen(for window: WindowInfo) -> NSScreen? {
-        // Convert from the Accessibility API's coordinate system (top-left origin) to NSScreen's (bottom-left origin)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-
-        // Convert the window's center point to NSScreen coordinates
-        let windowCenterX = window.frame.midX
-        let windowCenterY = mainScreenHeight - window.frame.midY
-
-        let windowCenterInNSScreen = CGPoint(x: windowCenterX, y: windowCenterY)
-
-
-        return NSScreen.screens.first { screen in
-            screen.frame.contains(windowCenterInNSScreen)
-        }
+        window.screen
     }
     
     /// Get the windows on the neighboring screen
@@ -1633,13 +1358,6 @@ class TilingEngine: ObservableObject {
         if let target = focusedTargetFrame {
             BorderManager.shared.updateBorder(withExplicitTarget: target)
         }
-    }
-
-    /// Reset the ratios (call this when windows are added or removed)
-    func resetRatios(for screen: NSScreen) {
-        let screenID = ScreenIdentifier(from: screen)
-        columnWidthRatios[screenID] = nil
-        rowHeightRatios[screenID] = nil
     }
 
     // MARK: - Workspace State Management

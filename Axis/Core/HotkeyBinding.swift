@@ -94,16 +94,6 @@ struct HotkeyModifiers: OptionSet, Codable, Hashable {
 		return result
 	}
 
-	/// Convert to CGEventFlags
-	func toCGEventFlags() -> CGEventFlags {
-		var flags: CGEventFlags = []
-		if contains(.control) { flags.insert(.maskControl) }
-		if contains(.option)  { flags.insert(.maskAlternate) }
-		if contains(.shift)   { flags.insert(.maskShift) }
-		if contains(.command) { flags.insert(.maskCommand) }
-		return flags
-	}
-
 	/// The display string (e.g. Ctrl+Option+Shift)
 	var displayString: String {
 		var parts: [String] = []

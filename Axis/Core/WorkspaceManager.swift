@@ -351,12 +351,6 @@ class WorkspaceManager: ObservableObject {
 
 	    /// Returns window IDs across every monitor and workspace (used by the window palette)
 
-	    func allWindowsByWorkspace() -> [ScreenIdentifier: [Int: Set<CGWindowID>]] {
-
-	        return workspaceWindows
-
-	    }
-
 	    /// Returns whether the given window is currently stashed off screen (used to control border display)
 	    /// An entry existing in savedFrames means WorkspaceManager has hidden it in another workspace
 	    func isWindowHidden(_ windowID: CGWindowID) -> Bool {
@@ -622,8 +616,6 @@ class WorkspaceManager: ObservableObject {
 		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-
 		for screen in NSScreen.screens {
 			let id = screenIdentifier(for: screen)
 			activeWorkspace[id] = 0
@@ -643,14 +635,7 @@ class WorkspaceManager: ObservableObject {
 					continue
 				}
 
-				// Determine the screen from the window's center point
-				let windowCenterX = window.frame.midX
-				let windowCenterY = mainScreenHeight - window.frame.midY
-				let windowCenter = CGPoint(x: windowCenterX, y: windowCenterY)
-
-				let contains = screen.frame.contains(windowCenter)
-
-				if contains {
+				if screen.frame.contains(window.centerInScreenCoordinates) {
 					workspaceWindows[id]?[0]?.insert(window.id)
 				}
 			}
@@ -672,10 +657,7 @@ class WorkspaceManager: ObservableObject {
 			guard onScreenIDs.contains(window.id) else { continue }
 			guard !assignedWindowIDs.contains(window.id) else { continue }
 
-			let centerX = window.frame.midX
-			let centerY = mainScreenHeight - window.frame.midY
-			let center = CGPoint(x: centerX, y: centerY)
-
+			let center = window.centerInScreenCoordinates
 			if let nearest = NSScreen.screens.min(by: { s1, s2 in
 				hypot(center.x - s1.frame.midX, center.y - s1.frame.midY) <
 				hypot(center.x - s2.frame.midX, center.y - s2.frame.midY)
@@ -807,98 +789,6 @@ class WorkspaceManager: ObservableObject {
 
 	// MARK: - Move Window to Workspace
 
-	/// Move the focused window to a different workspace
-	/// - Parameters:
-	///   - windowID: the ID of the window being moved
-	///   - workspace: the destination workspace number
-	///   - screen: the target monitor
-	///   - keepSwitchingFlag: if true, don't clear isSwitching (leave it to the subsequent switchWorkspace call)
-	func moveWindowToWorkspace(_ windowID: CGWindowID, workspace: Int, on screen: NSScreen, keepSwitchingFlag: Bool = false) {
-		let id = screenIdentifier(for: screen)
-		let currentWS = activeWorkspace[id] ?? 0
-
-		// Do nothing if it's the same workspace
-		guard workspace != currentWS else { return }
-
-
-		// Set the switching-in-progress flag
-		isSwitching = true
-		PerfLog.event("workspace: move #\(windowID) \(PerfLog.describe(screen)) ws\(currentWS + 1) -> ws\(workspace + 1)")
-
-		// Reset the cache since this is a user action
-		resetClosedWindowsCache()
-
-		// Remove the window from the current workspace
-		workspaceWindows[id]?[currentWS]?.remove(windowID)
-
-		// Create the destination workspace if it doesn't exist
-		if workspaceWindows[id]?[workspace] == nil {
-			if workspaceWindows[id] == nil {
-				workspaceWindows[id] = [:]
-			}
-			workspaceWindows[id]?[workspace] = []
-		}
-
-		// Add the window to the destination workspace
-		workspaceWindows[id]?[workspace]?.insert(windowID)
-
-		// Also remove the window from TilingEngine's snapshot
-		if var snapshot = tilingSnapshots[id]?[currentWS] {
-			snapshot.columns = snapshot.columns.map { column in
-				column.filter { $0 != windowID }
-			}.filter { !$0.isEmpty }
-			tilingSnapshots[id]?[currentWS] = snapshot
-		}
-
-		// Move the window off screen
-		hideWindow(windowID)
-
-		// Re-apply tiling on the current monitor
-		tilingEngine.tile(on: screen)
-
-        // Clean up once the original workspace becomes empty
-        let prevActiveWS = activeWorkspace[id] ?? 0
-        cleanupEmptyWorkspaces(on: screen)
-
-        // Re-fetch it, since cleanup may have changed activeWorkspace
-        let updatedCurrentWS = activeWorkspace[id] ?? 0
-
-		// If cleanup automatically switched to the destination workspace,
-		// Or if the active space changed because cleanup compacted the spaces,
-		// Restore and tile windows that had been stashed off screen
-		let focusedID: CGWindowID?
-		if updatedCurrentWS == workspace || updatedCurrentWS != prevActiveWS {
-			showWindowsForWorkspace(updatedCurrentWS, on: id)
-			tilingEngine.tile(on: screen)
-			// If the moved window is on the new active space, focus it
-			if workspaceWindows[id]?[updatedCurrentWS]?.contains(windowID) == true {
-				focusedID = focusWindow(windowID, in: updatedCurrentWS, on: id)
-			} else {
-				focusedID = focusFirstWindow(in: updatedCurrentWS, on: id)
-			}
-		} else {
-			// Focus a window remaining in the original workspace
-			focusedID = focusFirstWindow(in: updatedCurrentWS, on: id)
-		}
-
-		// Update the border and move the cursor to the center of the focused window
-		syncBorderAndCursor(to: focusedID)
-
-		// Update the menu bar
-		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-
-		// Save the workspace state to a file
-		saveStateToDisk()
-
-		// Clear the switching-in-progress flag after a short delay
-		// If keepSwitchingFlag is true, the caller (switchWorkspace) clears it
-		if !keepSwitchingFlag {
-			DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-				self?.isSwitching = false
-			}
-		}
-	}
-
 	/// Move the focused window to the next workspace (the space switches immediately too)
 	func moveWindowToNextWorkspace(on screen: NSScreen) {
 		guard let focusedWindow = accessibilityManager.getFocusedWindow() else { return }
@@ -948,66 +838,14 @@ class WorkspaceManager: ObservableObject {
 	// MARK: - Hide Corner (the AeroSpace approach)
 
 	/// The corner used to hide a window
-	private enum HideCorner {
-		case bottomLeft
-		case bottomRight
-	}
-
-	/// Determine the best hidden corner for the given monitor
-	/// Avoid the side that has a neighboring monitor
 	private func optimalHideCorner(for screenID: ScreenIdentifier) -> HideCorner {
-		guard let screen = screen(for: screenID) else {
-			return .bottomLeft
-		}
-
-		let screenFrame = screen.frame
-
-		// Check whether there's another monitor to the right
-		var hasMonitorOnRight = false
-		for otherScreen in NSScreen.screens {
-			let otherId = screenIdentifier(for: otherScreen)
-			if otherId == screenID { continue }
-
-			// If another monitor's left edge is near this monitor's right edge, treat it as being "to the right"
-			if otherScreen.frame.minX >= screenFrame.maxX - 10 {
-				hasMonitorOnRight = true
-				break
-			}
-		}
-
-		// Bottom-left if there's a monitor to the right, otherwise bottom-right (default)
-		return hasMonitorOnRight ? .bottomLeft : .bottomRight
+		guard let screen = screen(for: screenID) else { return .bottomLeft }
+		return HideCorner.best(for: screen)
 	}
 
-	/// Compute the position for hiding a window (AX coordinates: top-left origin, Y increases downward)
-	/// Position it at the monitor's corner, leaving just 1 pixel inside the monitor
 	private func hidePosition(for window: WindowInfo, corner: HideCorner, on screenID: ScreenIdentifier) -> CGPoint? {
 		guard let screen = screen(for: screenID) else { return nil }
-
-		// Convert NSScreen coordinates to AX coordinates
-		// AX coordinate system: (0, 0) is top-left, Y increases downward
-		// NSScreen coordinate system: the origin is bottom-left
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let visibleFrame = screen.visibleFrame
-
-		// Convert visibleFrame to AX coordinates
-		let axVisibleBottom = mainScreenHeight - visibleFrame.minY
-
-		switch corner {
-		case .bottomLeft:
-			// Position it so the window's right edge sits 1px inside visibleFrame's left edge
-			let x = visibleFrame.minX - window.frame.width + 1
-			// Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
-			let y = axVisibleBottom - 1
-			return CGPoint(x: x, y: y)
-
-		case .bottomRight:
-			// Position it so the window's left edge sits 1px inside visibleFrame's right edge
-			let x = visibleFrame.maxX - 1
-			// Position it so the window's top edge sits 1px inside visibleFrame's bottom edge
-			let y = axVisibleBottom - 1
-			return CGPoint(x: x, y: y)
-		}
+		return corner.position(forWindowWidth: window.frame.width, on: screen)
 	}
 
 	// MARK: - Private Helpers
@@ -1837,252 +1675,6 @@ class WorkspaceManager: ObservableObject {
 			let data = try encoder.encode(state)
 			try data.write(to: stateFilePath)
 		} catch {
-		}
-	}
-
-	/// Restore the workspace state from a file
-	/// - Returns: true if the restore succeeded
-	@discardableResult
-	func restoreStateFromDisk() -> Bool {
-		guard FileManager.default.fileExists(atPath: stateFilePath.path) else {
-			return false
-		}
-
-		do {
-			let data = try Data(contentsOf: stateFilePath)
-			let state = try JSONDecoder().decode(WorkspaceState.self, from: data)
-
-			// Don't restore if the saved data has no windows at all
-			let totalSavedWindows = state.screenStates.flatMap { $0.workspaces }.flatMap { $0.windows }.count
-			guard totalSavedWindows > 0 else {
-				return false
-			}
-
-			// Get all current windows (including ones hidden off-screen)
-			let allWindows = accessibilityManager.getAllWindows()
-			let managedWindows = allWindows.filter {
-				$0.shouldBeManaged() && !$0.shouldFloat()
-			}
-
-
-			// --- Matching ---
-			// Step 1: match by exact bundleID + title
-			// Step 2: if not found by exact match, match on bundleID alone
-
-			// Dictionary of bundleID+title -> [WindowInfo]
-			var exactMatchPool: [String: [WindowInfo]] = [:]
-			// Dictionary of bundleID -> [WindowInfo] (for step 2)
-			var bundleIDPool: [String: [WindowInfo]] = [:]
-
-			for window in managedWindows {
-				let bundleID = window.app.bundleIdentifier ?? ""
-				let exactKey = bundleID + "||" + window.title
-				exactMatchPool[exactKey, default: []].append(window)
-				bundleIDPool[bundleID, default: []].append(window)
-			}
-
-			// Track window IDs that have already been matched
-			var assignedWindowIDs = Set<CGWindowID>()
-
-			// Collect the match requests for every workspace
-			struct MatchRequest {
-				let screenID: ScreenIdentifier
-				let wsNumber: Int
-				let index: Int
-				let identity: WindowIdentity
-			}
-			var matchRequests: [MatchRequest] = []
-
-			for screenState in state.screenStates {
-				let screenID = ScreenIdentifier(displayID: screenState.displayID)
-				for entry in screenState.workspaces {
-					for (index, identity) in entry.windows.enumerated() {
-						matchRequests.append(MatchRequest(
-							screenID: screenID, wsNumber: entry.number,
-							index: index, identity: identity
-						))
-					}
-				}
-			}
-
-			// Step 1: exact match
-			var matchResults: [Int: WindowInfo] = [:] // index into matchRequests -> WindowInfo
-			for (reqIndex, req) in matchRequests.enumerated() {
-				let exactKey = req.identity.bundleID + "||" + req.identity.title
-				if var candidates = exactMatchPool[exactKey], !candidates.isEmpty {
-					let window = candidates.removeFirst()
-					exactMatchPool[exactKey] = candidates
-					// Also remove from bundleIDPool
-					if var bCandidates = bundleIDPool[req.identity.bundleID] {
-						bCandidates.removeAll { $0.id == window.id }
-						bundleIDPool[req.identity.bundleID] = bCandidates
-					}
-					matchResults[reqIndex] = window
-					assignedWindowIDs.insert(window.id)
-				}
-			}
-
-			// Step 2: match on bundleID alone (for what wasn't found by exact match)
-			for (reqIndex, req) in matchRequests.enumerated() {
-				guard matchResults[reqIndex] == nil else { continue }
-				if var candidates = bundleIDPool[req.identity.bundleID], !candidates.isEmpty {
-					// Pick from windows that haven't been assigned yet
-					if let idx = candidates.firstIndex(where: { !assignedWindowIDs.contains($0.id) }) {
-						let window = candidates[idx]
-						candidates.remove(at: idx)
-						bundleIDPool[req.identity.bundleID] = candidates
-						matchResults[reqIndex] = window
-						assignedWindowIDs.insert(window.id)
-					}
-				}
-			}
-
-			// Build the workspace using the match results
-			for screenState in state.screenStates {
-				let screenID = ScreenIdentifier(displayID: screenState.displayID)
-
-				// Check whether this monitor is currently connected
-				guard let screen = screen(for: screenID) else {
-					continue
-				}
-
-				activeWorkspace[screenID] = screenState.activeWorkspace
-
-				if workspaceWindows[screenID] == nil {
-					workspaceWindows[screenID] = [:]
-				}
-				if tilingSnapshots[screenID] == nil {
-					tilingSnapshots[screenID] = [:]
-				}
-
-				for entry in screenState.workspaces {
-					var matchedWindowIDs = Set<CGWindowID>()
-					var matchedByIndex: [Int: WindowInfo] = [:]
-
-					// Look up the matchRequests corresponding to this entry
-					for (reqIndex, req) in matchRequests.enumerated() {
-						if req.screenID == screenID && req.wsNumber == entry.number {
-							if let window = matchResults[reqIndex] {
-								matchedWindowIDs.insert(window.id)
-								matchedByIndex[req.index] = window
-							}
-						}
-					}
-
-					workspaceWindows[screenID]?[entry.number] = matchedWindowIDs
-
-					// Restore the tiling ratios
-					var rowRatiosIntKeyed: [Int: [CGFloat]]? = nil
-					if let rowRatios = entry.rowHeightRatios {
-						rowRatiosIntKeyed = [:]
-						for (key, value) in rowRatios {
-							if let intKey = Int(key) {
-								rowRatiosIntKeyed?[intKey] = value
-							}
-						}
-					}
-
-					// Restore the column structure
-					var restoredColumns: [[CGWindowID]] = []
-					if let columnStructure = entry.columnStructure {
-						for colIndices in columnStructure {
-							var column: [CGWindowID] = []
-							for idx in colIndices {
-								if let window = matchedByIndex[idx] {
-									column.append(window.id)
-								}
-							}
-							if !column.isEmpty {
-								restoredColumns.append(column)
-							}
-						}
-					}
-
-					// Also add windows that weren't part of the column structure
-					let windowsInColumns = Set(restoredColumns.flatMap { $0 })
-					let remainingWindows = matchedWindowIDs.subtracting(windowsInColumns)
-					for wid in remainingWindows {
-						restoredColumns.append([wid])
-					}
-
-					let snapshot = PerScreenSnapshot(
-						columns: restoredColumns.isEmpty ? matchedWindowIDs.map { [$0] } : restoredColumns,
-						columnWidthRatios: entry.columnWidthRatios,
-						rowHeightRatios: rowRatiosIntKeyed
-					)
-					tilingSnapshots[screenID]?[entry.number] = snapshot
-
-				}
-
-				// Move windows outside the active workspace off-screen
-				let activeWS = screenState.activeWorkspace
-				for (wsNumber, windowIDs) in workspaceWindows[screenID] ?? [:] {
-					guard wsNumber != activeWS else { continue }
-					guard !windowIDs.isEmpty else { continue }
-
-					let corner = optimalHideCorner(for: screenID)
-					let savedEntry = screenState.workspaces.first { $0.number == wsNumber }
-
-					for window in allWindows {
-						guard windowIDs.contains(window.id) else { continue }
-
-						// Record the previously saved original position into savedFrames
-						let bundleID = window.app.bundleIdentifier ?? ""
-						if let savedEntry = savedEntry,
-						   let identity = savedEntry.windows.first(where: { $0.bundleID == bundleID }) {
-							savedFrames[window.id] = identity.savedFrame
-						} else {
-							savedFrames[window.id] = window.frame
-						}
-
-						// Update the cache too
-						windowIdentityCache[window.id] = (bundleID: bundleID, title: window.title)
-
-						if let hidePos = hidePosition(for: window, corner: corner, on: screenID) {
-							window.setPosition(hidePos)
-						}
-					}
-				}
-
-				// Restore the active workspace's tiling state into TilingEngine
-				if let snapshot = tilingSnapshots[screenID]?[activeWS] {
-					tilingEngine.restoreTilingStateForScreen(screen, snapshot: snapshot)
-				}
-			}
-
-			// Place windows that couldn't be matched into workspace 0
-			let unassignedWindows = managedWindows.filter { !assignedWindowIDs.contains($0.id) }
-			if !unassignedWindows.isEmpty {
-
-				let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-				for window in unassignedWindows {
-					let centerX = window.frame.midX
-					let centerY = mainScreenHeight - window.frame.midY
-					let center = CGPoint(x: centerX, y: centerY)
-
-					for screen in NSScreen.screens {
-						if screen.frame.contains(center) {
-							let screenID = screenIdentifier(for: screen)
-							if workspaceWindows[screenID] == nil {
-								workspaceWindows[screenID] = [:]
-							}
-							if workspaceWindows[screenID]?[0] == nil {
-								workspaceWindows[screenID]?[0] = []
-							}
-							workspaceWindows[screenID]?[0]?.insert(window.id)
-							break
-						}
-					}
-				}
-			}
-
-			let totalMatched = assignedWindowIDs.count
-			didRestoreStateFromDisk = totalMatched > 0
-			return totalMatched > 0
-
-		} catch {
-			didRestoreStateFromDisk = false
-			return false
 		}
 	}
 
