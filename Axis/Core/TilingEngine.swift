@@ -166,9 +166,10 @@ class TilingEngine: ObservableObject {
     /// Raise the floating windows (explicitly marked Float, or shouldFloat) on the given screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
     /// Doesn't steal focus.
-    /// - Parameter allowActivation: for windows that reject kAXRaiseAction (System Settings), also allow
-    ///   bringing them forward by activating their app. That moves focus to the floating window, so it's
-    ///   reserved for the explicit hotkey; the automatic passes stay silent
+    /// - Parameter allowActivation: also bring buried windows forward by activating their app. kAXRaiseAction
+    ///   only reorders a window within its own app, so a floating window of an inactive app stays behind the
+    ///   active app's tiles even when the action reports success. That moves focus to the floating window,
+    ///   so it's reserved for the explicit hotkey; the automatic passes stay silent
     func raiseFloatingWindows(on screen: NSScreen, allowActivation: Bool = false) {
         let accessibilityManager = AccessibilityManager.shared
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
@@ -213,23 +214,34 @@ class TilingEngine: ObservableObject {
 
         // Windows that reject kAXRaiseAction
         var needsActivation: [WindowInfo] = []
+        // Windows that accepted kAXRaiseAction but whose app still has to come forward
+        var needsFocus: [WindowInfo] = []
+
+        /// Log why a window was passed over, only for the explicit hotkey (automatic passes run constantly)
+        func skip(_ window: WindowInfo, _ reason: String) {
+            if allowActivation { PerfLog.event("raiseFloating: skip \(PerfLog.describe(window)) (\(reason))") }
+        }
 
         for window in targetWindows {
             // Axis's own windows are excluded
             guard window.app.processIdentifier != myPID else { continue }
             // Windows not showing on screen are excluded
-            guard onScreenIDs.contains(window.id) else { continue }
+            guard onScreenIDs.contains(window.id) else { skip(window, "off screen"); continue }
             // Windows currently evacuated (another workspace, the palette, Zen) are excluded
-            guard !WorkspaceManager.shared.isWindowHidden(window.id) else { continue }
-            guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { continue }
-            guard !zenHiddenIDs.contains(window.id) else { continue }
-            // Floating windows only (explicitly marked Float, or otherwise eligible to float)
-            guard WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat() else { continue }
+            guard !WorkspaceManager.shared.isWindowHidden(window.id) else { skip(window, "workspace hidden"); continue }
+            guard !WindowPaletteManager.shared.isWindowHidden(window.id) else { skip(window, "palette hidden"); continue }
+            guard !zenHiddenIDs.contains(window.id) else { skip(window, "zen hidden"); continue }
+            // Floating windows only (explicitly marked Float, or otherwise eligible to float).
+            // The explicit hotkey also takes windows that belong to no workspace (e.g. "About This Mac"):
+            // they never get tiled, yet don't qualify as floating by size or subrole
+            let isUntiled = WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat()
+                || (allowActivation && !WorkspaceManager.shared.isWindowInAnyWorkspace(window.id))
+            guard isUntiled else { skip(window, "tiled"); continue }
             // Only raise genuine windows (standard windows or dialogs)
             // (so we don't raise invisible helper windows, like Arc's, on every pass)
             guard window.shouldBeManaged()
                 || window.subrole == kAXDialogSubrole as String
-                || window.subrole == kAXSystemDialogSubrole as String else { continue }
+                || window.subrole == kAXSystemDialogSubrole as String else { skip(window, "not a real window: \(window.subrole ?? "nil")"); continue }
             // Only the ones on this screen (judged by window center)
             let center = CGPoint(x: window.frame.midX, y: mainScreenHeight - window.frame.midY)
             guard screen.frame.contains(center) else { continue }
@@ -237,12 +249,16 @@ class TilingEngine: ObservableObject {
             // the target app, and on a non-activating panel that makes it the key window without
             // activating its app: keyboard input silently goes to the panel while the focused tile
             // still looks focused. Windows already on top (or on a higher window level) are left alone
-            guard isBuriedUnderTile(window) else { continue }
+            guard isBuriedUnderTile(window) else { skip(window, "not under a tile"); continue }
 
             let result = AXUIElementPerformAction(window.axElement, kAXRaiseAction as CFString)
             // System Settings answers kAXRaiseAction with attributeUnsupported (-25205) rather than actionUnsupported
-            if allowActivation, result == .actionUnsupported || result == .attributeUnsupported {
-                needsActivation.append(window)
+            if allowActivation {
+                if result == .actionUnsupported || result == .attributeUnsupported {
+                    needsActivation.append(window)
+                } else {
+                    needsFocus.append(window)
+                }
             }
         }
 
@@ -251,6 +267,11 @@ class TilingEngine: ObservableObject {
         for window in needsActivation {
             PerfLog.event("raiseFloating: activating \(PerfLog.describe(window)) (AXRaise unsupported)")
             _ = window.activateBringingToFront()
+        }
+        // Focus targets just that window, so the app's tiled windows stay where they are
+        for window in needsFocus {
+            PerfLog.event("raiseFloating: focusing \(PerfLog.describe(window))")
+            window.focus()
         }
     }
 
