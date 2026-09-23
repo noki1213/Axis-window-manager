@@ -13,7 +13,6 @@ import SwiftUI
 /// Manages the application's lifecycle
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
     
     private let accessibilityManager = AccessibilityManager.shared
     private let hotkeyManager = HotkeyManager.shared
@@ -299,6 +298,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Return the screen nearest to the given coordinates (NSScreen coordinate system)
+    /// Register a window on the screen holding its center, or on the nearest
+    /// screen when its center is off every screen.
+    private func registerOnNearestScreen(_ id: CGWindowID, window: WindowInfo) {
+        let center = window.centerInScreenCoordinates
+        if let screen = window.screen ?? closestScreen(to: center) {
+            workspaceManager.registerWindow(id, on: screen)
+        }
+    }
+
     private func closestScreen(to point: CGPoint) -> NSScreen? {
         return NSScreen.screens.min(by: { screen1, screen2 in
             let center1 = CGPoint(x: screen1.frame.midX, y: screen1.frame.midY)
@@ -538,20 +546,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Determine which monitor a window (in AX coordinates) is on
     private func screenContainingWindow(_ window: WindowInfo) -> NSScreen? {
-        let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        for screen in NSScreen.screens {
-            let axFrame = CGRect(
-                x: screen.frame.minX,
-                y: mainScreenHeight - screen.frame.maxY,
-                width: screen.frame.width,
-                height: screen.frame.height
-            )
-            if axFrame.contains(center) {
-                return screen
-            }
-        }
-        return NSScreen.screens.first
+        window.screen ?? NSScreen.screens.first
     }
 
     private func checkForWindowChanges() {
@@ -871,26 +866,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                         if let window = currentWindows.first(where: { $0.id == newID }) {
                             guard !window.shouldFloat() else { continue }
-                            let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-                            let centerX = window.frame.midX
-                            let centerY = mainScreenHeight - window.frame.midY
-                            let center = CGPoint(x: centerX, y: centerY)
-
-
-                            var assigned = false
-                            for screen in NSScreen.screens {
-                                if screen.frame.contains(center) {
-                                    workspaceManager.registerWindow(newID, on: screen)
-                                    assigned = true
-                                    break
-                                }
-                            }
-                            if !assigned {
-                                if let nearest = self.closestScreen(to: center) {
-                                    workspaceManager.registerWindow(newID, on: nearest)
-                                } else {
-                                }
-                            }
+                            registerOnNearestScreen(newID, window: window)
                         }
                     }
 
@@ -932,25 +908,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
 
                     // Fall back to physical position when there's no focus information
-                    let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-                    let centerX = window.frame.midX
-                    let centerY = mainScreenHeight - window.frame.midY
-                    let center = CGPoint(x: centerX, y: centerY)
-
-                    var assigned = false
-                    for screen in NSScreen.screens {
-                        if screen.frame.contains(center) {
-                            workspaceManager.registerWindow(newID, on: screen)
-                            assigned = true
-                            break
-                        }
-                    }
-                    if !assigned {
-                        // If it doesn't fall inside any monitor, register it to the nearest one
-                        if let nearest = self.closestScreen(to: center) {
-                            workspaceManager.registerWindow(newID, on: nearest)
-                        }
-                    }
+                    registerOnNearestScreen(newID, window: window)
                 }
 
                 // windows re-hidden by hideStrayVisibleWindows (whose original workspace
@@ -997,23 +955,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if workspaceManager.isWindowInAnyWorkspace(newID) { continue }
                 if let window = currentWindows.first(where: { $0.id == newID }) {
                     guard !window.shouldFloat() else { continue }
-                    let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-                    let centerX = window.frame.midX
-                    let centerY = mainScreenHeight - window.frame.midY
-                    let center = CGPoint(x: centerX, y: centerY)
-                    var assigned = false
-                    for screen in NSScreen.screens {
-                        if screen.frame.contains(center) {
-                            workspaceManager.registerWindow(newID, on: screen)
-                            assigned = true
-                            break
-                        }
-                    }
-                    if !assigned {
-                        if let nearest = closestScreen(to: center) {
-                            workspaceManager.registerWindow(newID, on: nearest)
-                        }
-                    }
+                    registerOnNearestScreen(newID, window: window)
                 }
             }
 
@@ -1243,26 +1185,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Register on-screen windows that aren't registered to any workspace
             // (when actually switching real macOS Spaces, that Space's windows
             //   to make sure it doesn't get left behind unregistered)
-            let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
             for window in onScreenWindows {
                 if self.workspaceManager.isWindowInAnyWorkspace(window.id) {
                     continue
                 }
                 guard !window.shouldFloat() else { continue }
-                let centerX = window.frame.midX
-                let centerY = mainScreenHeight - window.frame.midY
-                let center = CGPoint(x: centerX, y: centerY)
-                var assigned = false
-                for screen in NSScreen.screens {
-                    if screen.frame.contains(center) {
-                        self.workspaceManager.registerWindow(window.id, on: screen)
-                        assigned = true
-                        break
-                    }
-                }
-                if !assigned, let nearest = self.closestScreen(to: center) {
-                    self.workspaceManager.registerWindow(window.id, on: nearest)
-                }
+                self.registerOnNearestScreen(window.id, window: window)
             }
 
             // Exited fullscreen and returned, but to a workspace that's not currently active
