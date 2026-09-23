@@ -22,7 +22,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
 - Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
-- State Persistence: Workspaces and window positions are preserved across sleep/lock and app restarts.
+- State Persistence: Workspaces and window positions are preserved across sleep and lock. Launching Axis starts every window on workspace 0 of its monitor.
 - Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
 ## Customizing Keyboard Shortcuts

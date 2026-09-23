@@ -37,39 +37,6 @@ struct PerScreenSnapshot {
 	var rowHeightRatios: [Int: [CGFloat]]?
 }
 
-// MARK: - Struct for persisting workspace state
-
-/// Information for identifying a window (used to match it up again after a restart)
-struct WindowIdentity: Codable {
-	let bundleID: String
-	let title: String
-	let savedFrame: CGRect
-}
-
-/// Saved data for a single workspace
-struct WorkspaceEntry: Codable {
-	let number: Int
-	let windows: [WindowIdentity]
-	/// Column width ratios
-	let columnWidthRatios: [CGFloat]?
-	/// Row height ratios (keys are the string representation of the column index)
-	let rowHeightRatios: [String: [CGFloat]]?
-	/// Column structure (indices of the windows in each column, referring to positions in the `windows` array)
-	let columnStructure: [[Int]]?
-}
-
-/// Saved data for a single monitor
-struct ScreenState: Codable {
-	let displayID: UInt32
-	let activeWorkspace: Int
-	let workspaces: [WorkspaceEntry]
-}
-
-/// The overall saved data
-struct WorkspaceState: Codable {
-	let screenStates: [ScreenState]
-}
-
 // MARK: - ClosedWindowsSnapshot (AeroSpace-style)
 
 /// A snapshot of the entire workspace taken when a window is detected as "closed"
@@ -119,9 +86,6 @@ class WorkspaceManager: ObservableObject {
 
 	/// The original position of a window moved off screen
 	private var savedFrames: [CGWindowID: CGRect] = [:]
-
-	/// Whether it was restored from saved data at launch
-	private(set) var didRestoreStateFromDisk: Bool = false
 
 	/// Whether the initial workspace setup (initializeWithCurrentWindows) has completed
 	/// Once it becomes true, calling it again (e.g. from a Space switch) does nothing.
@@ -606,9 +570,9 @@ class WorkspaceManager: ObservableObject {
 
 	
 	func initializeWithCurrentWindows() {
-		// Skip if it's already been restored from saved data, or if the initial setup is already complete
+		// Skip once the initial setup is complete
 		// (So being called on every Space switch doesn't corrupt the workspace assignments)
-		if didRestoreStateFromDisk || isInitialized {
+		if isInitialized {
 			return
 		}
 
@@ -672,12 +636,11 @@ class WorkspaceManager: ObservableObject {
 	}
 
 	/// Force re-initialization if the state is broken (for the watchdog)
-	/// Reset didRestoreStateFromDisk and re-register every window to workspace 0
+	/// Re-register every window to workspace 0
 	func forceReinitialize() {
 		PerfLog.event("workspace: force reinitialize (all registrations dropped)")
 
 		// Clear the state
-		didRestoreStateFromDisk = false
 		isInitialized = false
 		workspaceWindows.removeAll()
 		savedFrames.removeAll()
@@ -768,8 +731,8 @@ class WorkspaceManager: ObservableObject {
 			self?.isSwitching = false
 		}
 
-		// 11. Save the workspace state to a file
-		saveStateToDisk()
+		// 11. Record window identities for matching after sleep
+		refreshWindowIdentities()
 
 	}
 
@@ -1534,147 +1497,16 @@ class WorkspaceManager: ObservableObject {
 
 	}
 
-	// MARK: - Persisting workspace state
+	// MARK: - Window identities
 
-	/// The path to the save destination file
-	private var stateFilePath: URL {
-		let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-		let axisDir = appSupport.appendingPathComponent("Axis")
-		return axisDir.appendingPathComponent("workspaces.json")
-	}
-
-	/// Save the workspace state to a file
-	func saveStateToDisk() {
-		let allWindows = accessibilityManager.getAllWindows()
-		// Build a dictionary of the windows getAllWindows can retrieve
-		var windowDict: [CGWindowID: WindowInfo] = [:]
-		for window in allWindows {
-			windowDict[window.id] = window
-			// Also update the cache of on-screen windows
+	/// Record which app and title each window has. Window IDs can change across
+	/// sleep and lock; this is what the windows are matched back up by.
+	func refreshWindowIdentities() {
+		for window in accessibilityManager.getAllWindows() {
 			windowIdentityCache[window.id] = (
 				bundleID: window.app.bundleIdentifier ?? "",
 				title: window.title
 			)
-		}
-
-		var screenStates: [ScreenState] = []
-		var totalSavedWindows = 0
-
-		for (screenID, workspaces) in workspaceWindows {
-			var entries: [WorkspaceEntry] = []
-
-			for (wsNumber, windowIDs) in workspaces.sorted(by: { $0.key < $1.key }) {
-				var windowIdentities: [WindowIdentity] = []
-
-				for windowID in windowIDs {
-					// First use whatever windows getAllWindows could retrieve
-					if let window = windowDict[windowID] {
-						let frame = savedFrames[windowID] ?? window.frame
-						let identity = WindowIdentity(
-							bundleID: window.app.bundleIdentifier ?? "",
-							title: window.title,
-							savedFrame: frame
-						)
-						windowIdentities.append(identity)
-					}
-					// Fall back to the cache when getAllWindows fails to retrieve it
-					else if let cached = windowIdentityCache[windowID] {
-						let frame = savedFrames[windowID] ?? .zero
-						let identity = WindowIdentity(
-							bundleID: cached.bundleID,
-							title: cached.title,
-							savedFrame: frame
-						)
-						windowIdentities.append(identity)
-					} else {
-					}
-				}
-
-				// Get the ratios from the tiling snapshot
-				let snapshot = tilingSnapshots[screenID]?[wsNumber]
-				let colWidthRatios = snapshot?.columnWidthRatios
-
-				// Convert rowHeightRatios' Int keys to String (JSON keys must be strings)
-				var rowRatiosStringKeyed: [String: [CGFloat]]? = nil
-				if let rowRatios = snapshot?.rowHeightRatios {
-					rowRatiosStringKeyed = [:]
-					for (key, value) in rowRatios {
-						rowRatiosStringKeyed?[String(key)] = value
-					}
-				}
-
-				// Save the column structure (so window ordering can be restored)
-				var columnStructure: [[Int]]? = nil
-				if let snapshot = snapshot {
-					var structure: [[Int]] = []
-					for column in snapshot.columns {
-						var colIndices: [Int] = []
-						for wid in column {
-							// Find the matching index in windowIdentities
-							let bundleID: String
-							let title: String
-							if let window = windowDict[wid] {
-								bundleID = window.app.bundleIdentifier ?? ""
-								title = window.title
-							} else if let cached = windowIdentityCache[wid] {
-								bundleID = cached.bundleID
-								title = cached.title
-							} else {
-								continue
-							}
-							if let idx = windowIdentities.firstIndex(where: {
-								$0.bundleID == bundleID && $0.title == title
-							}) {
-								colIndices.append(idx)
-							}
-						}
-						if !colIndices.isEmpty {
-							structure.append(colIndices)
-						}
-					}
-					if !structure.isEmpty {
-						columnStructure = structure
-					}
-				}
-
-				totalSavedWindows += windowIdentities.count
-
-				let entry = WorkspaceEntry(
-					number: wsNumber,
-					windows: windowIdentities,
-					columnWidthRatios: colWidthRatios,
-					rowHeightRatios: rowRatiosStringKeyed,
-					columnStructure: columnStructure
-				)
-				entries.append(entry)
-			}
-
-			let screenState = ScreenState(
-				displayID: screenID.displayID,
-				activeWorkspace: activeWorkspace[screenID] ?? 0,
-				workspaces: entries
-			)
-			screenStates.append(screenState)
-		}
-
-		let state = WorkspaceState(screenStates: screenStates)
-
-		// Safeguard: if not a single window could be saved,
-		// Don't overwrite good existing data with empty data
-		if totalSavedWindows == 0 {
-			return
-		}
-
-		do {
-			// Create the directory if it doesn't exist
-			let dir = stateFilePath.deletingLastPathComponent()
-			try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-
-			let encoder = JSONEncoder()
-			encoder.outputFormatting = .prettyPrinted
-			let data = try encoder.encode(state)
-			try data.write(to: stateFilePath)
-		} catch {
 		}
 	}
 
