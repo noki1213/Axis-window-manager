@@ -113,9 +113,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        // Save workspace state to a file before quitting
-        workspaceManager.saveStateToDisk()
-
         // Bring every off-screen window back on screen
         restoreAllWindowsBeforeQuit()
         hotkeyManager.stop()
@@ -373,8 +370,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Rescue off-screen windows right after launch (a fallback for when the previous quit couldn't restore them)
         rescueOffScreenWindows()
 
-        // Initialize workspaces (respecting windows' current positions, registering them to workspace 0 on each monitor)
-        // Don't use the saved data's monitor assignment (it would move the window to a different monitor)
+        // Initialize workspaces: every window starts on workspace 0 of the monitor it is on
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             self.workspaceManager.initializeWithCurrentWindows()
@@ -932,9 +928,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 retileAfterNewWindowSettles()
             }
 
-            // Save state whenever a window change occurs
-            // (don't rely solely on the save-on-shutdown path)
-            workspaceManager.saveStateToDisk()
+            // Keep the app and title of every window current, for matching after sleep
+            workspaceManager.refreshWindowIdentities()
 
         } else if currentWindowIDs != lastWindowIDs {
             // Same window count, but the IDs changed
@@ -1267,8 +1262,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         PerfLog.event("system: will sleep")
         // Set a flag so window checks don't run during sleep
         isWaking = true
-        // Save workspace state before sleep
-        workspaceManager.saveStateToDisk()
+        // Record window identities before sleep, when window IDs may change
+        workspaceManager.refreshWindowIdentities()
     }
 
     @objc private func onSystemWake() {
@@ -1385,8 +1380,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             lastWindowCount = onScreenWindows.count
             lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
-            // Save the state after the reset
-            workspaceManager.saveStateToDisk()
+            // Record window identities after the reset
+            workspaceManager.refreshWindowIdentities()
             return
         }
 
