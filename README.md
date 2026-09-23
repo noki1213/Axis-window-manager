@@ -99,6 +99,20 @@ If the key combination is already used by another action, a conflict warning wil
 - Move the focused window to next/previous workspace
 - Empty workspaces are automatically removed and reordered
 
+### Launching an App Aside
+Opens an app with its windows on an empty workspace of their own, past the last one in use, without touching the workspace on screen: its tiling and the keyboard focus stay as they are. Useful for build scripts that relaunch an app while you keep working.
+
+| Entry point | What it does |
+|---|---|
+| `open-aside /Applications/Some.app` | Command installed to `~/.local/bin` by `install.sh`. Opens the app normally when Axis is not running |
+| `axis://launch-aside?path=/Applications/Some.app` | URL scheme behind the command (the path is URL-encoded) |
+
+In a build script:
+
+```bash
+if command -v open-aside >/dev/null; then open-aside "$APP"; else open "$APP"; fi
+```
+
 ## Installation
 
 ### Download the app
@@ -252,6 +266,14 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - 次/前のワークスペースに切り替え
 - フォーカス中のウィンドウを次/前のワークスペースに移動
 - 空のワークスペースは自動的に削除され、ID が再割り当てされます
+
+### アプリを脇に起動する
+アプリを、使っているワークスペースの右隣の空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
+
+| 入口 | 動作 |
+|---|---|
+| `open-aside /Applications/Some.app` | `install.sh` が `~/.local/bin` に入れるコマンド。Axis が起動していなければ普通に開く |
+| `axis://launch-aside?path=/Applications/Some.app` | コマンドの中身の URL スキーム（パスは URL エンコードする） |
 
 ## インストール
 

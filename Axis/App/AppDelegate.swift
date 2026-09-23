@@ -58,6 +58,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // The settings window
     private var settingsWindow: NSWindow?
     
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Registered before launch finishes, so a URL that launched Axis is not missed
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    /// axis://launch-aside?path=/Applications/Some.app
+    ///     launch the app with its windows on an empty workspace, out of sight
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let components = URLComponents(string: string)
+        else { return }
+        let path = components.queryItems?.first(where: { $0.name == "path" })?.value
+
+        switch components.host {
+        case "launch-aside":
+            guard let path, !path.isEmpty else { return }
+            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            LaunchAsideManager.shared.launch(appAt: url, on: workspaceManager.focusedScreen())
+        default:
+            break
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Configure it as a menu bar app (hide the Dock icon)
         NSApp.setActivationPolicy(.accessory)
@@ -298,6 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Register a window on the screen holding its center, or on the nearest
     /// screen when its center is off every screen.
     private func registerOnNearestScreen(_ id: CGWindowID, window: WindowInfo) {
+        if LaunchAsideManager.shared.claim(window, workspaces: workspaceManager) { return }
         let center = window.centerInScreenCoordinates
         if let screen = window.screen ?? closestScreen(to: center) {
             workspaceManager.registerWindow(id, on: screen)
@@ -879,6 +908,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // The normal new-window registration path
                 // Prefer registering to the focus monitor recorded one cycle ago
                 // (when opening a new window via Cmd+N etc., place it on the monitor that had focus rather than by physical position)
+                var setAsideIDs: Set<CGWindowID> = []
                 for newID in newWindowIDs {
                     // Skip if it's already registered in some workspace
                     // (avoids mistakenly registering a window from another workspace right after a workspace switch)
@@ -888,6 +918,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                     guard let window = currentWindows.first(where: { $0.id == newID }),
                           !window.shouldFloat() else {
+                        continue
+                    }
+
+                    // A window of an app launched aside goes to its own workspace, out of sight
+                    if LaunchAsideManager.shared.claim(window, workspaces: workspaceManager) {
+                        setAsideIDs.insert(newID)
                         continue
                     }
 
@@ -909,7 +945,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // windows re-hidden by hideStrayVisibleWindows (whose original workspace
                 // don't move focus to a fullscreen-returned window that isn't currently active
-                focusNewWindow(newWindowIDs: newWindowIDs.subtracting(strayHiddenIDs), allWindows: currentWindows)
+                focusNewWindow(newWindowIDs: newWindowIDs.subtracting(strayHiddenIDs).subtracting(setAsideIDs), allWindows: currentWindows)
                 windowsWereAdded = true
             }
 
@@ -1126,6 +1162,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func switchWorkspaceIfWindowElsewhere(_ window: WindowInfo) -> Bool {
         guard let location = workspaceManager.workspaceLocation(for: window.id) else {
+            return false
+        }
+        // A window just set aside by a launch keeps its distance: focus goes back instead
+        if LaunchAsideManager.shared.holdsFocus(from: window) {
             return false
         }
 
