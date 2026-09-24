@@ -235,13 +235,18 @@ class WorkspaceManager: ObservableObject {
 	}
 
 	/// Register a window on `workspace` of `screen` and move it out of sight,
-	/// leaving the workspace on screen and its tiling as they are.
-	func registerWindowOutOfSight(_ windowID: CGWindowID, on screen: NSScreen, workspace: Int) {
+	/// leaving the workspace on screen and its tiling as they are. A floating
+	/// window stays floating there: it comes and goes with the workspace but is
+	/// never tiled.
+	func registerWindowOutOfSight(_ windowID: CGWindowID, on screen: NSScreen, workspace: Int, floating: Bool) {
 		let id = screenIdentifier(for: screen)
 		if workspaceWindows[id] == nil {
 			workspaceWindows[id] = [:]
 		}
 		workspaceWindows[id]?[workspace, default: []].insert(windowID)
+		if floating {
+			floatWindowIDs.insert(windowID)
+		}
 		hideWindow(windowID)
 	}
 

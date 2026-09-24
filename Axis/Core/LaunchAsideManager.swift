@@ -63,8 +63,10 @@ final class LaunchAsideManager {
 		entry.holdFocusUntil = Date().addingTimeInterval(Self.focusHoldInterval)
 		pending[bundleID] = entry
 
-		PerfLog.event("launch-aside: \(PerfLog.describe(window)) -> ws\(workspace + 1)")
-		workspaces.registerWindowOutOfSight(window.id, on: entry.screen, workspace: workspace)
+		// Read before registering: a registered window no longer counts as floating
+		let floating = window.shouldFloat()
+		PerfLog.event("launch-aside: \(PerfLog.describe(window)) -> ws\(workspace + 1)" + (floating ? " (floating)" : ""))
+		workspaces.registerWindowOutOfSight(window.id, on: entry.screen, workspace: workspace, floating: floating)
 		returnFocus(ifTakenBy: bundleID)
 		return true
 	}
