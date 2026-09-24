@@ -1405,6 +1405,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }.joined(separator: "|")
     }
 
+    /// Screen geometry, workspaces, and tiled columns, written to the log
+    private func logScreenLayout() {
+        guard PerfLog.enabled else { return }
+        for screen in NSScreen.screens {
+            let id = ScreenIdentifier(from: screen)
+            let columns = (tilingEngine.tiledWindows[id] ?? []).map { "[\(PerfLog.describe($0))]" }.joined(separator: " ")
+            PerfLog.log("  screen \(screen.localizedName)#\(id.displayID) frame=\(NSStringFromRect(screen.frame)) visible=\(NSStringFromRect(screen.visibleFrame)) tiled=\(columns)")
+        }
+        for line in workspaceManager.layoutSummaryLines() {
+            PerfLog.log("  workspaces \(line)")
+        }
+    }
+
     private func runScreenChange() {
         processScreenChange()
         let handledSignature = screenLayoutSignature()
@@ -1413,6 +1426,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let cooldown = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             if self.screenLayoutSignature() != handledSignature {
+                PerfLog.event("screen change: layout moved after handling, handling again")
                 self.runScreenChange()
             } else {
                 self.isHandlingScreenChange = false
@@ -1431,7 +1445,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let addedScreenIDs = currentScreenIDs.subtracting(knownScreenIDs)
 
         // If the monitor count hasn't changed, just retile (a resolution or arrangement change only)
+        PerfLog.event("screen change: handling (before) previous=\(previousScreenCount) current=\(currentScreenCount) removed=\(removedScreenIDs.map { $0.displayID }) added=\(addedScreenIDs.map { $0.displayID })")
+        logScreenLayout()
+        defer { logScreenLayout() }
+
         guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
+            PerfLog.event("screen change: same monitors, retile only")
             knownScreenIDs = currentScreenIDs
             tilingEngine.tileAllScreens()
             return
@@ -1443,6 +1462,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // So it doesn't get added by mistake even when a displayID glitch during removal produces a spurious "added" event,
         // Limited to the case where the monitor count actually increased.
         if !addedScreenIDs.isEmpty && currentScreenCount > previousScreenCount {
+            PerfLog.event("screen change: monitor added, full reset")
             workspaceManager.forceReinitialize()
             knownScreenIDs = currentScreenIDs
             tilingEngine.cleanupDisconnectedScreens()
@@ -1461,6 +1481,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        PerfLog.event("screen change: restoring per monitor")
         // Handling for a disconnected monitor
         for removedID in removedScreenIDs {
             workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
