@@ -916,16 +916,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
-                    guard let window = currentWindows.first(where: { $0.id == newID }),
-                          !window.shouldFloat() else {
+                    guard let window = currentWindows.first(where: { $0.id == newID }) else {
                         continue
                     }
 
-                    // A window of an app launched aside goes to its own workspace, out of sight
+                    // A window of an app launched aside goes to its own workspace, out of sight,
+                    // floating or not
                     if LaunchAsideManager.shared.claim(window, workspaces: workspaceManager) {
                         setAsideIDs.insert(newID)
                         continue
                     }
+
+                    guard !window.shouldFloat() else { continue }
 
                     // If a placement reservation (Ctrl+Opt+N) is active, prefer that.
                     // If the reservation was consumed, both workspace registration and placement are already done, so skip the normal path
