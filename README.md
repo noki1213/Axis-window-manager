@@ -104,7 +104,7 @@ Opens an app with its windows on an empty workspace of their own, past the last 
 
 | Entry point | What it does |
 |---|---|
-| `open-aside /Applications/Some.app` | Command installed to `~/.local/bin` by `install.sh`. Opens the app normally when Axis is not running |
+| `open-aside /Applications/Some.app` | The `bin/open-aside` script; copy it to a folder on your `PATH` such as `~/.local/bin`. Opens the app normally when Axis is not running |
 | `axis://launch-aside?path=/Applications/Some.app` | URL scheme behind the command (the path is URL-encoded) |
 
 In a build script:
@@ -139,10 +139,13 @@ Requires Xcode. No Apple Developer account needed.
 ```sh
 git clone https://github.com/noki1213/Axis-window-manager.git
 cd Axis-window-manager
-./install.sh
+xcodebuild -scheme Axis -configuration Release -derivedDataPath build \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
+rm -rf /Applications/Axis.app
+cp -R build/Build/Products/Release/Axis.app /Applications/
 ```
 
-`install.sh` builds an unsigned Release build and installs it to `/Applications`. Because you built it locally, macOS does not quarantine it and there is no first-launch prompt.
+This builds a Release build signed for your Mac alone (ad-hoc, no account involved) and copies it to Applications, replacing any older copy — quit the app first if it is running. Because you built it locally, macOS does not quarantine it and there is no first-launch prompt.
 
 Either way, grant Accessibility permission when prompted — see Setup below.
 
@@ -272,7 +275,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 | 入口 | 動作 |
 |---|---|
-| `open-aside /Applications/Some.app` | `install.sh` が `~/.local/bin` に入れるコマンド。Axis が起動していなければ普通に開く |
+| `open-aside /Applications/Some.app` | `bin/open-aside` のスクリプト。`~/.local/bin` など `PATH` の通ったフォルダにコピーして使う。Axis が起動していなければ普通に開く |
 | `axis://launch-aside?path=/Applications/Some.app` | コマンドの中身の URL スキーム（パスは URL エンコードする） |
 
 ## インストール
@@ -301,10 +304,13 @@ Xcode が必要です。Apple Developer アカウントは不要です。
 ```sh
 git clone https://github.com/noki1213/Axis-window-manager.git
 cd Axis-window-manager
-./install.sh
+xcodebuild -scheme Axis -configuration Release -derivedDataPath build \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= build
+rm -rf /Applications/Axis.app
+cp -R build/Build/Products/Release/Axis.app /Applications/
 ```
 
-`install.sh` は未署名の Release ビルドを作成して `/Applications` にインストールします。自分でビルドしたアプリは macOS に隔離されないため、初回起動の確認は出ません。
+この Mac 専用の署名（アカウント不要のアドホック署名）を付けた Release ビルドを作り、アプリケーションフォルダにコピーします。古いものがあれば置き換えるので、起動中なら先に終了してください。自分でビルドしたアプリは macOS に隔離されないため、初回起動の確認は出ません。
 
 どちらの方法でも、アクセシビリティ権限を求められたら許可してください（下のセットアップを参照）。
 
