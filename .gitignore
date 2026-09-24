@@ -58,3 +58,7 @@ ref/
 # Local settings (e.g. Team ID for code signing)
 .env
 dist/
+
+# Local build and release scripts
+install.sh
+release.sh
