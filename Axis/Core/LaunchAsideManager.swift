@@ -10,15 +10,19 @@ import AppKit
 final class LaunchAsideManager {
 	static let shared = LaunchAsideManager()
 
-	/// How long after the launch the app's new windows are still caught.
-	private static let claimInterval: TimeInterval = 20
+	/// How long to wait for the app's first window. Generous, because window
+	/// handling can be paused for a while (Mission Control, a slow launch) and
+	/// the first window must not slip onto the workspace on screen.
+	private static let firstWindowWait: TimeInterval = 300
+	/// How long after the first window the app's further windows still follow it.
+	private static let followingWindowWait: TimeInterval = 20
 	/// How long after a window is caught its app is kept from taking focus.
 	/// Launched apps activate themselves a moment after their first window.
 	private static let focusHoldInterval: TimeInterval = 3
 
 	private struct Pending {
 		let screen: NSScreen
-		let deadline: Date
+		var deadline: Date
 		/// Chosen when the first window arrives, so later windows join it.
 		var workspace: Int?
 		var holdFocusUntil: Date?
@@ -42,7 +46,7 @@ final class LaunchAsideManager {
 		   front.bundleIdentifier != Bundle.main.bundleIdentifier {
 			previousApp = front
 		}
-		pending[bundleID] = Pending(screen: screen, deadline: Date().addingTimeInterval(Self.claimInterval))
+		pending[bundleID] = Pending(screen: screen, deadline: Date().addingTimeInterval(Self.firstWindowWait))
 		PerfLog.event("launch-aside: \(bundleID) -> \(PerfLog.describe(screen))")
 
 		let configuration = NSWorkspace.OpenConfiguration()
@@ -59,6 +63,9 @@ final class LaunchAsideManager {
 			return false
 		}
 		let workspace = entry.workspace ?? workspaces.firstUnusedWorkspace(on: entry.screen)
+		if entry.workspace == nil {
+			entry.deadline = Date().addingTimeInterval(Self.followingWindowWait)
+		}
 		entry.workspace = workspace
 		entry.holdFocusUntil = Date().addingTimeInterval(Self.focusHoldInterval)
 		pending[bundleID] = entry
