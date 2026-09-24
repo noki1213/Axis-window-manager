@@ -617,9 +617,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             consecutiveGhostSkips = 0
 
+            // Windows of an app launched aside go straight to their own workspace and
+            // are no reason to leave Zen mode; they count as seen from here on
+            var appearedZen = currentIDsZen.subtracting(lastWindowIDs)
+            for window in managedZen where appearedZen.contains(window.id) {
+                if LaunchAsideManager.shared.claim(window, workspaces: workspaceManager) {
+                    appearedZen.remove(window.id)
+                    lastWindowIDs.insert(window.id)
+                    lastWindowCount += 1
+                }
+            }
+
             // Zen is a per-monitor feature, so on monitors where Zen isn't active,
             // Don't cancel it just for a window count change (e.g. simply opening Finder on another monitor)
-            let appearedZen = currentIDsZen.subtracting(lastWindowIDs)
             let zenScreen = ZenModeManager.shared.activeScreen
             let appearedOnZenScreen = managedZen.contains { window in
                 appearedZen.contains(window.id) && screenContainingWindow(window) === zenScreen
