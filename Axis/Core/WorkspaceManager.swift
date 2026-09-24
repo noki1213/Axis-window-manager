@@ -1140,6 +1140,19 @@ class WorkspaceManager: ObservableObject {
 		return NSScreen.main
 	}
 
+	/// One line per screen describing its workspaces, for diagnosing monitor-change layouts
+	func layoutSummaryLines() -> [String] {
+		NSScreen.screens.map { screen in
+			let id = ScreenIdentifier(from: screen)
+			let active = activeWorkspace[id] ?? -1
+			let spaces = (workspaceWindows[id] ?? [:]).keys.sorted().map { ws in
+				let ids = (workspaceWindows[id]?[ws] ?? []).sorted().map(String.init).joined(separator: ",")
+				return "ws\(ws)=[\(ids)]"
+			}.joined(separator: " ")
+			return "\(screen.localizedName)#\(id.displayID) active=ws\(active) \(spaces)"
+		}
+	}
+
 	// MARK: - Handling monitor connect/disconnect
 
 	/// Handling for when a monitor is disconnected
