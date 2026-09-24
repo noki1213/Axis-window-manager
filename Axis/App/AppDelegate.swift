@@ -51,6 +51,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // For detecting monitor changes
     private var knownScreenIDs: Set<ScreenIdentifier> = []
     private var isHandlingScreenChange = false
+    private var pendingScreenChange: DispatchWorkItem?
+    private var screenChangeCooldown: DispatchWorkItem?
 
     // The startup guide window
     private var startupGuideController: StartupGuideWindowController?
@@ -1381,21 +1383,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Monitor change handling
 
     @objc private func onScreenParametersChanged() {
-        // Debounce rapid successive notifications (this can fire multiple times on monitor changes)
-        guard !isHandlingScreenChange else { return }
         PerfLog.event("system: screen parameters changed (\(NSScreen.screens.map { PerfLog.describe($0) }.joined(separator: ", ")))")
         isHandlingScreenChange = true
 
-        // Wait for macOS to fully update the monitor info before proceeding
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            self.processScreenChange()
+        // macOS sends several notifications while a monitor change settles (frames and the menu bar
+        // arrive in stages). Restart the wait on every one so the last layout is never dropped.
+        screenChangeCooldown?.cancel()
+        pendingScreenChange?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.runScreenChange()
+        }
+        pendingScreenChange = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
 
-            // Cooldown period (to guard against rapid successive changes)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+    /// Screen IDs plus geometry, to tell whether the configuration kept moving after it was handled
+    private func screenLayoutSignature() -> String {
+        NSScreen.screens.map { screen in
+            let id = ScreenIdentifier(from: screen).displayID
+            return "\(id):\(NSStringFromRect(screen.frame)):\(NSStringFromRect(screen.visibleFrame))"
+        }.joined(separator: "|")
+    }
+
+    private func runScreenChange() {
+        processScreenChange()
+        let handledSignature = screenLayoutSignature()
+
+        // Cooldown: if the layout changed again without a notification, handle it once more
+        let cooldown = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if self.screenLayoutSignature() != handledSignature {
+                self.runScreenChange()
+            } else {
                 self.isHandlingScreenChange = false
             }
         }
+        screenChangeCooldown = cooldown
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: cooldown)
     }
 
     private func processScreenChange() {
