@@ -133,6 +133,34 @@ class WorkspaceManager: ObservableObject {
 		return floatWindowIDs.contains(windowID)
 	}
 
+	// MARK: - Tiled windows across a relaunch
+
+	private static let tiledAtQuitKey = "tiledWindowIDsAtQuit"
+
+	/// Windows that were tiled when Axis last quit. Their windows outlive Axis, so on the next
+	/// launch these are tiled again even when a stacked column left them small enough to look
+	/// like dialogs.
+	private lazy var tiledBeforeRelaunch: Set<CGWindowID> = {
+		let ids = UserDefaults.standard.array(forKey: Self.tiledAtQuitKey) as? [UInt32] ?? []
+		return Set(ids)
+	}()
+
+	func wasTiledBeforeRelaunch(_ windowID: CGWindowID) -> Bool {
+		tiledBeforeRelaunch.contains(windowID)
+	}
+
+	/// Record the tiled windows so the next launch can tell them from genuinely small windows
+	func rememberTiledWindowsForRelaunch() {
+		var ids = Set<CGWindowID>()
+		for workspaces in workspaceWindows.values {
+			for windows in workspaces.values {
+				ids.formUnion(windows)
+			}
+		}
+		ids.subtract(floatWindowIDs)
+		UserDefaults.standard.set(ids.map { UInt32($0) }, forKey: Self.tiledAtQuitKey)
+	}
+
 	// MARK: - Public Methods
 
 	/// Get a ScreenIdentifier from an NSScreen

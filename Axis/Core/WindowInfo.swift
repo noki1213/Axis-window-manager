@@ -466,9 +466,9 @@ struct WindowInfo: Identifiable, Equatable {
             return true
         }
 
-        // If already managed as a tiled window in a workspace, do not float it just because
-        // tiling or column stacking resized it into smaller dimensions
-        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) {
+        // If already managed as a tiled window in a workspace (or was one when Axis last quit),
+        // do not float it just because tiling or column stacking resized it into smaller dimensions
+        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) || WorkspaceManager.shared.wasTiledBeforeRelaunch(id) {
             return false
         }
 
