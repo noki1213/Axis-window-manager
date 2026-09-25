@@ -13,13 +13,25 @@ struct WindowPaletteItem {
 	let appName: String
 	let windowTitle: String
 	let appIcon: NSImage?
-	let workspace: Int
+	/// nil for windows that don't belong to any workspace (the System section)
+	let workspace: Int?
 	let screenID: ScreenIdentifier
 }
 
-/// A section for a single workspace (Space)
+/// A section of the palette: one workspace (Space), or one of the special groups
 struct WindowPaletteSection {
-	let workspace: Int
+	enum Kind: Equatable {
+		/// A workspace, by number
+		case space(Int)
+		/// Windows the user deliberately floated
+		case float
+		/// System-originated floating windows not registered to any workspace
+		case system
+		/// Windows hidden with Ctrl+Opt+X (minimized)
+		case hidden
+	}
+
+	let kind: Kind
 	var items: [WindowPaletteItem]
 }
 
@@ -180,17 +192,13 @@ class WindowPalettePanel: NSPanel {
 
 	// MARK: - Private Methods
 
-	/// Return the label string for a Space section
-	/// workspace == -3: Hidden (windows hidden with Ctrl+Opt+X, i.e. minimized)
-	/// workspace == -2: Float (windows the user deliberately floated)
-	/// workspace == -1: System (system-originated floating windows)
-	/// Otherwise: a normal workspace number
-	private static func sectionLabel(for workspace: Int) -> String {
-		switch workspace {
-		case -3: return "Hidden"
-		case -2: return "Float"
-		case -1: return "System"
-		default: return "Space \(workspace)"
+	/// Return the label string for a section
+	private static func sectionLabel(for kind: WindowPaletteSection.Kind) -> String {
+		switch kind {
+		case .hidden: return "Hidden"
+		case .float: return "Float"
+		case .system: return "System"
+		case .space(let workspace): return "Space \(workspace)"
 		}
 	}
 
@@ -252,9 +260,7 @@ class WindowPalettePanel: NSPanel {
 			// Each Space section
 			for space in display.spaces {
 				// Space label
-				// The Float section (workspace == -2, windows the user has floated) is labeled "Float",
-				// The System section (workspace == -1, system-originated floating windows) is displayed as "System"
-				let spaceLabel = NSTextField(labelWithString: WindowPalettePanel.sectionLabel(for: space.workspace))
+				let spaceLabel = NSTextField(labelWithString: WindowPalettePanel.sectionLabel(for: space.kind))
 				spaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
 				spaceLabel.textColor = NSColor.white.withAlphaComponent(0.4)
 				spaceLabel.translatesAutoresizingMaskIntoConstraints = false

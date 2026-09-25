@@ -42,6 +42,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Used to detect focus movement and automatically switch workspaces.
     /// (fills the gap, since onActiveAppChanged only fires on app switches)
     private var lastFocusedWindowID: CGWindowID?
+    /// The monitor of lastFocusedWindowID, kept so focus can return there once that window closes
+    private var lastFocusedWindowScreen: NSScreen?
     private var wasScreenLocked = false
     private var isWaking = false
 
@@ -679,11 +681,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Target only on-screen windows (i.e. windows in the current Space)
+        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
+
         // Record "the focus monitor at this moment" for registering the new window
         // By the time a new window is detected, macOS has already moved focus to it, so
         // Using the value recorded one cycle ago lets us correctly determine which monitor had focus
         // (this needs to run every cycle, so it's placed before the full-scan skip below)
-        if let focused = accessibilityManager.getFocusedWindow() {
+        let focusedWindow = accessibilityManager.getFocusedWindow()
+        if let focused = focusedWindow {
             if workspaceManager.isWindowInAnyWorkspace(focused.id) {
                 lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
             }
@@ -695,14 +701,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // (the isSpaceSwitching/isSwitching guards at the top of this function), so switchWorkspace
             // This doesn't recurse by detecting and re-firing on its own focus move.
             if focused.id != lastFocusedWindowID {
+                let previousID = lastFocusedWindowID
+                let previousScreen = lastFocusedWindowScreen
                 lastFocusedWindowID = focused.id
+                lastFocusedWindowScreen = workspaceManager.screenForWindow(focused.id) ?? focused.screen
                 // If a cross-workspace switch happens, switchWorkspace itself
                 // borderManager.updateBorder() is called at the end, so don't call it here
                 // (running twice in the same tick briefly snaps the border to the old, pre-switch position).
                 // Only focus moves within the same workspace (the case behind that one recurring symptom),
                 // Notify the border update from here
-                let didSwitchWorkspace = !zenWindowClosed && switchWorkspaceIfWindowElsewhere(focused)
-                if !didSwitchWorkspace {
+                if !zenWindowClosed && isInAnotherWorkspace(focused) {
+                    followFocusOnceSettled(to: focused, from: previousID, previousScreen: previousScreen)
+                } else {
                     borderManager.notifyFocusedWindowChanged()
                 }
 
@@ -720,12 +730,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
+        } else if let previousID = lastFocusedWindowID, focusedWindowClosed(previousID, onScreenIDs: onScreenIDs) {
+            // The focused window closed and macOS left nothing focused (common with floating windows,
+            // which the close handling below doesn't track)
+            lastFocusedWindowID = nil
+            focusAdjacentWindowAfterClose(preferringScreen: lastFocusedWindowScreen)
         }
 
-        // Target only on-screen windows (i.e. windows in the current Space)
         // Filtering with shouldBeManaged() screens out transient windows during app launch, and
         // Exclude internal windows, like Excel's, from the count
-        let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
         // Skip the expensive full AX scan if the set of windows is unchanged from last time.
         // Querying all apps via AX takes 25-390ms, and running it every 0.3 seconds
@@ -1099,8 +1112,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            // Only fall back to the top-left when there's no window under the mouse and nothing currently has focus
-            if self.accessibilityManager.getFocusedWindow() == nil {
+            // Only fall back to the top-left when there's no window under the mouse and nothing visible has focus
+            // (macOS may have handed focus to a window stashed in another workspace)
+            let focused = self.accessibilityManager.getFocusedWindow()
+            if focused.map({ self.workspaceManager.isWindowHidden($0.id) }) ?? true {
                 // Focus the first of the tiled windows
                 for screen in NSScreen.screens {
                     if let columns = self.tilingEngine.tiledWindows[ScreenIdentifier(from: screen)],
@@ -1181,6 +1196,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// - Returns: true if a workspace switch was actually started. The caller uses this to
     ///   Only notify the border update ourselves when no switch occurred (switchWorkspace itself
     ///   updates the border when the switch completes, avoiding a momentary glitch from a double update)
+    /// Whether the window belongs to a workspace other than the one shown on its monitor
+    private func isInAnotherWorkspace(_ window: WindowInfo) -> Bool {
+        guard let location = workspaceManager.workspaceLocation(for: window.id) else { return false }
+        return location.workspace != workspaceManager.currentWorkspace(on: location.screen)
+    }
+
+    /// Whether the previously focused window is gone: closed or minimized, but not hidden by Axis
+    private func focusedWindowClosed(_ windowID: CGWindowID, onScreenIDs: Set<CGWindowID>) -> Bool {
+        !onScreenIDs.contains(windowID) && !HiddenWindowManager.shared.isHidden(windowID)
+    }
+
+    /// Follow a focus move into another workspace, unless it came from the focused window closing.
+    /// macOS hands focus to another window of the same app a moment before the closed window leaves
+    /// the window list, so the decision waits until the close has settled.
+    private func followFocusOnceSettled(to window: WindowInfo, from previousID: CGWindowID?, previousScreen: NSScreen?) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else { return }
+            if let previousID = previousID,
+               self.focusedWindowClosed(previousID, onScreenIDs: self.accessibilityManager.getOnScreenWindowIDs()) {
+                self.focusAdjacentWindowAfterClose(preferringScreen: previousScreen)
+                return
+            }
+            guard self.accessibilityManager.getFocusedWindow()?.id == window.id else { return }
+            if !self.switchWorkspaceIfWindowElsewhere(window) {
+                self.borderManager.notifyFocusedWindowChanged()
+            }
+        }
+    }
+
     @discardableResult
     private func switchWorkspaceIfWindowElsewhere(_ window: WindowInfo) -> Bool {
         guard let location = workspaceManager.workspaceLocation(for: window.id) else {
@@ -1294,8 +1338,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 onScreenIDs.contains($0.id) && $0.shouldBeManaged()
                     && (self.workspaceManager.isWindowInAnyWorkspace($0.id) || $0.shouldFloat())
             }
-            self.lastWindowCount = onScreenWindows.count
-            self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
+            // A registered window that closed during the switch stays tracked, so the next cycle
+            // still sees it close and unregisters it; absorbing it here would leave its workspace
+            // looking occupied while showing nothing
+            let onScreenWindowIDs = Set(onScreenWindows.map { $0.id })
+            let closedDuringSwitch = self.lastWindowIDs.subtracting(onScreenWindowIDs)
+                .filter { self.workspaceManager.isWindowInAnyWorkspace($0) }
+            self.lastWindowIDs = onScreenWindowIDs.union(closedDuringSwitch)
+            self.lastWindowCount = self.lastWindowIDs.count
 
             // Take whatever is focused now as the baseline for focus-move detection.
             // On a switch to an empty workspace nothing gets focused, so macOS keeps the previous
