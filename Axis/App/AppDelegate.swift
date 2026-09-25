@@ -589,6 +589,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Skip automatic tiling while Zen mode is active (guards against input-source switches like the eisu key)
         // However, if a window change occurred, automatically exit Zen mode and return to normal tiling
+        // Set when the centered Zen window was closed: macOS then hands focus to another window
+        // of the same app, which may live in another workspace, and following it would leave Zen's workspace
+        var zenWindowClosed = false
         if ZenModeManager.shared.isActive {
             let onScreenIDsZen = accessibilityManager.getOnScreenWindowIDs()
             let allWindowsZen = accessibilityManager.getAllWindows()
@@ -637,7 +640,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let appearedOnZenScreen = managedZen.contains { window in
                 appearedZen.contains(window.id) && screenContainingWindow(window) === zenScreen
             }
-            let vanishedOnZenScreen = !vanishedZen.intersection(ZenModeManager.shared.hiddenWindowIDs).isEmpty
+            // Closing the centered window itself also ends Zen mode, bringing back the rest of its workspace
+            let zenFocusedVanished = ZenModeManager.shared.focusedWindowID.map { vanishedZen.contains($0) } ?? false
+            zenWindowClosed = zenFocusedVanished
+            let vanishedOnZenScreen = zenFocusedVanished
+                || !vanishedZen.intersection(ZenModeManager.shared.hiddenWindowIDs).isEmpty
             if !appearedOnZenScreen && !vanishedOnZenScreen {
                 if PerfLog.enabled {
                     PerfLog.logf("Keeping Zen mode: changes are on another monitor (appeared=%d vanished=%d)",
@@ -694,7 +701,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // (running twice in the same tick briefly snaps the border to the old, pre-switch position).
                 // Only focus moves within the same workspace (the case behind that one recurring symptom),
                 // Notify the border update from here
-                let didSwitchWorkspace = switchWorkspaceIfWindowElsewhere(focused)
+                let didSwitchWorkspace = !zenWindowClosed && switchWorkspaceIfWindowElsewhere(focused)
                 if !didSwitchWorkspace {
                     borderManager.notifyFocusedWindowChanged()
                 }
