@@ -221,7 +221,7 @@ class WindowPaletteManager {
 
 		// Selecting from the Hidden section (windows hidden with Ctrl+Opt+X)
 		// Route it through the neighbor-memory restore logic instead of a normal workspace switch
-		if selectedItem.workspace == -3 {
+		if space.kind == .hidden {
 			HiddenWindowManager.shared.restore(windowID: selectedItem.windowID)
 		} else {
 			// Switch to the selected window's workspace
@@ -431,7 +431,7 @@ class WindowPaletteManager {
 
 				// Only add Spaces that have windows
 				if !items.isEmpty {
-					let section = WindowPaletteSection(workspace: workspace, items: items)
+					let section = WindowPaletteSection(kind: .space(workspace), items: items)
 					displayMap[screenID]?.spaces.append(section)
 				}
 			}
@@ -441,22 +441,17 @@ class WindowPaletteManager {
 		var result = Array(displayMap.values)
 		result.sort { $0.displayNumber < $1.displayNumber }
 
-		// Sort the Spaces within each Display by number
-		for i in result.indices {
-			result[i].spaces.sort { $0.workspace < $1.workspace }
-		}
-
 		// --- Add the Float section (windows the user deliberately floated) to each Display ---
-		// Use workspace = -2 as a dedicated section marker (the real workspace number is kept on each item)
+		// The real workspace number is kept on each item
 		for i in result.indices {
 			if let floatItems = userFloatItemsByScreen[result[i].screenID], !floatItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(workspace: -2, items: floatItems))
+				result[i].spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
 			}
 		}
 
 		// --- Add the System section (floating windows not registered to any workspace) to the end of each Display ---
 		// Since system-originated floating windows like the Settings app or dialogs aren't registered to a workspace,
-		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section (workspace = -1).
+		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section.
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 		let myPID = ProcessInfo.processInfo.processIdentifier
 		var systemFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
@@ -486,7 +481,7 @@ class WindowPaletteManager {
 				appName: window.app.localizedName ?? "Unknown App",
 				windowTitle: window.title,
 				appIcon: window.app.icon,
-				workspace: -1,
+				workspace: nil,
 				screenID: screenID
 			)
 			systemFloatItemsByScreen[screenID, default: []].append(item)
@@ -494,12 +489,11 @@ class WindowPaletteManager {
 
 		for i in result.indices {
 			if let systemFloatItems = systemFloatItemsByScreen[result[i].screenID], !systemFloatItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(workspace: -1, items: systemFloatItems))
+				result[i].spaces.append(WindowPaletteSection(kind: .system, items: systemFloatItems))
 			}
 		}
 
 		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
-		// Use workspace = -3 as a dedicated section marker
 		var hiddenItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
 		for record in HiddenWindowManager.shared.hiddenStack {
 			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
@@ -508,7 +502,7 @@ class WindowPaletteManager {
 				appName: windowInfo.app.localizedName ?? "Unknown App",
 				windowTitle: windowInfo.title,
 				appIcon: windowInfo.app.icon,
-				workspace: -3,
+				workspace: record.workspace,
 				screenID: record.screenID
 			)
 			hiddenItemsByScreen[record.screenID, default: []].append(item)
@@ -516,7 +510,7 @@ class WindowPaletteManager {
 
 		for i in result.indices {
 			if let hiddenItems = hiddenItemsByScreen[result[i].screenID], !hiddenItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(workspace: -3, items: hiddenItems))
+				result[i].spaces.append(WindowPaletteSection(kind: .hidden, items: hiddenItems))
 			}
 		}
 
@@ -532,9 +526,9 @@ class WindowPaletteManager {
 		let currentWS = workspaceManager.currentWorkspace(on: screen)
 
 		// Switch if it's on a different workspace
-		// (System section windows (workspace == -1) don't belong to a workspace, so they aren't switched)
-		if item.workspace != -1 && item.workspace != currentWS {
-			workspaceManager.switchWorkspace(to: item.workspace, on: screen)
+		// (System section windows don't belong to a workspace, so they aren't switched)
+		if let workspace = item.workspace, workspace != currentWS {
+			workspaceManager.switchWorkspace(to: workspace, on: screen)
 		}
 
 		// Focus the target window

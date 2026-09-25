@@ -449,13 +449,13 @@ class WorkspaceManager: ObservableObject {
 		let keptActive = keepingActive ? activeWorkspace[id] : nil
 
 		// Separate negative spaces from non-negative ones
-		// Negative spaces (-1, -2, ...) aren't reordered; keep them as they are
-		let negativeIDs = workspaces.keys.filter { $0 < 0 }.sorted()
+		// Negative spaces are ordered outward from 0 (-1, -2, ...)
+		let negativeIDs = workspaces.keys.filter { $0 < 0 }.sorted(by: >)
 		let nonNegativeIDs = workspaces.keys.filter { $0 >= 0 }.sorted()
 
 		// Build the mapping to the new ID
 		// Rule:
-		// 1. Leave negative spaces as-is without renumbering (delete if empty)
+		// 1. Compact negative spaces up to -1, -2, ... (they stay left of 0)
 		// 2. Compact non-negative spaces (0 and above) down to 0, 1, 2, ...
 		// 3. Always keep workspace 0 (the default)
 		// 4. Keep workspaces that still have windows
@@ -463,14 +463,18 @@ class WorkspaceManager: ObservableObject {
 		var mapping: [Int: Int] = [:]
 		var hasChanges = false
 
-		// Handle negative spaces (numbers stay unchanged)
+		// Handle negative spaces (compact up to -1, -2, ...)
+		var nextNegativeID = -1
 		for oldID in negativeIDs {
 			let windowCount = workspaces[oldID]?.count ?? 0
 			if windowCount > 0 || oldID == keptActive {
-				// Keep it if it has windows (don't renumber)
-				mapping[oldID] = oldID
+				if oldID != nextNegativeID {
+					hasChanges = true
+				}
+				mapping[oldID] = nextNegativeID
+				nextNegativeID -= 1
 			} else {
-				// Delete it if empty
+				// Marked for deletion (empty space)
 				hasChanges = true
 			}
 		}
@@ -530,11 +534,11 @@ class WorkspaceManager: ObservableObject {
 				activeWorkspace[id] = newActive
 			} else {
 				// When the spot this window was at has been deleted
-				// If it was in a negative space and got deleted, reset it to 0
-				// If it was in a positive space and got deleted, clamp it to the max value
+				// A deleted space hands over to the one that slid into its number, or to the
+				// innermost remaining space on its side (0 when no negative space is left)
 				activeWasDeleted = true
 				if currentActive < 0 {
-					activeWorkspace[id] = 0
+					activeWorkspace[id] = max(currentActive, nextNegativeID + 1)
 				} else {
 					let maxID = max(0, nextID - 1)
 					let newActive = min(currentActive, maxID)
