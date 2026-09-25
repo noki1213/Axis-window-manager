@@ -143,6 +143,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        workspaceManager.rememberTiledWindowsForRelaunch()
         // Bring every off-screen window back on screen
         restoreAllWindowsBeforeQuit()
         hotkeyManager.stop()
