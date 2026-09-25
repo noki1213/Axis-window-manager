@@ -441,10 +441,12 @@ class WorkspaceManager: ObservableObject {
 	    
 
 	    /// Delete empty workspaces and compact the numbering
+	    /// - Parameter keepingActive: keep the active workspace even when it's empty (right after switching into it)
 
-	    private func cleanupEmptyWorkspaces(on screen: NSScreen) {
+	    private func cleanupEmptyWorkspaces(on screen: NSScreen, keepingActive: Bool = false) {
 		let id = screenIdentifier(for: screen)
 		guard let workspaces = workspaceWindows[id] else { return }
+		let keptActive = keepingActive ? activeWorkspace[id] : nil
 
 		// Separate negative spaces from non-negative ones
 		// Negative spaces (-1, -2, ...) aren't reordered; keep them as they are
@@ -464,7 +466,7 @@ class WorkspaceManager: ObservableObject {
 		// Handle negative spaces (numbers stay unchanged)
 		for oldID in negativeIDs {
 			let windowCount = workspaces[oldID]?.count ?? 0
-			if windowCount > 0 {
+			if windowCount > 0 || oldID == keptActive {
 				// Keep it if it has windows (don't renumber)
 				mapping[oldID] = oldID
 			} else {
@@ -484,7 +486,7 @@ class WorkspaceManager: ObservableObject {
 			// Conditions to keep it:
 			// - It has windows in it
 			// - OR: it's space 0, and there isn't a single window across all non-negative spaces (at least one space is required)
-			if windowCount > 0 || (oldID == 0 && !hasAnyWindowsInNonNegative) {
+			if windowCount > 0 || oldID == keptActive || (oldID == 0 && !hasAnyWindowsInNonNegative) {
 				if oldID != nextID {
 					hasChanges = true
 				}
@@ -546,8 +548,9 @@ class WorkspaceManager: ObservableObject {
 			// Note: even if the number stays the same, the content can be swapped out by a delete-then-renumber
 			//       e.g. if space 1 is empty and gets deleted, and space 2 shifts down to 1,
 			//           the number stays 1 but the content changes to Xcode, so show/focus is needed
+			// A kept active workspace only got renumbered; its content is already on screen
 			let resolvedActive = activeWorkspace[id]!
-			if previousActive != resolvedActive || activeWasDeleted {
+			if keptActive == nil && (previousActive != resolvedActive || activeWasDeleted) {
 				showWindowsForWorkspace(resolvedActive, on: id)
 				focusFirstWindow(in: resolvedActive, on: id)
 			}
@@ -772,9 +775,14 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		// 7. Hide the old windows after a short delay (once the new windows have rendered on screen)
+		// Capture the IDs now: the cleanup below may renumber the workspaces before the delay ends
+		let oldWindowIDs = workspaceWindows[id]?[currentWS] ?? []
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-			self?.hideWindowsForWorkspace(currentWS, on: id)
+			self?.hideWindows(oldWindowIDs, on: id)
 		}
+
+		// Drop the workspaces left empty (including the one just left) so numbering stays contiguous
+		cleanupEmptyWorkspaces(on: screen, keepingActive: true)
 
 		// 8. Update the border and move the cursor to the center of the focused window
 		syncBorderAndCursor(to: focusedID)
@@ -848,10 +856,8 @@ class WorkspaceManager: ObservableObject {
 		}
 
 		// Switch workspaces immediately (the window stays visible since it's already on screen)
+		// The switch also drops the original workspace if it became empty
 		switchWorkspace(to: targetWS, on: screen, focusWindowID: windowID)
-
-		// Clean up once the original workspace becomes empty
-		cleanupEmptyWorkspaces(on: screen)
 	}
 
 	// MARK: - Hide Corner (the AeroSpace approach)
@@ -872,6 +878,12 @@ class WorkspaceManager: ObservableObject {
 	/// Move the given workspace's windows to the corner and hide them (the AeroSpace approach)
 	private func hideWindowsForWorkspace(_ workspace: Int, on screenID: ScreenIdentifier) {
 		guard let windowIDs = workspaceWindows[screenID]?[workspace] else { return }
+		hideWindows(windowIDs, on: screenID)
+	}
+
+	/// Move the given windows to the corner and hide them
+	private func hideWindows(_ windowIDs: Set<CGWindowID>, on screenID: ScreenIdentifier) {
+		guard !windowIDs.isEmpty else { return }
 
 		let corner = optimalHideCorner(for: screenID)
 		let allWindows = accessibilityManager.getAllWindows()
