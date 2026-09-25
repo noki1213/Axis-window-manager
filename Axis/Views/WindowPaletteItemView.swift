@@ -23,7 +23,7 @@ class WindowPaletteItemView: NSView {
 	/// The card's width
 	static let cardWidth: CGFloat = 120
 	/// The card's height
-	static let cardHeight: CGFloat = 84
+	static let cardHeight: CGFloat = 110
 
 	// MARK: - Init
 
@@ -61,8 +61,11 @@ class WindowPaletteItemView: NSView {
 		titleLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
 		titleLabel.textColor = NSColor.white.withAlphaComponent(0.6)
 		titleLabel.alignment = .center
-		titleLabel.lineBreakMode = .byTruncatingTail
-		titleLabel.maximumNumberOfLines = 1
+		// Wrap long titles over up to three lines, truncating only the last
+		titleLabel.lineBreakMode = .byWordWrapping
+		titleLabel.maximumNumberOfLines = 3
+		titleLabel.cell?.truncatesLastVisibleLine = true
+		titleLabel.preferredMaxLayoutWidth = Self.cardWidth - 8
 		addSubview(titleLabel)
 
 		// Auto Layout
