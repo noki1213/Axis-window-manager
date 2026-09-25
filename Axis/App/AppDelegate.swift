@@ -1281,7 +1281,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
             let allWindows = self.accessibilityManager.getAllWindows()
-            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
+            // A window that opened during the switch and is not registered yet is left out, so the
+            // next cycle still sees it as new and registers it; absorbing it here would leave it untiled
+            let onScreenWindows = allWindows.filter {
+                onScreenIDs.contains($0.id) && $0.shouldBeManaged()
+                    && (self.workspaceManager.isWindowInAnyWorkspace($0.id) || $0.shouldFloat())
+            }
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
