@@ -50,6 +50,8 @@ class WindowPalettePanel: NSPanel {
 
 	/// Data per Display
 	private var displays: [WindowPaletteDisplay] = []
+	/// Shared height for every card, fitted to the longest title
+	private var cardHeight: CGFloat = 0
 
 	/// The selected Display index
 	private var selectedDisplayIndex: Int = 0
@@ -161,6 +163,9 @@ class WindowPalettePanel: NSPanel {
 	/// Set the Display data and show the panel (with an appearance animation)
 	func showWithDisplays(_ newDisplays: [WindowPaletteDisplay], displayIndex: Int, spaceIndex: Int, itemIndex: Int) {
 		self.displays = newDisplays
+		self.cardHeight = WindowPaletteItemView.cardHeight(
+			forTitles: newDisplays.flatMap { $0.spaces.flatMap { $0.items.map(\.windowTitle) } }
+		)
 		self.selectedDisplayIndex = displayIndex
 		self.selectedSpaceIndex = spaceIndex
 		self.selectedItemIndex = itemIndex
@@ -284,7 +289,7 @@ class WindowPalettePanel: NSPanel {
 
 					NSLayoutConstraint.activate([
 						card.widthAnchor.constraint(equalToConstant: WindowPaletteItemView.cardWidth),
-						card.heightAnchor.constraint(equalToConstant: WindowPaletteItemView.cardHeight),
+						card.heightAnchor.constraint(equalToConstant: cardHeight),
 					])
 
 					cardRow.addArrangedSubview(card)
@@ -364,7 +369,7 @@ class WindowPalettePanel: NSPanel {
 		let panelWidth = min(maxDisplayRowWidth + panelPadding * 2, screen.frame.width)
 
 		// Panel height: the sum of the heights of all Display rows (height = total of all Display rows)
-		let singleRowHeight = displayTitleHeight + displayTitleSpacing + labelHeight + labelSpacing + WindowPaletteItemView.cardHeight
+		let singleRowHeight = displayTitleHeight + displayTitleSpacing + labelHeight + labelSpacing + cardHeight
 		var totalContentHeight = CGFloat(displays.count) * singleRowHeight
 		if displays.count > 1 {
 			// Since the stack spacing appears both above and below the 1px separator, count the spacing twice
