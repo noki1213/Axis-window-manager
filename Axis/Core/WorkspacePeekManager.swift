@@ -322,7 +322,7 @@ private class WorkspacePeekView: NSView {
 	///   - maxWidth: the max width available to this panel. Cards beyond it aren't laid out
 	private static func makeCard(workspace: Int, items: [WorkspacePeekManager.PeekItem], isLeft: Bool, maxWidth: CGFloat) -> NSView {
 		let itemWidth = WindowPaletteItemView.cardWidth
-		let itemHeight = WindowPaletteItemView.cardHeight
+		let itemHeight = WindowPaletteItemView.cardHeight(forTitles: items.map(\.windowTitle))
 
 		// Lay out only as many as fit within the width (drop whatever doesn't fit)
 		let usableWidth = max(itemWidth, maxWidth - cardPadding * 2)

@@ -22,8 +22,55 @@ class WindowPaletteItemView: NSView {
 
 	/// The card's width
 	static let cardWidth: CGFloat = 120
-	/// The card's height
-	static let cardHeight: CGFloat = 110
+	/// Padding above the icon, matched below the title
+	private static let verticalPadding: CGFloat = 10
+	private static let iconSize: CGFloat = 32
+	private static let iconToNameSpacing: CGFloat = 4
+	private static let nameToTitleSpacing: CGFloat = 1
+
+	/// The card height that fits the longest of the given titles.
+	/// Cards shown together share this height so their icons line up
+	/// and the space below the tallest title matches the space above the icon.
+	static func cardHeight(forTitles titles: [String]) -> CGFloat {
+		let nameLabel = NSTextField(labelWithString: "")
+		configureAppNameLabel(nameLabel)
+		nameLabel.stringValue = "A"
+		let nameHeight = ceil(nameLabel.fittingSize.height)
+
+		let titleLabel = NSTextField(labelWithString: "")
+		configureTitleLabel(titleLabel)
+		var titleHeight: CGFloat = 0
+		for title in titles.isEmpty ? [""] : titles {
+			titleLabel.stringValue = displayTitle(title)
+			titleHeight = max(titleHeight, ceil(titleLabel.fittingSize.height))
+		}
+
+		return verticalPadding + iconSize + iconToNameSpacing + nameHeight
+			+ nameToTitleSpacing + titleHeight + verticalPadding
+	}
+
+	private static func displayTitle(_ title: String) -> String {
+		title.isEmpty ? "No title" : title
+	}
+
+	private static func configureAppNameLabel(_ label: NSTextField) {
+		label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+		label.textColor = .white
+		label.alignment = .center
+		label.lineBreakMode = .byTruncatingTail
+		label.maximumNumberOfLines = 1
+	}
+
+	private static func configureTitleLabel(_ label: NSTextField) {
+		label.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+		label.textColor = NSColor.white.withAlphaComponent(0.6)
+		label.alignment = .center
+		// Wrap long titles over up to two lines, truncating only the last
+		label.lineBreakMode = .byWordWrapping
+		label.maximumNumberOfLines = 2
+		label.cell?.truncatesLastVisibleLine = true
+		label.preferredMaxLayoutWidth = cardWidth - 8
+	}
 
 	// MARK: - Init
 
@@ -49,40 +96,29 @@ class WindowPaletteItemView: NSView {
 
 		// App name (center-aligned)
 		appNameLabel.translatesAutoresizingMaskIntoConstraints = false
-		appNameLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-		appNameLabel.textColor = .white
-		appNameLabel.alignment = .center
-		appNameLabel.lineBreakMode = .byTruncatingTail
-		appNameLabel.maximumNumberOfLines = 1
+		Self.configureAppNameLabel(appNameLabel)
 		addSubview(appNameLabel)
 
 		// Window title (center-aligned, light color)
 		titleLabel.translatesAutoresizingMaskIntoConstraints = false
-		titleLabel.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-		titleLabel.textColor = NSColor.white.withAlphaComponent(0.6)
-		titleLabel.alignment = .center
-		// Wrap long titles over up to three lines, truncating only the last
-		titleLabel.lineBreakMode = .byWordWrapping
-		titleLabel.maximumNumberOfLines = 3
-		titleLabel.cell?.truncatesLastVisibleLine = true
-		titleLabel.preferredMaxLayoutWidth = Self.cardWidth - 8
+		Self.configureTitleLabel(titleLabel)
 		addSubview(titleLabel)
 
 		// Auto Layout
 		NSLayoutConstraint.activate([
 			// Icon: top center
-			iconImageView.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+			iconImageView.topAnchor.constraint(equalTo: topAnchor, constant: Self.verticalPadding),
 			iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
-			iconImageView.widthAnchor.constraint(equalToConstant: 32),
-			iconImageView.heightAnchor.constraint(equalToConstant: 32),
+			iconImageView.widthAnchor.constraint(equalToConstant: Self.iconSize),
+			iconImageView.heightAnchor.constraint(equalToConstant: Self.iconSize),
 
 			// App name: below the icon
-			appNameLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 4),
+			appNameLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: Self.iconToNameSpacing),
 			appNameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
 			appNameLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
 
 			// Title: below the app name
-			titleLabel.topAnchor.constraint(equalTo: appNameLabel.bottomAnchor, constant: 1),
+			titleLabel.topAnchor.constraint(equalTo: appNameLabel.bottomAnchor, constant: Self.nameToTitleSpacing),
 			titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
 			titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
 		])
@@ -94,6 +130,6 @@ class WindowPaletteItemView: NSView {
 	func configure(icon: NSImage?, appName: String, windowTitle: String) {
 		iconImageView.image = icon
 		appNameLabel.stringValue = appName
-		titleLabel.stringValue = windowTitle.isEmpty ? "No title" : windowTitle
+		titleLabel.stringValue = Self.displayTitle(windowTitle)
 	}
 }
