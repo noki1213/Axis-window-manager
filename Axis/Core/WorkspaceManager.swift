@@ -385,23 +385,7 @@ class WorkspaceManager: ObservableObject {
 	    	for (screenID, workspaces) in workspaceWindows {
 	    		result[screenID] = [:]
 	    		for (workspace, windowIDs) in workspaces {
-	    			if let snapshot = tilingSnapshots[screenID]?[workspace] {
-	    				// Lay out windows in the snapshot's column order (left-to-right, top-to-bottom)
-	    				let orderedByTiling = snapshot.columns.flatMap { $0 }
-	    				var ordered: [CGWindowID] = []
-	    				var remaining = windowIDs
-	    				for id in orderedByTiling {
-	    					if remaining.contains(id) {
-	    						ordered.append(id)
-	    						remaining.remove(id)
-	    					}
-	    				}
-	    				// Windows not included in the snapshot (e.g. Float) are appended at the end
-	    				ordered.append(contentsOf: remaining)
-	    				result[screenID]?[workspace] = ordered
-	    			} else {
-	    				result[screenID]?[workspace] = Array(windowIDs)
-	    			}
+	    			result[screenID]?[workspace] = orderedWindowIDs(windowIDs, on: screenID, workspace: workspace)
 	    		}
 	    	}
 
@@ -415,22 +399,27 @@ class WorkspaceManager: ObservableObject {
 	    	guard let windowIDs = workspaceWindows[id]?[workspace], !windowIDs.isEmpty else {
 	    		return []
 	    	}
+	    	return orderedWindowIDs(windowIDs, on: id, workspace: workspace)
+	    }
 
-	    	guard let snapshot = tilingSnapshots[id]?[workspace] else {
-	    		return Array(windowIDs)
+	    /// Orders a workspace's windows by column (left-to-right), then by row within each column (top-to-bottom).
+	    /// The active workspace reads the live layout from TilingEngine, since its saved snapshot is only refreshed on switch.
+	    /// Windows outside the layout (e.g. floating) follow at the end in a stable order.
+	    private func orderedWindowIDs(_ windowIDs: Set<CGWindowID>, on screenID: ScreenIdentifier, workspace: Int) -> [CGWindowID] {
+	    	let columns: [[CGWindowID]]
+	    	if activeWorkspace[screenID] == workspace, let live = tilingEngine.tiledWindows[screenID] {
+	    		columns = live.map { column in column.map { $0.id } }
+	    	} else {
+	    		columns = tilingSnapshots[screenID]?[workspace]?.columns ?? []
 	    	}
 
-	    	let orderedByTiling = snapshot.columns.flatMap { $0 }
 	    	var ordered: [CGWindowID] = []
 	    	var remaining = windowIDs
-	    	for wid in orderedByTiling {
-	    		if remaining.contains(wid) {
-	    			ordered.append(wid)
-	    			remaining.remove(wid)
-	    		}
+	    	for id in columns.joined() where remaining.contains(id) {
+	    		ordered.append(id)
+	    		remaining.remove(id)
 	    	}
-	    	// Windows not included in the snapshot (e.g. Float) are appended at the end
-	    	ordered.append(contentsOf: remaining)
+	    	ordered.append(contentsOf: remaining.sorted())
 	    	return ordered
 	    }
 
