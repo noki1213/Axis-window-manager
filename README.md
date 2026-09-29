@@ -8,6 +8,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 
 - Tiling Layout: Automatically arranges windows in a tiling layout.
 - Keyboard Navigation: Move focus between windows.
+- Focus Previous Window: Jump back to the window you were last working in with one key, across workspaces and monitors. Press it again to return.
 - Window Movement: Reorganize windows with keyboard shortcuts.
 - Step Move (Merge / Split): Move the focused window one step left/right — it splits out of a shared column into its own column, or merges into the neighboring column if it's already alone.
 - Float: Pull a window out of the tiling layout and position it freely.
@@ -43,6 +44,13 @@ If the key combination is already used by another action, a conflict warning wil
 - Move windows to a different position
 - Resize windows (shrink / expand)
 - Reset layout (single column per window)
+
+### Focus Previous Window
+- Jumps to the window you were working in before the current one, switching workspace or monitor if needed; pressing it again returns, so two windows can be toggled back and forth
+- A window counts once it has kept focus for 10 seconds (adjustable in Settings), so windows you only pass through while moving focus step by step are skipped
+- The window you jump from and the one you land on always count, however briefly you stayed
+- Only tiled and floating windows count: popups and panels that briefly take focus are ignored. Closed and hidden windows are skipped
+- Also reachable from other tools via `axis://focus-back`
 
 ### Step Move (Merge / Split)
 - Move the focused window one step left or right
@@ -178,6 +186,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 - タイリングレイアウト：ウィンドウを自動的にタイル状に配置します
 - キーボード操作：ウィンドウ間のフォーカス移動
+- 前のウィンドウに戻る：直前に作業していたウィンドウへ、ワークスペースやモニターをまたいでキー1つで戻ります。もう一度押すと元に戻ります
 - ウィンドウ移動：キーボードショートカットでウィンドウを再配置
 - 合流/分離（ステップ移動）：フォーカス中のウィンドウを左右へ1ステップ移動。複数ウィンドウの列にいれば抜けて隣に単独列として出て、単独列にいれば隣の列の末尾に合流します
 - Float：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
@@ -213,6 +222,13 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - ウィンドウの位置変更
 - ウィンドウのリサイズ（縮小・拡大）
 - レイアウトのリセット（各ウィンドウを1列に）
+
+### 前のウィンドウに戻る
+- いまのウィンドウの前に作業していたウィンドウへ飛ぶ。別のワークスペースやモニターにあれば切り替える。もう一度押すと戻るので、2つのウィンドウを行き来できる
+- 10秒（設定で変更可能）以上フォーカスしていたウィンドウだけを数えるので、フォーカスを1つずつ動かす途中で通っただけのウィンドウは飛ばされる
+- このキーで離れたウィンドウと着いたウィンドウは、いた時間に関係なく必ず数える
+- 数えるのはタイル・Float のウィンドウだけ。一瞬フォーカスを取るポップアップやパネルは無視する。閉じたウィンドウと隠したウィンドウは飛ばす
+- ほかのツールからは `axis://focus-back` で呼べる
 
 ### 合流/分離（ステップ移動）
 - フォーカス中のウィンドウを左右へ1ステップだけ移動

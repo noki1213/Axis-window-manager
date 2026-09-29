@@ -53,6 +53,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @ObservedObject private var accessibilityManager = AccessibilityManager.shared
     @ObservedObject private var ffm = FocusFollowsMouseManager.shared
+    @ObservedObject private var focusHistory = FocusHistoryManager.shared
     @State private var launchAtLogin = false
 
     var body: some View {
@@ -101,6 +102,19 @@ struct GeneralSettingsView: View {
                             Slider(value: $ffm.delayMs, in: 0...500, step: 10)
                         }
                     }
+                }
+                .padding(8)
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Focus Previous Window: remember after \(Int(focusHistory.settleSeconds)) s")
+                        Slider(value: $focusHistory.settleSeconds, in: 1...30, step: 1)
+                    }
+                    Text("Windows you only pass through while moving focus are skipped. Windows you jump from or to are always remembered.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .padding(8)
             }

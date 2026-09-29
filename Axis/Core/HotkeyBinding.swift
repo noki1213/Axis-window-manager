@@ -17,6 +17,7 @@ enum HotkeyAction: String, Codable, CaseIterable {
 	case focusRight
 	case focusUp
 	case focusDown
+	case focusBack
 	// Window movement
 	case moveWindowLeft
 	case moveWindowRight
@@ -154,6 +155,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.focusRight: "Focus Right",
 		.focusUp: "Focus Up",
 		.focusDown: "Focus Down",
+		.focusBack: "Focus Previous Window",
 		.moveWindowLeft: "Move Window Left",
 		.moveWindowRight: "Move Window Right",
 		.moveWindowUp: "Move Window Up",
@@ -185,6 +187,7 @@ struct HotkeyBinding: Codable, Identifiable {
 		.focusRight: .focusAndMove,
 		.focusUp: .focusAndMove,
 		.focusDown: .focusAndMove,
+		.focusBack: .focusAndMove,
 		.moveWindowLeft: .focusAndMove,
 		.moveWindowRight: .focusAndMove,
 		.moveWindowUp: .focusAndMove,
@@ -257,6 +260,7 @@ struct HotkeyBinding: Codable, Identifiable {
 			HotkeyBinding(action: .focusRight, keyCode: kVK_ANSI_L, modifiers: ctrlOpt),
 			HotkeyBinding(action: .focusUp,    keyCode: kVK_ANSI_I, modifiers: ctrlOpt),
 			HotkeyBinding(action: .focusDown,  keyCode: kVK_ANSI_K, modifiers: ctrlOpt),
+			HotkeyBinding(action: .focusBack,  keyCode: kVK_ANSI_A, modifiers: ctrlOpt),
 			// Window movement
 			HotkeyBinding(action: .moveWindowLeft,  keyCode: kVK_ANSI_J, modifiers: ctrlOptShift),
 			HotkeyBinding(action: .moveWindowRight, keyCode: kVK_ANSI_L, modifiers: ctrlOptShift),
