@@ -74,6 +74,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// axis://launch-aside?path=/Applications/Some.app
     ///     launch the app with its windows on an empty workspace, out of sight
+    /// axis://focus-back
+    ///     jump back to the previously focused window
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let components = URLComponents(string: string)
@@ -85,6 +87,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let path, !path.isEmpty else { return }
             let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             LaunchAsideManager.shared.launch(appAt: url, on: workspaceManager.focusedScreen())
+        case "focus-back":
+            FocusHistoryManager.shared.jumpBack()
         default:
             break
         }
@@ -692,6 +696,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let focused = focusedWindow {
             if workspaceManager.isWindowInAnyWorkspace(focused.id) {
                 lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
+                FocusHistoryManager.shared.focusChanged(to: focused.id)
             }
 
             // Detects when focus moves, within the same app, to a different window in a different workspace.

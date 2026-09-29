@@ -336,6 +336,10 @@ class HotkeyManager: ObservableObject {
 					}
 				}
 			}
+		case .focusBack:
+			DispatchQueue.main.async {
+				FocusHistoryManager.shared.jumpBack()
+			}
 
 		// MARK: Window movement
 		case .moveWindowLeft:
