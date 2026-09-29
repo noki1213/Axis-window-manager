@@ -121,18 +121,38 @@ class WindowPaletteManager {
 		selectedItemIndex = 0
 	}
 
-	/// Move up (wraps to the previous Display, clamping the Space/Item index within range)
+	/// Move up to the card above (falls back to the previous Display when the layout gives no neighbor)
 	func moveUp() {
 		guard !displays.isEmpty else { return }
+		if let target = panel?.verticalNeighbor(
+			displayIndex: selectedDisplayIndex,
+			spaceIndex: selectedSpaceIndex,
+			itemIndex: selectedItemIndex,
+			up: true
+		) {
+			(selectedDisplayIndex, selectedSpaceIndex, selectedItemIndex) = target
+			notifyPanel()
+			return
+		}
 		let displayCount = displays.count
 		selectedDisplayIndex = (selectedDisplayIndex - 1 + displayCount) % displayCount
 		clampSelectionToCurrentDisplay()
 		notifyPanel()
 	}
 
-	/// Move down (wraps to the next Display, clamping the Space/Item index within range)
+	/// Move down to the card below (falls back to the next Display when the layout gives no neighbor)
 	func moveDown() {
 		guard !displays.isEmpty else { return }
+		if let target = panel?.verticalNeighbor(
+			displayIndex: selectedDisplayIndex,
+			spaceIndex: selectedSpaceIndex,
+			itemIndex: selectedItemIndex,
+			up: false
+		) {
+			(selectedDisplayIndex, selectedSpaceIndex, selectedItemIndex) = target
+			notifyPanel()
+			return
+		}
 		let displayCount = displays.count
 		selectedDisplayIndex = (selectedDisplayIndex + 1) % displayCount
 		clampSelectionToCurrentDisplay()
