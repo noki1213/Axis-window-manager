@@ -72,6 +72,15 @@ class WindowPalettePanel: NSPanel {
 	/// The main vertical stack (lays out Display rows vertically)
 	private let mainVerticalStack = NSStackView()
 
+	/// Scrolls the content vertically when it is taller than the screen allows
+	private let scrollView = NSScrollView()
+
+	/// The scrolled document holding the stack and the highlight
+	private let documentView = FlippedView()
+
+	/// The widest the card area may grow before cards wrap onto the next line
+	private var maxContentWidth: CGFloat = 0
+
 	/// The visual effect view used for the background blur
 	private let visualEffectView = NSVisualEffectView()
 
@@ -83,6 +92,9 @@ class WindowPalettePanel: NSPanel {
 
 	/// The spacing between Display rows
 	private let displaySpacing: CGFloat = 16
+
+	/// The spacing between wrapped lines within a Display
+	private let lineSpacing: CGFloat = 12
 
 	/// The margin around the panel
 	private let panelPadding: CGFloat = 16
@@ -143,18 +155,38 @@ class WindowPalettePanel: NSPanel {
 		mainVerticalStack.spacing = displaySpacing
 		mainVerticalStack.translatesAutoresizingMaskIntoConstraints = false
 
-		// Add the main stack and highlight view to the visual effect view
-		visualEffectView.addSubview(mainVerticalStack)
-		visualEffectView.addSubview(highlightView, positioned: .below, relativeTo: mainVerticalStack)
+		// The highlight lives in the scrolled document so it moves with the cards
+		documentView.translatesAutoresizingMaskIntoConstraints = false
+		documentView.addSubview(mainVerticalStack)
+		documentView.addSubview(highlightView, positioned: .below, relativeTo: mainVerticalStack)
+
+		scrollView.drawsBackground = false
+		scrollView.hasVerticalScroller = true
+		scrollView.autohidesScrollers = true
+		scrollView.scrollerStyle = .overlay
+		scrollView.translatesAutoresizingMaskIntoConstraints = false
+		scrollView.documentView = documentView
+
+		visualEffectView.addSubview(scrollView)
 		visualEffectView.translatesAutoresizingMaskIntoConstraints = false
 
 		self.contentView = visualEffectView
 
+		let clipView = scrollView.contentView
 		NSLayoutConstraint.activate([
-			mainVerticalStack.topAnchor.constraint(equalTo: visualEffectView.topAnchor, constant: panelPadding),
-			mainVerticalStack.bottomAnchor.constraint(lessThanOrEqualTo: visualEffectView.bottomAnchor, constant: -panelPadding),
-			mainVerticalStack.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor, constant: panelPadding),
-			mainVerticalStack.trailingAnchor.constraint(lessThanOrEqualTo: visualEffectView.trailingAnchor, constant: -panelPadding),
+			scrollView.topAnchor.constraint(equalTo: visualEffectView.topAnchor),
+			scrollView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor),
+			scrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor),
+			scrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor),
+
+			documentView.topAnchor.constraint(equalTo: clipView.topAnchor),
+			documentView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+			documentView.widthAnchor.constraint(equalTo: clipView.widthAnchor),
+
+			mainVerticalStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: panelPadding),
+			mainVerticalStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -panelPadding),
+			mainVerticalStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: panelPadding),
+			mainVerticalStack.trailingAnchor.constraint(lessThanOrEqualTo: documentView.trailingAnchor, constant: -panelPadding),
 		])
 	}
 
@@ -169,6 +201,9 @@ class WindowPalettePanel: NSPanel {
 		self.selectedDisplayIndex = displayIndex
 		self.selectedSpaceIndex = spaceIndex
 		self.selectedItemIndex = itemIndex
+
+		let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
+		maxContentWidth = max(visible.width * 0.9 - panelPadding * 2, WindowPaletteItemView.cardWidth)
 
 		rebuildViews()
 		positionOnScreen()
@@ -253,12 +288,18 @@ class WindowPalettePanel: NSPanel {
 			displayTitle.translatesAutoresizingMaskIntoConstraints = false
 			displayRow.addArrangedSubview(displayTitle)
 
-			// Stack that lays Space sections out horizontally
-			let spacesRow = NSStackView()
-			spacesRow.orientation = .horizontal
-			spacesRow.alignment = .top
-			spacesRow.spacing = sectionSpacing
-			spacesRow.translatesAutoresizingMaskIntoConstraints = false
+			// Space sections flow left to right and wrap onto a new line when the screen is full
+			let linesStack = NSStackView()
+			linesStack.orientation = .vertical
+			linesStack.alignment = .leading
+			linesStack.spacing = lineSpacing
+			linesStack.translatesAutoresizingMaskIntoConstraints = false
+
+			let cardStride = WindowPaletteItemView.cardWidth + cardSpacing
+			let maxColumns = max(Int((maxContentWidth + cardSpacing) / cardStride), 1)
+
+			var currentLine: NSStackView?
+			var currentLineWidth: CGFloat = 0
 
 			var displayCardViews: [[WindowPaletteItemView]] = []
 
@@ -270,15 +311,27 @@ class WindowPalettePanel: NSPanel {
 				spaceLabel.textColor = NSColor.white.withAlphaComponent(0.4)
 				spaceLabel.translatesAutoresizingMaskIntoConstraints = false
 
-				// Stack that lays cards out horizontally
-				let cardRow = NSStackView()
-				cardRow.orientation = .horizontal
-				cardRow.spacing = cardSpacing
-				cardRow.translatesAutoresizingMaskIntoConstraints = false
+				// A section with more windows than fit on one line wraps its cards over several rows
+				let columns = min(space.items.count, maxColumns)
+				let cardRows = NSStackView()
+				cardRows.orientation = .vertical
+				cardRows.alignment = .leading
+				cardRows.spacing = cardSpacing
+				cardRows.translatesAutoresizingMaskIntoConstraints = false
 
 				var spaceCardViews: [WindowPaletteItemView] = []
+				var cardRow: NSStackView?
 
-				for item in space.items {
+				for (index, item) in space.items.enumerated() {
+					if index % max(columns, 1) == 0 {
+						let row = NSStackView()
+						row.orientation = .horizontal
+						row.spacing = cardSpacing
+						row.translatesAutoresizingMaskIntoConstraints = false
+						cardRows.addArrangedSubview(row)
+						cardRow = row
+					}
+
 					let card = WindowPaletteItemView()
 					card.translatesAutoresizingMaskIntoConstraints = false
 					card.configure(
@@ -292,13 +345,13 @@ class WindowPalettePanel: NSPanel {
 						card.heightAnchor.constraint(equalToConstant: cardHeight),
 					])
 
-					cardRow.addArrangedSubview(card)
+					cardRow?.addArrangedSubview(card)
 					spaceCardViews.append(card)
 				}
 
 				displayCardViews.append(spaceCardViews)
 
-				// Space section (label + card row)
+				// Space section (label + card rows)
 				let spaceSection = NSStackView()
 				spaceSection.orientation = .vertical
 				spaceSection.alignment = .leading
@@ -306,13 +359,31 @@ class WindowPalettePanel: NSPanel {
 				spaceSection.translatesAutoresizingMaskIntoConstraints = false
 
 				spaceSection.addArrangedSubview(spaceLabel)
-				spaceSection.addArrangedSubview(cardRow)
+				spaceSection.addArrangedSubview(cardRows)
 
-				spacesRow.addArrangedSubview(spaceSection)
+				let sectionWidth = columns > 0
+					? CGFloat(columns) * cardStride - cardSpacing
+					: spaceLabel.fittingSize.width
+
+				// Start a new line when this section would run past the screen
+				if let line = currentLine, currentLineWidth + sectionSpacing + sectionWidth <= maxContentWidth {
+					line.addArrangedSubview(spaceSection)
+					currentLineWidth += sectionSpacing + sectionWidth
+				} else {
+					let line = NSStackView()
+					line.orientation = .horizontal
+					line.alignment = .top
+					line.spacing = sectionSpacing
+					line.translatesAutoresizingMaskIntoConstraints = false
+					line.addArrangedSubview(spaceSection)
+					linesStack.addArrangedSubview(line)
+					currentLine = line
+					currentLineWidth = sectionWidth
+				}
 			}
 
 			cardViews.append(displayCardViews)
-			displayRow.addArrangedSubview(spacesRow)
+			displayRow.addArrangedSubview(linesStack)
 			mainVerticalStack.addArrangedSubview(displayRow)
 		}
 	}
@@ -335,60 +406,85 @@ class WindowPalettePanel: NSPanel {
 			}
 		}
 
-		guard let card = selectedCardView, let contentView = self.contentView else {
+		guard let card = selectedCardView else {
 			highlightView.isHidden = true
 			return
 		}
 
 		highlightView.isHidden = false
-		let targetFrame = card.convert(card.bounds, to: contentView)
+		let targetFrame = card.convert(card.bounds, to: documentView)
 		PopupAppearance.animateFrame(of: highlightView, to: targetFrame, animated: animated)
+		documentView.scrollToVisible(targetFrame.insetBy(dx: 0, dy: -panelPadding))
 	}
 
-	/// Center the panel on screen
+	/// The card directly above or below the given one, wrapping to the far edge.
+	/// Rows are matched by position, so this crosses wrapped lines and Displays alike.
+	func verticalNeighbor(displayIndex: Int, spaceIndex: Int, itemIndex: Int, up: Bool) -> (display: Int, space: Int, item: Int)? {
+		guard cardViews.indices.contains(displayIndex),
+		      cardViews[displayIndex].indices.contains(spaceIndex),
+		      cardViews[displayIndex][spaceIndex].indices.contains(itemIndex) else { return nil }
+
+		visualEffectView.layoutSubtreeIfNeeded()
+		let current = cardViews[displayIndex][spaceIndex][itemIndex].convert(
+			cardViews[displayIndex][spaceIndex][itemIndex].bounds, to: documentView
+		)
+
+		var candidates: [(index: (display: Int, space: Int, item: Int), frame: NSRect)] = []
+		for (d, displayCards) in cardViews.enumerated() {
+			for (sIdx, spaceCards) in displayCards.enumerated() {
+				for (i, card) in spaceCards.enumerated() {
+					candidates.append(((d, sIdx, i), card.convert(card.bounds, to: documentView)))
+				}
+			}
+		}
+
+		// The document is flipped, so "up" means a smaller y
+		let tolerance: CGFloat = 1
+		let inDirection = candidates.filter {
+			up ? $0.frame.midY < current.midY - tolerance : $0.frame.midY > current.midY + tolerance
+		}
+		let pool = inDirection.isEmpty
+			? candidates.filter { abs($0.frame.midY - current.midY) > tolerance }
+			: inDirection
+		guard !pool.isEmpty else { return nil }
+
+		// Nearest row in the direction of travel; when wrapping, the pool is every other row,
+		// so the same rule picks the far edge
+		let rowY = up ? pool.map(\.frame.midY).max()! : pool.map(\.frame.midY).min()!
+		let row = pool.filter { abs($0.frame.midY - rowY) <= tolerance }
+		return row.min(by: { abs($0.frame.midX - current.midX) < abs($1.frame.midX - current.midX) })?.index
+	}
+
+	/// Size the panel to its content and center it on screen
 	private func positionOnScreen() {
 		guard let screen = NSScreen.main else { return }
 
-		// Compute each Display row's width and take the widest one (width = the widest Display row)
-		var maxDisplayRowWidth: CGFloat = 0
-		for display in displays {
-			var rowWidth: CGFloat = 0
-			for (index, space) in display.spaces.enumerated() {
-				let cardCount = space.items.count
-				let spaceWidth = CGFloat(cardCount) * WindowPaletteItemView.cardWidth + CGFloat(max(cardCount - 1, 0)) * cardSpacing
-				rowWidth += spaceWidth
-				if index > 0 {
-					rowWidth += sectionSpacing
-				}
-			}
-			maxDisplayRowWidth = max(maxDisplayRowWidth, rowWidth)
-		}
-		if maxDisplayRowWidth == 0 {
-			maxDisplayRowWidth = WindowPaletteItemView.cardWidth
-		}
-		let panelWidth = min(maxDisplayRowWidth + panelPadding * 2, screen.frame.width)
+		visualEffectView.layoutSubtreeIfNeeded()
+		let contentSize = mainVerticalStack.fittingSize
+		let visible = screen.visibleFrame
 
-		// Panel height: the sum of the heights of all Display rows (height = total of all Display rows)
-		let singleRowHeight = displayTitleHeight + displayTitleSpacing + labelHeight + labelSpacing + cardHeight
-		var totalContentHeight = CGFloat(displays.count) * singleRowHeight
-		if displays.count > 1 {
-			// Since the stack spacing appears both above and below the 1px separator, count the spacing twice
-			totalContentHeight += CGFloat(displays.count - 1) * (displaySpacing * 2 + 1)
-		}
-		let panelHeight = min(totalContentHeight + panelPadding * 2, screen.frame.height * 0.85)
+		let panelWidth = min(max(contentSize.width, WindowPaletteItemView.cardWidth) + panelPadding * 2, visible.width)
+		let panelHeight = min(contentSize.height + panelPadding * 2, visible.height * 0.85)
 
 		let panelFrame = NSRect(
-			x: screen.frame.midX - panelWidth / 2,
-			y: screen.frame.midY - panelHeight / 2,
+			x: visible.midX - panelWidth / 2,
+			y: visible.midY - panelHeight / 2,
 			width: panelWidth,
 			height: panelHeight
 		)
 
 		self.setFrame(panelFrame, display: true)
+		visualEffectView.layoutSubtreeIfNeeded()
+		documentView.scroll(.zero)
 	}
 
 	// MARK: - NSPanel Override
 
 	override var canBecomeKey: Bool { false }
 	override var canBecomeMain: Bool { false }
+}
+
+/// A top-down coordinate space, so scrolled content starts at the top
+private final class FlippedView: NSView {
+	override var isFlipped: Bool { true }
 }
