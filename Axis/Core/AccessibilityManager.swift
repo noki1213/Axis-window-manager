@@ -284,6 +284,15 @@ class AccessibilityManager: ObservableObject {
         return windowIDs
     }
     
+    /// Get the IDs of every window that still exists, wherever it is (other Spaces, minimized,
+    /// moved out of sight). Read from the window server, so an app too busy to answer AX still counts
+    func getExistingWindowIDs() -> Set<CGWindowID> {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return Set(windowList.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+    }
+
     /// Get the focused window
     func getFocusedWindow() -> WindowInfo? {
         let perfStart = CFAbsoluteTimeGetCurrent()

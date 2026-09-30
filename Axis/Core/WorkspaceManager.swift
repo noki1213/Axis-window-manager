@@ -278,6 +278,32 @@ class WorkspaceManager: ObservableObject {
 		hideWindow(windowID)
 	}
 
+	/// Forget windows the window server no longer has. A window can go without its close being seen
+	/// (it floated, so it was never tracked, or its app was too busy to answer when it went), and it
+	/// would otherwise keep its workspace from ever counting as empty
+	private func dropVanishedWindows(on screenID: ScreenIdentifier) {
+		guard let workspaces = workspaceWindows[screenID] else { return }
+		let existing = accessibilityManager.getExistingWindowIDs()
+		guard !existing.isEmpty else { return }
+
+		for (workspace, windowIDs) in workspaces {
+			let vanished = windowIDs.subtracting(existing)
+			guard !vanished.isEmpty else { continue }
+			workspaceWindows[screenID]?[workspace]?.subtract(vanished)
+			for windowID in vanished {
+				savedFrames.removeValue(forKey: windowID)
+				floatWindowIDs.remove(windowID)
+			}
+			if var snapshot = tilingSnapshots[screenID]?[workspace] {
+				snapshot.columns = snapshot.columns.map { column in
+					column.filter { !vanished.contains($0) }
+				}.filter { !$0.isEmpty }
+				tilingSnapshots[screenID]?[workspace] = snapshot
+			}
+			PerfLog.event("workspace: dropped vanished \(vanished.sorted().map { "#\($0)" }.joined(separator: ", ")) from display\(screenID.displayID) ws\(workspace + 1)")
+		}
+	}
+
 	/// Check whether even a single window is registered across all spaces
 	/// - Returns: true if any space has a window
 	func hasAnyRegisteredWindows() -> Bool {
@@ -434,6 +460,7 @@ class WorkspaceManager: ObservableObject {
 
 	    private func cleanupEmptyWorkspaces(on screen: NSScreen, keepingActive: Bool = false) {
 		let id = screenIdentifier(for: screen)
+		dropVanishedWindows(on: id)
 		guard let workspaces = workspaceWindows[id] else { return }
 		let keptActive = keepingActive ? activeWorkspace[id] : nil
 
