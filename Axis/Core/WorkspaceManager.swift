@@ -1215,11 +1215,8 @@ class WorkspaceManager: ObservableObject {
 
 	// MARK: - Handling monitor connect/disconnect
 
-	/// Handling for when a monitor is disconnected
-	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
-	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
-
-		// Exit the special mode
+	/// Zen mode and the palette are laid out for the old screens, so leave them before the screens change
+	private func exitSpecialModesForScreenChange() {
 		if ZenModeManager.shared.isActive {
 			ZenModeManager.shared.toggle()
 		}
@@ -1228,6 +1225,52 @@ class WorkspaceManager: ObservableObject {
 			HotkeyManager.shared.currentMode = .normal
 			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
 		}
+	}
+
+	/// Handling for when one screen takes the place of another, e.g. closing the lid with an external
+	/// monitor attached while the built-in display was the only screen.
+	/// The workspaces move over unchanged; only the geometry is new.
+	func handleScreenReplaced(oldScreenID: ScreenIdentifier, newScreenID: ScreenIdentifier) {
+		exitSpecialModesForScreenChange()
+		isSwitching = true
+
+		workspaceWindows[newScreenID] = workspaceWindows.removeValue(forKey: oldScreenID) ?? [0: []]
+		tilingSnapshots[newScreenID] = tilingSnapshots.removeValue(forKey: oldScreenID)
+		let activeWS = activeWorkspace.removeValue(forKey: oldScreenID) ?? 0
+		activeWorkspace[newScreenID] = activeWS
+		tilingEngine.transferTilingState(from: oldScreenID, to: newScreenID)
+
+		// Saved data from an earlier disconnect points at the old screen as the place its workspaces went
+		disconnectedScreenData.removeAll()
+		resetClosedWindowsCache()
+
+		// macOS pulls windows off a vanished display onto the remaining one, so windows of
+		// inactive workspaces end up in view. Park them in the new screen's corner again.
+		// Saved frames are dropped first so a window AX misses here still counts as visible
+		// and gets parked by the stray-window sweep instead.
+		let workspaces = workspaceWindows[newScreenID] ?? [:]
+		for windowIDs in workspaces.values {
+			for windowID in windowIDs {
+				savedFrames.removeValue(forKey: windowID)
+			}
+		}
+		let inactiveIDs = workspaces
+			.filter { $0.key != activeWS }
+			.reduce(into: Set<CGWindowID>()) { $0.formUnion($1.value) }
+			.subtracting(floatWindowIDs)
+		hideWindows(inactiveIDs, on: newScreenID)
+
+		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+			self?.isSwitching = false
+		}
+	}
+
+	/// Handling for when a monitor is disconnected
+	/// Migrate the disconnected monitor's workspaces to the remaining monitors as new workspaces
+	func handleScreenDisconnected(removedScreenID: ScreenIdentifier) {
+		exitSpecialModesForScreenChange()
 		isSwitching = true
 
 		// Decide the destination monitor (normally the MacBook's built-in display)

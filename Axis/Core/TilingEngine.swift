@@ -1405,6 +1405,14 @@ class TilingEngine: ObservableObject {
         rowHeightRatios[screenID] = nil
     }
 
+    /// Hand a screen's columns and ratios over to the screen that replaced it.
+    /// Ratios are fractions of the screen width, so they carry over to a screen of another size.
+    func transferTilingState(from oldScreenID: ScreenIdentifier, to newScreenID: ScreenIdentifier) {
+        tiledWindows[newScreenID] = tiledWindows.removeValue(forKey: oldScreenID)
+        columnWidthRatios[newScreenID] = columnWidthRatios.removeValue(forKey: oldScreenID)
+        rowHeightRatios[newScreenID] = rowHeightRatios.removeValue(forKey: oldScreenID)
+    }
+
     /// Clean up data for a disconnected monitor
     func cleanupDisconnectedScreens() {
         let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })

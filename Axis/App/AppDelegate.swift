@@ -973,8 +973,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
-                    // Register to the monitor that had focus one cycle ago, if there is one
-                    if let screen = lastFocusedScreen {
+                    // Register to the monitor that had focus one cycle ago, if it is still connected
+                    if let lastScreen = lastFocusedScreen,
+                       let screen = workspaceManager.screen(for: ScreenIdentifier(from: lastScreen)) {
                         workspaceManager.registerWindow(newID, on: screen)
                         continue
                     }
@@ -1517,6 +1518,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logScreenLayout()
         defer { logScreenLayout() }
 
+        // Between the old display going away and the new one arriving there can be no screen at all.
+        // Keep the old list so the next notification sees one screen replacing the other.
+        guard !currentScreenIDs.isEmpty else {
+            PerfLog.event("screen change: no screens, waiting for the next change")
+            return
+        }
+
         guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
             PerfLog.event("screen change: same monitors, retile only")
             knownScreenIDs = currentScreenIDs
@@ -1537,15 +1545,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             tilingEngine.tileAllScreens()
             borderManager.updateBorder()
 
-            // Refresh window tracking
-            let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-            let allWindows = accessibilityManager.getAllWindows()
-            let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
-            lastWindowCount = onScreenWindows.count
-            lastWindowIDs = Set(onScreenWindows.map { $0.id })
+            refreshWindowTrackingAfterScreenChange()
 
             // Record window identities after the reset
             workspaceManager.refreshWindowIdentities()
+            return
+        }
+
+        // One screen took the place of another (closing the lid as an external monitor takes over,
+        // or the reverse): its workspaces move to the new screen as they are
+        if removedScreenIDs.count == 1, addedScreenIDs.count == 1,
+           let oldID = removedScreenIDs.first, let newID = addedScreenIDs.first {
+            PerfLog.event("screen change: screen replaced, moving workspaces \(oldID.displayID) -> \(newID.displayID)")
+            workspaceManager.handleScreenReplaced(oldScreenID: oldID, newScreenID: newID)
+            knownScreenIDs = currentScreenIDs
+            tilingEngine.cleanupDisconnectedScreens()
+            tilingEngine.tileAllScreens()
+            borderManager.updateBorder()
+            refreshWindowTrackingAfterScreenChange()
             return
         }
 
@@ -1569,13 +1586,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tilingEngine.tileAllScreens()
         borderManager.updateBorder()
 
-        // Update window tracking (filtered by shouldBeManaged() to stay consistent with checkForWindowChanges)
+        refreshWindowTrackingAfterScreenChange()
+    }
+
+    /// Update window tracking (filtered by shouldBeManaged() to stay consistent with checkForWindowChanges)
+    private func refreshWindowTrackingAfterScreenChange() {
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
         let allWindows = accessibilityManager.getAllWindows()
         let onScreenWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         lastWindowCount = onScreenWindows.count
         lastWindowIDs = Set(onScreenWindows.map { $0.id })
-
     }
 
     /// Show the workspace number in the menu bar
