@@ -1506,16 +1506,26 @@ class WorkspaceManager: ObservableObject {
 		// Whether anything changed
 		var hasChanges = false
 
+		// Windows that kept their ID stay where they are. Claim them all before matching
+		// the changed ones, or a vanished window could take over a live window that is
+		// registered in another workspace and leave it tiled in two workspaces at once.
+		let managedIDs = Set(managedWindows.map { $0.id })
+		for workspaces in workspaceWindows.values {
+			for windowIDs in workspaces.values {
+				for oldID in windowIDs where managedIDs.contains(oldID) {
+					usedNewIDs.insert(oldID)
+					idMapping[oldID] = oldID
+				}
+			}
+		}
+
 		// Re-match window IDs for each workspace
 		for (_, workspaces) in workspaceWindows {
 			for (
                 _, windowIDs) in workspaces {
 				for oldID in windowIDs {
-					// First check whether the same ID exists in the current window list
-					if managedWindows.contains(where: { $0.id == oldID }) {
-						// ID hasn't changed -> use it as is
-						usedNewIDs.insert(oldID)
-						idMapping[oldID] = oldID
+					// ID hasn't changed -> already claimed above
+					if managedIDs.contains(oldID) {
 						continue
 					}
 
