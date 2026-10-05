@@ -33,6 +33,9 @@ class TilingEngine: ObservableObject {
 
     private let accessibilityManager = AccessibilityManager.shared
 
+    /// Windows last kept in place while unreadable, per screen, so each hold is logged once
+    private var lastHeldWindowIDs: [ScreenIdentifier: Set<CGWindowID>] = [:]
+
     private init() {}
     
     // MARK: - Public Methods
@@ -62,7 +65,7 @@ class TilingEngine: ObservableObject {
             window.shouldBeManaged() && !window.shouldFloat() && workspaceIDs.contains(window.id) && !WorkspaceManager.shared.isFloating(window.id)
         }
 
-        let managedWindows: [WindowInfo]
+        var managedWindows: [WindowInfo]
         if onScreenIDs.isEmpty {
             managedWindows = candidateWindows
         } else {
@@ -85,6 +88,19 @@ class TilingEngine: ObservableObject {
                     let names = ghosts.map { "\($0.app.localizedName ?? "?")/\($0.title)" }.joined(separator: ", ")
                     PerfLog.logf("★ Excluding ghost windows (still present only in AX): %@", names)
                 }
+            }
+        }
+
+        // Keep tiled windows that dropped out of this scan only because their app couldn't be read
+        // (an app busy for a moment, or every app while the screen is locked). Dropping them would
+        // retile the rest over them, and nothing re-adds them once the app answers again
+        let heldWindows = unreadableTiledWindows(on: screenID, scanned: allWindows, workspaceIDs: workspaceIDs)
+        managedWindows += heldWindows
+        let heldIDs = Set(heldWindows.map { $0.id })
+        if heldIDs != (lastHeldWindowIDs[screenID] ?? []) {
+            lastHeldWindowIDs[screenID] = heldIDs
+            if !heldWindows.isEmpty {
+                PerfLog.event("tile: keeping unreadable \(PerfLog.describe(heldWindows)) on \(PerfLog.describe(screen))")
             }
         }
 
@@ -158,6 +174,22 @@ class TilingEngine: ObservableObject {
 
         // Re-raise floating windows to the front on every tiling pass (keeps them from getting hidden behind tiles)
         raiseFloatingWindows(on: screen)
+    }
+
+    /// Windows in the screen's current columns that are missing from the AX scan, belong to an app
+    /// that didn't fully answer it, and still exist in the window server. Returned as last seen
+    private func unreadableTiledWindows(on screenID: ScreenIdentifier, scanned: [WindowInfo], workspaceIDs: Set<CGWindowID>) -> [WindowInfo] {
+        let tiled = (tiledWindows[screenID] ?? []).flatMap { $0 }
+        guard !tiled.isEmpty else { return [] }
+        let scannedIDs = Set(scanned.map { $0.id })
+        let missing = tiled.filter {
+            !scannedIDs.contains($0.id) && workspaceIDs.contains($0.id) && !WorkspaceManager.shared.isFloating($0.id)
+        }
+        guard !missing.isEmpty else { return [] }
+        let unreadable = accessibilityManager.windowsPossiblyUnreadableInLastScan(Set(missing.map { $0.id }))
+        guard !unreadable.isEmpty else { return [] }
+        let existing = accessibilityManager.getExistingWindowIDs()
+        return missing.filter { unreadable.contains($0.id) && existing.contains($0.id) }
     }
 
     /// Raise the floating windows (explicitly marked Float, or shouldFloat) on the given screen to the front

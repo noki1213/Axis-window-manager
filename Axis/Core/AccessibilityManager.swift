@@ -95,20 +95,25 @@ class AccessibilityManager: ObservableObject {
         // Write results back by index to preserve the original app order
         var results = [[WindowInfo]](repeating: [], count: runningApps.count)
         var failedPIDs = Set<pid_t>()
+        var incompletePIDs = Set<pid_t>()
         if !runningApps.isEmpty {
             let lock = NSLock()
             DispatchQueue.concurrentPerform(iterations: runningApps.count) { index in
-                let appWindows = self.fetchWindows(for: runningApps[index])
+                let fetched = self.fetchWindows(for: runningApps[index])
+                let pid = runningApps[index].processIdentifier
                 lock.lock()
-                results[index] = appWindows ?? []
-                if appWindows == nil {
-                    failedPIDs.insert(runningApps[index].processIdentifier)
+                results[index] = fetched?.windows ?? []
+                if fetched == nil {
+                    failedPIDs.insert(pid)
+                } else if fetched?.complete == false {
+                    incompletePIDs.insert(pid)
                 }
                 lock.unlock()
             }
         }
         let windows = results.flatMap { $0 }
         lastScanFailedPIDs = failedPIDs
+        lastScanIncompletePIDs = incompletePIDs
         for window in windows {
             knownWindowOwners[window.id] = window.app.processIdentifier
         }
@@ -171,6 +176,11 @@ class AccessibilityManager: ObservableObject {
     /// Their windows are missing from that scan's result without having been closed
     private(set) var lastScanFailedPIDs: Set<pid_t> = []
 
+    /// Apps that answered the last full scan but returned windows whose details couldn't be read.
+    /// While the screen is locked every app answers this way. Some apps (Finder's desktop) always do,
+    /// so this alone doesn't mean a window was hidden from the scan
+    private(set) var lastScanIncompletePIDs: Set<pid_t> = []
+
     /// Owner process of every window seen in any scan so far, so a window that has since vanished
     /// from the AX list can still be traced back to its app
     private var knownWindowOwners: [CGWindowID: pid_t] = [:]
@@ -185,15 +195,28 @@ class AccessibilityManager: ObservableObject {
         }
     }
 
+    /// Of the given windows, those whose app failed to answer the last scan, or answered without
+    /// the details of every window. Pair this with a window-server existence check before treating
+    /// such a window as still open, since an incomplete answer can also come from an app that's fine
+    func windowsPossiblyUnreadableInLastScan(_ windowIDs: Set<CGWindowID>) -> Set<CGWindowID> {
+        let suspectPIDs = lastScanFailedPIDs.union(lastScanIncompletePIDs)
+        guard !suspectPIDs.isEmpty else { return [] }
+        return windowIDs.filter { id in
+            guard let pid = knownWindowOwners[id] else { return false }
+            return suspectPIDs.contains(pid)
+        }
+    }
+
     /// Get the windows of a specific application (an unreadable app is reported as having no windows)
     func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
-        return fetchWindows(for: app) ?? []
+        return fetchWindows(for: app)?.windows ?? []
     }
 
     /// Get the windows of a specific application.
     /// - Returns: nil when the app's window list could not be read at all (timeout etc.),
-    ///   as opposed to an empty array for an app that genuinely has no windows
-    private func fetchWindows(for app: NSRunningApplication) -> [WindowInfo]? {
+    ///   as opposed to an empty array for an app that genuinely has no windows.
+    ///   `complete` is false when some of the listed windows couldn't be turned into a WindowInfo
+    private func fetchWindows(for app: NSRunningApplication) -> (windows: [WindowInfo], complete: Bool)? {
         let perfStart = CFAbsoluteTimeGetCurrent()
         defer {
             let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
@@ -204,7 +227,7 @@ class AccessibilityManager: ObservableObject {
         }
 
         guard let axApp = AXUIElementCreateApplication(app.processIdentifier) as AXUIElement? else {
-            return []
+            return ([], true)
         }
         // Set a timeout so the main thread doesn't block on a slow-responding app
         // (too short and it misses slow apps' windows, breaking the layout)
@@ -233,7 +256,7 @@ class AccessibilityManager: ObservableObject {
                          app.localizedName ?? "?", axWindows.count, windows.count)
         }
 
-        return windows
+        return (windows, windows.count == axWindows.count)
     }
 
     /// Get the windows of the application with the given PID
