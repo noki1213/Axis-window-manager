@@ -202,6 +202,9 @@ struct WindowInfo: Identifiable, Equatable {
     
     /// Set the window's position
     func setPosition(_ position: CGPoint) {
+        // The window leaves the frame Axis last applied (hiding it in a corner, for example), so a later
+        // setFrame back to that frame must not be skipped as already in place
+        Self.lastAppliedFrames[id] = nil
         disableAnimations {
             applyPosition(position)
         }
