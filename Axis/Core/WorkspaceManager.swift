@@ -657,6 +657,7 @@ class WorkspaceManager: ObservableObject {
 
 
 		let allWindows = accessibilityManager.getAllWindows()
+		let unreadablePIDs = accessibilityManager.lastScanFailedPIDs
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
 		for screen in NSScreen.screens {
@@ -712,6 +713,52 @@ class WorkspaceManager: ObservableObject {
 
 		// Initial setup complete. From here on, this function does nothing thanks to the guard at the top
 		isInitialized = true
+
+		if !unreadablePIDs.isEmpty {
+			adoptWindowsMissedByInitialization(pids: unreadablePIDs)
+		}
+	}
+
+	/// Apps that couldn't answer during initialization had their windows left out of every workspace,
+	/// and since those windows were already on screen they never show up as new ones either.
+	/// Once such an app answers again, register its windows the way initialization would have
+	private func adoptWindowsMissedByInitialization(pids: Set<pid_t>, attempt: Int = 0) {
+		DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+			guard let self else { return }
+			guard !self.isSwitching else {
+				self.adoptWindowsMissedByInitialization(pids: pids, attempt: attempt)
+				return
+			}
+
+			self.accessibilityManager.invalidateWindowCache()
+			let allWindows = self.accessibilityManager.getAllWindows()
+			let stillUnreadable = pids.intersection(self.accessibilityManager.lastScanFailedPIDs)
+			let onScreenIDs = self.accessibilityManager.getOnScreenWindowIDs()
+
+			var screensToTile: [ScreenIdentifier: NSScreen] = [:]
+			for window in allWindows where pids.contains(window.app.processIdentifier) {
+				guard window.shouldBeManaged() && !window.shouldFloat() else { continue }
+				guard onScreenIDs.contains(window.id), !self.isWindowInAnyWorkspace(window.id) else { continue }
+
+				let center = window.centerInScreenCoordinates
+				let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+					?? NSScreen.screens.min(by: { s1, s2 in
+						hypot(center.x - s1.frame.midX, center.y - s1.frame.midY) <
+						hypot(center.x - s2.frame.midX, center.y - s2.frame.midY)
+					})
+				guard let screen else { continue }
+				self.registerWindow(window.id, on: screen)
+				screensToTile[self.screenIdentifier(for: screen)] = screen
+			}
+			for screen in screensToTile.values {
+				TilingEngine.shared.tile(on: screen)
+			}
+
+			// Keep waiting on apps that are still busy, but not forever
+			if !stillUnreadable.isEmpty && attempt < 9 {
+				self.adoptWindowsMissedByInitialization(pids: stillUnreadable, attempt: attempt + 1)
+			}
+		}
 	}
 
 	/// Force re-initialization if the state is broken (for the watchdog)
