@@ -128,6 +128,14 @@ nonisolated extension TrackingState {
 		}
 	}
 
+	/// Whether focus may be given to this window automatically: tracked, and its app is not marked
+	/// as not answering. Focusing such a window only makes the main thread wait for the app's
+	/// timeouts, so the code that picks a window to focus passes over these.
+	func isFocusable(_ id: WindowID) -> Bool {
+		guard let record = records[id] else { return false }
+		return apps[record.pid]?.unresponsiveSince == nil
+	}
+
 	/// The monitor, workspace and workspace number of a managed window. The monitor is the
 	/// workspace's host, never derived from the window's frame.
 	func location(_ id: WindowID) -> WindowLocation? {

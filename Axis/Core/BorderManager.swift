@@ -134,7 +134,10 @@ class BorderManager: ObservableObject {
     func updateBorderExpecting(windowID: CGWindowID, retryCount: Int = 0) {
         let focused = AccessibilityManager.shared.getFocusedWindow()
 
-        if focused?.id != windowID, retryCount < 6 {
+        // An app that does not answer is not retried: each read of it makes the main thread wait out the
+        // timeout, and the update below keeps the border where it is for such an app
+        let appAnswers = AccessibilityManager.shared.lastFocusedWindowError != .cannotComplete
+        if focused?.id != windowID, retryCount < 6, appAnswers {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 self.updateBorderExpecting(windowID: windowID, retryCount: retryCount + 1)
             }

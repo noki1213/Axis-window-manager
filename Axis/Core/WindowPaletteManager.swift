@@ -406,14 +406,12 @@ class WindowPaletteManager {
 
 		for windowID in state.records.keys.sorted() {
 			guard let record = state.record(windowID), record.workspace == nil else { continue }
-			// Only windows that would be on screen: shown, or out of sight for the palette (minimized
-			// and fullscreen ones are in other states)
-			guard record.visibility == .visible || record.visibility == .paletteHidden, record.observed.onScreen else { continue }
+			// Only windows that are on screen (the palette leaves these where they are; minimized and
+			// fullscreen ones are in other states)
+			guard record.visibility == .visible, record.observed.onScreen else { continue }
 
-			// The monitor the window is on, or was on before the palette took it out of sight (falls
-			// back to the main one if it can't be determined)
-			let shownFrame = record.visibility == .visible ? record.observed.frame : record.lastVisibleFrame ?? record.observed.frame
-			guard let monitor = shownFrame.flatMap({ state.monitorKey(for: $0) }) ?? state.primaryMonitor,
+			// The monitor the window is on (falls back to the main one if it can't be determined)
+			guard let monitor = record.observed.frame.flatMap({ state.monitorKey(for: $0) }) ?? state.primaryMonitor,
 				  let item = item(windowID, workspace: nil, monitor: monitor) else { continue }
 			systemFloatItemsByMonitor[monitor, default: []].append(item)
 		}

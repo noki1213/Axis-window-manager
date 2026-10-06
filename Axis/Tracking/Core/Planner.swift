@@ -71,6 +71,10 @@ nonisolated enum PlannerPolicy {
 	/// A minimize that has not shown after this long is requested again (each retry counts as a
 	/// fight).
 	static let minimizeRetryDelay: Time = 1
+	/// A window its app announced as destroyed is left alone this long: its close animation and the
+	/// scan that confirms the destroy are over by then, and a destroy that is never confirmed does
+	/// not leave the window unplaced for good.
+	static let closingGrace: Time = 2
 	/// The Zen window's read-back size differing from the request by more than this in either
 	/// dimension means it refused the size (fixed-size windows).
 	static let zenRefusalTolerance: CGFloat = 10
@@ -306,6 +310,12 @@ nonisolated extension TrackingState {
 
 	private mutating func plannerPlan(_ record: WindowRecord, _ pass: inout PlannerPass) {
 		let id = record.id
+		// A window its app announced as destroyed is closing: it animates away, and a write would only
+		// fight the animation. The scan that confirms the destroy retires it, or lists it again and
+		// the next plan puts it where it belongs.
+		if let since = record.liveness.pendingDestroySince, pass.now - since < PlannerPolicy.closingGrace {
+			return
+		}
 		// An app that does not answer keeps its windows' slots; writes to it wait until a scan of
 		// it succeeds again.
 		let writable = apps[record.pid]?.unresponsiveSince == nil
@@ -418,7 +428,9 @@ nonisolated extension TrackingState {
 		}
 
 		if plannerIsOutOfSight(id, observed: observed, target: target, monitors: pass.monitors) {
-			plannerEndFights(id)
+			// Out of sight does not end a run of fights: a window that comes back a moment after each
+			// park is still fighting. The run ends with the next correction that is over a fight
+			// window after the last write.
 			plannerState.parked[id] = record.visibility
 			plannerState.expected[id] = target
 			return

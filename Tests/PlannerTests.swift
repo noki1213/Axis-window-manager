@@ -191,6 +191,44 @@ private let comparisonTests: [TestCase] = [
 		expect(state.plan(snapshot: before, options: PlanOptions(isCommand: true), now: 1.02).isEmpty)
 	},
 
+	TestCase("a window its app announced as destroyed gets no writes until the doubt is cleared") {
+		var (state, _, _) = twoWorkspaces()
+		_ = state.plan(snapshot: settled(at: 1), options: PlanOptions(), now: 1)
+		// Window 2 shrinks while its close animation runs, and window 3 is seen on screen while it closes.
+		let closing = CGRect(x: 730, y: 40, width: 690, height: 840)
+		state.records[2]?.liveness.pendingDestroySince = 1.9
+		state.records[3]?.liveness.pendingDestroySince = 1.9
+		var plan = state.plan(snapshot: showing([1: leftSlot, 2: closing, 3: shownThree], pids: [3: 200], at: 2),
+			options: PlanOptions(), now: 2)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.log, [])
+
+		// A scan lists them again: they are corrected like any window off its place.
+		state.records[2]?.liveness.pendingDestroySince = nil
+		state.records[3]?.liveness.pendingDestroySince = nil
+		plan = state.plan(snapshot: showing([1: leftSlot, 2: closing, 3: shownThree], pids: [3: 200], at: 3),
+			options: PlanOptions(), now: 3)
+		expectEqual(plan.show, [PlanGroup(pid: 100, actions: [
+			setFrame(2, rightSlot, .enforce(observed: closing, expected: .visible), observed: closing),
+		])])
+		expectEqual(plan.hide.flatMap(\.actions).map(\.window), [3])
+		expectEqual(state.log.map(\.message), [
+			"enforce: App/W2#2 slot drift 730,40 690x840 vs 726,37 702x851; re-applying",
+			"enforce: Other/W3#3 found at 190,190 600x400, expected parked (workspaceInactive); re-parking",
+		])
+	},
+
+	TestCase("a destroy that is never confirmed does not leave the window unplaced for good") {
+		var (state, _, _) = twoWorkspaces()
+		_ = state.plan(snapshot: settled(at: 1), options: PlanOptions(), now: 1)
+		let away = CGRect(x: 730, y: 40, width: 690, height: 840)
+		state.records[2]?.liveness.pendingDestroySince = 2
+		let snapshot = { (time: Time) in showing([1: leftSlot, 2: away, 3: parkedThree], pids: [3: 200], at: time) }
+		expect(state.plan(snapshot: snapshot(3.9), options: PlanOptions(), now: 3.9).isEmpty)
+		let plan = state.plan(snapshot: snapshot(4), options: PlanOptions(), now: 4)
+		expectEqual(plan.actions.map(\.window), [2])
+	},
+
 ]
 
 // MARK: - Fights
@@ -229,6 +267,37 @@ private let fightTests: [TestCase] = [
 		expectEqual(state.ledger[1]?.fights, 0)
 		expectEqual(state.ledger[1]?.gaveUpUntil, nil)
 		expectEqual(state.plannerFollowUps(now: 32), [])
+	},
+
+	TestCase("a parked window that comes back after each park is given up on within a second") {
+		var (state, _, _) = twoWorkspaces()
+		_ = state.plan(snapshot: settled(at: 1), options: PlanOptions(), now: 1)
+
+		// The app puts window 3 back on screen a moment after every park, so the passes in between
+		// find it out of sight.
+		var parks: [Time] = []
+		var time: Time = 2
+		for step in 0..<12 {
+			let shown = step % 2 == 0
+			let plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot, 3: shown ? shownThree : parkedThree],
+				pids: [3: 200], at: time), options: PlanOptions(), now: time)
+			if !plan.isEmpty {
+				parks.append(time)
+				state.recordWrites(landed(plan), now: time + 0.005)
+			}
+			time += 0.05
+		}
+		expectEqual(parks.count, 3, "corrected at \(parks)")
+		expectEqual(state.log.filter { $0.message.hasPrefix("enforce: giving up") }.map(\.message),
+			["enforce: giving up on Other/W3#3 for 30s (3 fights)"])
+		expectEqual(state.ledger[3]?.gaveUpUntil, 2.3 + 30)
+
+		// Once the pause is over it is corrected again.
+		let plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot, 3: shownThree], pids: [3: 200], at: 40),
+			options: PlanOptions(), now: 40)
+		expectEqual(plan.actions.map(\.kind), [.park(parkPoint)])
+		expectEqual(state.ledger[3]?.fights, 0)
+		expectEqual(state.ledger[3]?.gaveUpUntil, nil)
 	},
 
 	TestCase("a window back in place ends its run of fights") {
@@ -281,6 +350,36 @@ private let parkTests: [TestCase] = [
 			options: PlanOptions(), now: 4.5)
 		expectEqual(plan.actions.map(\.kind), [.park(parkPoint)])
 		expectEqual(state.ledger[3]?.fights, 1)
+	},
+
+	TestCase("the palette parks the managed windows and writes nothing to an unmanaged one") {
+		var (state, _, _) = twoWorkspaces()
+		// An overlay no workspace owns, which refuses to move.
+		let overlay = CGRect(x: 415, y: 636, width: 640, height: 320)
+		state.testAddWindow(4, placement: .unmanaged, workspace: nil, pid: 300, app: "Overlay", frame: overlay)
+		let snapshot = showing([1: leftSlot, 2: rightSlot, 3: parkedThree, 4: overlay], pids: [3: 200, 4: 300], at: 1)
+		_ = state.plan(snapshot: snapshot, options: PlanOptions(), now: 1)
+
+		state.paletteBegin(now: 2)
+		state.normalize(now: 2)
+		var plan = state.plan(snapshot: snapshot, options: PlanOptions(isCommand: true), now: 2)
+		expectEqual(plan.show, [])
+		expectEqual(plan.hide, [PlanGroup(pid: 100, actions: [
+			park(1, .park(.paletteHidden), observed: leftSlot),
+			park(2, .park(.paletteHidden), observed: rightSlot),
+		])])
+		state.recordWrites(landed(plan), now: 2.01)
+
+		// Passes while the palette is open leave it alone.
+		for step in 1...5 {
+			let time = 2 + Time(step) * 0.1
+			plan = state.plan(snapshot: showing([1: CGRect(origin: parkPoint, size: leftSlot.size),
+				2: CGRect(origin: parkPoint, size: rightSlot.size), 3: parkedThree, 4: overlay], pids: [3: 200, 4: 300], at: time),
+				options: PlanOptions(), now: time)
+			expect(plan.isEmpty, "\(plan)")
+		}
+		expectEqual(state.records[4]?.visibility, .visible)
+		expectEqual(state.log.filter { $0.message.contains("Overlay") }, [])
 	},
 
 	TestCase("a window entering a parked state is parked in the hide phase without an enforcement line") {
@@ -522,6 +621,61 @@ private let appTests: [TestCase] = [
 		// Window 1 keeps the left half: the busy window's slot stays.
 		expectEqual(plan.show, [PlanGroup(pid: 100, actions: [setFrame(1, leftSlot, .layout, observed: away)])])
 		expectEqual(plan.hide.map(\.pid), [200])
+	},
+
+	TestCase("an app that did not answer a write is scanned again a second later and its windows are written once it answers") {
+		var (state, _, _) = twoWorkspaces()
+		state.apps[100] = AppState(pid: 100, name: "App")
+		_ = state.plan(snapshot: settled(at: 1), options: PlanOptions(), now: 1)
+
+		let away = CGRect(x: 100, y: 100, width: 300, height: 300)
+		var plan = state.plan(snapshot: showing([1: away, 2: rightSlot, 3: parkedThree], pids: [3: 200], at: 2),
+			options: PlanOptions(), now: 2)
+		expectEqual(plan.actions.map(\.window), [1])
+		// The write waits out its timeout.
+		state.recordWrites([WriteResult(window: 1, pid: 100, kind: .frame, target: leftSlot, error: AXErrorCode.cannotComplete)], now: 2.3)
+		expectEqual(state.apps[100]?.unresponsiveSince, 2.3)
+		expectEqual(state.followUps(now: 2.3).filter { $0.kind == .scan(100) },
+			[FollowUp(at: 3.3, kind: .scan(100), reason: "unreadable retry")])
+
+		// Until the scan its windows get no writes.
+		plan = state.plan(snapshot: showing([1: away, 2: rightSlot, 3: parkedThree], pids: [3: 200], at: 3),
+			options: PlanOptions(), now: 3)
+		expect(plan.isEmpty, "\(plan)")
+
+		// The scan finds the app answering: the window is put where it belongs in the same pass.
+		let listed = [WindowFacts(id: 1, pid: 100, title: "W1", frame: away), WindowFacts(id: 2, pid: 100, title: "W2", frame: rightSlot)]
+		state.ingestScan(pid: 100, result: .complete(listed), serverHas: [], now: 3.3)
+		expectEqual(state.apps[100]?.unresponsiveSince, nil)
+		expectEqual(state.followUps(now: 3.3).filter { $0.kind == .scan(100) }, [])
+		plan = state.plan(snapshot: showing([1: away, 2: rightSlot, 3: parkedThree], pids: [3: 200], at: 3.3),
+			options: PlanOptions(), now: 3.3)
+		expectEqual(plan.show, [PlanGroup(pid: 100, actions: [
+			setFrame(1, leftSlot, .enforce(observed: away, expected: .visible), observed: away),
+		])])
+	},
+
+	TestCase("rescans after writes the app keeps not answering come further apart, and an answered write starts over") {
+		var (state, _, _) = twoWorkspaces()
+		state.apps[100] = AppState(pid: 100, name: "App")
+		let failure = WriteResult(window: 1, pid: 100, kind: .frame, target: leftSlot, error: AXErrorCode.cannotComplete)
+		let listed = [WindowFacts(id: 1, pid: 100, title: "W1"), WindowFacts(id: 2, pid: 100, title: "W2")]
+		var now: Time = 10
+		var delays: [Time] = []
+		for _ in 0..<6 {
+			state.recordWrites([failure], now: now)
+			delays.append((state.apps[100]?.nextRetryAt ?? 0) - now)
+			// The app answers the scan but not the next write.
+			now = state.apps[100]?.nextRetryAt ?? now
+			state.ingestScan(pid: 100, result: .complete(listed), serverHas: [], now: now)
+			expectEqual(state.apps[100]?.unresponsiveSince, nil)
+		}
+		expectEqual(delays, [1, 2, 4, 5, 5, 5])
+
+		state.recordWrites([WriteResult(window: 1, pid: 100, kind: .frame, target: leftSlot, result: leftSlot)], now: now + 0.1)
+		expectEqual(state.apps[100]?.writeFailures, 0)
+		state.recordWrites([failure], now: now + 0.2)
+		expectEqual(state.apps[100]?.nextRetryAt, now + 1.2)
 	},
 
 	TestCase("a write the app could not complete marks it unresponsive and is not recorded") {

@@ -86,7 +86,9 @@ class FocusHistoryManager: ObservableObject {
 
 		// Closed windows are no longer tracked; hidden ones stay out of sight on purpose
 		history.removeAll { !workspaces.isTracked($0) }
-		guard let targetID = history.last(where: { $0 != leavingID && !HiddenWindowManager.shared.isHidden($0) }),
+		// Windows of an app that is not answering are passed over: focusing one only makes the main thread wait
+		let state = TrackingCoordinator.shared.state
+		guard let targetID = history.last(where: { $0 != leavingID && !HiddenWindowManager.shared.isHidden($0) && state.isFocusable($0) }),
 		      let target = TrackingCoordinator.shared.windowInfo(targetID)
 		else { return }
 		PerfLog.event("focus history: jump back to \(PerfLog.describe(target))")

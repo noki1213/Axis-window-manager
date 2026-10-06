@@ -64,6 +64,8 @@ final class TrackingCoordinator {
 	private var passCounter = 0
 	private var lastPassEndedAt: Time = -.infinity
 	private var passTimer: DispatchSourceTimer?
+	/// Runs the hide phase a command left for later (see `scheduleHidePhase`).
+	private var hidePhaseTimer: DispatchSourceTimer?
 	private var passRateWindowStart: Time = 0
 	private var passRateCount = 0
 	private var passRateLoggedAt: Time = -.infinity
@@ -148,6 +150,7 @@ final class TrackingCoordinator {
 		liftOnNextPass = false
 		barrierEpoch += 1
 		stopTimer(&missionControlTimer)
+		stopTimer(&hidePhaseTimer)
 		watchedWindows = []
 		watcherContext = nil
 		observerGaveUpLogged = []
@@ -212,10 +215,11 @@ final class TrackingCoordinator {
 		guard isRunning else { return }
 		isRunning = false
 		runID += 1
-		for timer in [passTimer, persistTimer, sampler, lockTimer, asleepTimer, missionControlTimer] {
+		for timer in [passTimer, hidePhaseTimer, persistTimer, sampler, lockTimer, asleepTimer, missionControlTimer] {
 			timer?.cancel()
 		}
 		passTimer = nil
+		hidePhaseTimer = nil
 		persistTimer = nil
 		sampler = nil
 		lockTimer = nil
@@ -989,7 +993,7 @@ final class TrackingCoordinator {
 	/// Runs a command on the state: `mutate` changes it, then the windows are observed and
 	/// normalized as at the end of a pass, the plan is executed and the outputs go out.
 	/// `delaysHidePhase`: windows leaving the screen go a moment later, so a workspace switch shows
-	/// the new windows before the old ones leave.
+	/// the new windows before the old ones leave. A timer of its own carries them out.
 	func perform(_ name: String, delaysHidePhase: Bool = false, _ mutate: (inout TrackingState) -> Void) {
 		guard isRunning else { return }
 		// Someone is using the Mac: a wake notification that never came does not keep commands
@@ -1008,6 +1012,39 @@ final class TrackingCoordinator {
 			state.ingestServer(snapshot)
 			state.normalize(now: now)
 			planAndExecute(snapshot, isCommand: true, includeHidePhase: !delaysHidePhase, now: now)
+			finishStep(now: now)
+		}
+		if delaysHidePhase {
+			scheduleHidePhase()
+		}
+	}
+
+	/// The hide phase a command left for later runs on a timer of its own, started by the command
+	/// before its caller goes on (to focus the new window, say). It does not wait for the passes: one
+	/// is often in flight, and with an app that does not answer it stays there for most of a second,
+	/// which would keep the old workspace on screen meanwhile. A pass that comes first plans the hide
+	/// phase itself and leaves nothing for the timer.
+	private func scheduleHidePhase() {
+		stopTimer(&hidePhaseTimer)
+		guard state.plannerState.hidePhaseDue != nil else { return }
+		let timer = DispatchSource.makeTimerSource(queue: .main)
+		timer.schedule(deadline: .now() + PlannerPolicy.hidePhaseDelay, leeway: .milliseconds(2))
+		timer.setEventHandler { [weak self] in
+			self?.hidePhaseTimerFired()
+		}
+		timer.resume()
+		hidePhaseTimer = timer
+	}
+
+	private func hidePhaseTimerFired() {
+		stopTimer(&hidePhaseTimer)
+		guard isRunning, state.plannerState.hidePhaseDue != nil else { return }
+		PerfLog.measure("tracking.hide phase", threshold: CoordinatorTiming.slowPass) {
+			let now = Self.uptime()
+			let snapshot = ServerProbe.onScreen(now: now)
+			state.ingestServer(snapshot)
+			state.normalize(now: now)
+			planAndExecute(snapshot, isCommand: false, includeHidePhase: true, now: now)
 			finishStep(now: now)
 		}
 	}

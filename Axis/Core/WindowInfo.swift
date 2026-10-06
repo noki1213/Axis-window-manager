@@ -70,6 +70,11 @@ struct WindowInfo: Identifiable, Equatable {
     
     /// A handle built from facts already known about the window, without asking the app.
     init(facts: WindowFacts, element: AXUIElement, app: NSRunningApplication) {
+        // Cached elements already carry this timeout; set again so a handle can never wait for the
+        // system default (seconds) on an app that does not answer. Same value as the cache's, so
+        // it does not shorten a call another thread has under way.
+        AXUIElementSetMessagingTimeout(element, ElementCache.messagingTimeout)
+
         self.id = facts.id
         self.axElement = element
         self.app = app
@@ -121,7 +126,9 @@ struct WindowInfo: Identifiable, Equatable {
     /// The actual implementation of setting focus (a single attempt)
     /// - Parameter useAppActivate: whether to focus via the conventional activate() instead of the private API.
     ///   Set to true on retry, as a fallback for environments where the private API doesn't work
-    private func applyFocusOnce(useAppActivate: Bool) {
+    /// - Returns: false when the app did not answer an AX call, so retrying would only wait for it again
+    @discardableResult
+    private func applyFocusOnce(useAppActivate: Bool) -> Bool {
         // Normally this raises the process and designates the window at the same time.
         // If this succeeds, the app never gets a chance to pick a different window of its own
         if !useAppActivate, setFrontProcessWithThisWindow() {
@@ -134,15 +141,19 @@ struct WindowInfo: Identifiable, Equatable {
                 AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
                 AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             }
-            return
+            return true
         }
 
         // A fallback: the conventional approach.
         // NSRunningApplication.activate() only "brings the app to the front" — it doesn't control which window
         // which window it shows is left up to the app, so for apps with multiple windows an unintended one
         // Shows briefly. This path is only hit when the one above isn't usable
-        AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        // These run on the main thread, and an app that does not answer the first call will not answer
+        // the next ones either: each would wait out the timeout, so the rest are skipped.
+        var answered = AXUIElementSetAttributeValue(axElement, kAXMainAttribute as CFString, kCFBooleanTrue) != .cannotComplete
+        if answered {
+            answered = AXUIElementSetAttributeValue(axElement, kAXFocusedAttribute as CFString, kCFBooleanTrue) != .cannotComplete
+        }
 
         if #available(macOS 14.0, *) {
             app.activate()
@@ -150,7 +161,10 @@ struct WindowInfo: Identifiable, Equatable {
             app.activate(options: [.activateIgnoringOtherApps])
         }
 
-        AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
+        if answered {
+            answered = AXUIElementPerformAction(axElement, kAXRaiseAction as CFString) != .cannotComplete
+        }
+        return answered
     }
 
     /// The most recent result of setFrontProcessWithThisWindow() (recorded so we only log when it changes after launch)
@@ -231,31 +245,60 @@ struct WindowInfo: Identifiable, Equatable {
     /// Do the first check as early as possible. Too slow and the window becomes visible, causing a flicker
     private static let focusRetryDelays: [TimeInterval] = [0.008, 0.016, 0.032, 0.064, 0.12]
 
+    /// The longest focus() goes on checking and retrying. This runs on the main thread, and every call
+    /// to an app that does not answer waits out the messaging timeout, so a window of such an app
+    /// must not keep the main thread busy for long (nothing else, like hiding the old workspace, runs meanwhile)
+    private static let focusVerifyBudget: TimeInterval = 0.5
+
+    /// With less of the budget left than this a read would only time out, so the check stops instead
+    private static let minimumReadBudget: TimeInterval = 0.02
+
     /// Confirm whether focus actually moved, and retry if it didn't
-    /// - Parameter focusStart: For measurement. The time of the first focus() call
+    /// Stops at the end of the time budget, and right away once the app does not answer
+    /// - Parameter focusStart: The time of the first focus() call. Also the start of the time budget
     private func verifyFocus(attempt: Int, focusStart: CFAbsoluteTime, claimedKeyPress: (label: String, start: CFAbsoluteTime)?) {
-        guard attempt < Self.focusRetryDelays.count else {
+        func giveUp(_ reason: String) {
             if PerfLog.enabled {
                 let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
-                PerfLog.logf("WindowInfo.verifyFocus: all 5 attempts failed (%.1fms)", elapsed * 1000)
+                PerfLog.logf("WindowInfo.verifyFocus: %@ (%.1fms)", reason, elapsed * 1000)
             }
             PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
+        }
+
+        guard attempt < Self.focusRetryDelays.count else {
+            giveUp("all \(Self.focusRetryDelays.count) attempts failed")
             return
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
+            // A read may not wait longer than what is left of the budget
+            let remaining = Self.focusVerifyBudget - (CFAbsoluteTimeGetCurrent() - focusStart)
+            guard remaining > Self.minimumReadBudget else {
+                giveUp("gave up, no confirmation within the time budget")
+                return
+            }
+
             // Do nothing if focus has already moved as intended
-            if AccessibilityManager.shared.getFocusedWindowID() == self.id {
+            switch AccessibilityManager.shared.readFocusedWindowID(timeout: min(0.3, remaining)) {
+            case .window(let focusedID) where focusedID == self.id:
                 if PerfLog.enabled {
                     let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
                     PerfLog.logf("WindowInfo.verifyFocus: succeeded on check %d (%.1fms)", attempt + 1, elapsed * 1000)
                 }
                 PerfLog.reportKeyPressToFocusConfirmed(claimedKeyPress)
                 return
+            case .timedOut:
+                giveUp("gave up, the app did not answer")
+                return
+            case .window, .noWindow:
+                break
             }
 
             // Some apps don't respond to raising via AX, so also call activate() from the second attempt onward
-            self.applyFocusOnce(useAppActivate: attempt >= 1)
+            guard self.applyFocusOnce(useAppActivate: attempt >= 1) else {
+                giveUp("gave up, the app did not answer")
+                return
+            }
             self.verifyFocus(attempt: attempt + 1, focusStart: focusStart, claimedKeyPress: claimedKeyPress)
         }
     }

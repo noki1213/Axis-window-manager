@@ -248,11 +248,17 @@ class WorkspaceManager {
 		}
 	}
 
-	/// Focus the first window shown in the workspace: the first tile, else a Float window
+	/// Focus the first window shown in the workspace: the first tile, else a Float window. Windows of
+	/// an app that is not answering are passed over: focusing one would keep the main thread waiting
+	/// for the app, and the old workspace's windows would stay on screen meanwhile.
 	/// - Returns: the ID of the window that was actually focused (nil if there was no target)
 	@discardableResult
 	private func focusFirstWindow(in workspace: WorkspaceID) -> CGWindowID? {
 		for id in state.orderedWindows(workspace) where !state.isHidden(id) {
+			guard state.isFocusable(id) else {
+				PerfLog.event("focus: skip \(state.describe(id)) (its app is not answering)")
+				continue
+			}
 			if let window = coordinator.windowInfo(id) {
 				window.focus()
 				return id

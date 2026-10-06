@@ -207,7 +207,9 @@ final class FocusFollower {
 		DispatchQueue.main.asyncAfter(deadline: .now() + Self.openedWindowFocusDelay) { [weak self] in
 			guard let self, self.openedWindows.remove(id) != nil else { return }
 			let state = self.coordinator.state
-			guard state.visibility(id) == .visible, state.focus.current != id,
+			// An app that stopped answering since the window opened is left alone: focusing it only
+			// makes the main thread wait for the app.
+			guard state.visibility(id) == .visible, state.focus.current != id, state.isFocusable(id),
 			      let window = self.coordinator.windowInfo(id)
 			else { return }
 			window.focus()
