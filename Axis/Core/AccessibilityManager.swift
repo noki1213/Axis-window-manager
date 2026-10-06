@@ -153,9 +153,9 @@ class AccessibilityManager: ObservableObject {
     }
     
     /// Get just the ID of the focused window
-    /// getFocusedWindow() queries several AX attributes — title, size, role, etc. — to build a WindowInfo
-    /// Polls AX about 8 times. Just to confirm whether focus actually moved to the target window
-    /// In this case, get just the ID to reduce the wait on the main thread
+    /// getFocusedWindow() queries several AX attributes (title, frame, subrole, ...) to build a WindowInfo.
+    /// Callers that only need to know which window has focus use this instead, to cut the wait
+    /// on the main thread
     func getFocusedWindowID() -> CGWindowID? {
         if case .window(let id) = readFocusedWindowID() {
             return id

@@ -45,7 +45,7 @@ let scenarioTests: [TestCase] = [
 
 	TestCase("timeoutDuringZen") {
 		var world = ScenarioWorld()
-		world.addApp(pid: 100, bundleID: "com.test.app", name: "Ghostty")
+		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")
 		world.addWindow(id: 1, pid: 100, frame: CGRect(x: 100, y: 100, width: 600, height: 600))
 		world.addWindow(id: 2, pid: 100, frame: CGRect(x: 800, y: 100, width: 600, height: 600))
 		world.runPass()
@@ -66,7 +66,7 @@ let scenarioTests: [TestCase] = [
 
 	TestCase("sporadicMissesDuringZen") {
 		var world = ScenarioWorld()
-		world.addApp(pid: 100, bundleID: "com.test.app", name: "Keysurf")
+		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")
 		world.addWindow(id: 1, pid: 100, frame: CGRect(x: 100, y: 100, width: 600, height: 600))
 		world.addWindow(id: 2, pid: 100, frame: CGRect(x: 800, y: 100, width: 600, height: 600))
 		world.runPass()
@@ -394,7 +394,7 @@ let scenarioTests: [TestCase] = [
 
 	TestCase("lateRelayoutReapplied") {
 		var world = ScenarioWorld()
-		world.addApp(pid: 100, bundleID: "com.test.app", name: "Ghostty")
+		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")
 		world.addWindow(id: 1, pid: 100, frame: CGRect(x: 100, y: 100, width: 600, height: 600))
 		world.runPass(planOptions: PlanOptions(), executePlan: true)
 

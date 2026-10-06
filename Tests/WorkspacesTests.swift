@@ -399,7 +399,7 @@ private let columnOperationTests: [TestCase] = [
 		expectEqual(inserted(.float, 0, into: base), base)
 	},
 
-	TestCase("column operations match the original tiling engine on random layouts") {
+	TestCase("column operations match a reference model on random layouts") {
 		var random = SeededGenerator(seed: 0x5EED_0001)
 		for round in 0..<400 {
 			let layout = randomLayout(&random)
@@ -1011,7 +1011,7 @@ private let helperTests: [TestCase] = [
 	},
 ]
 
-// MARK: - Reference: the original tiling engine's column operations
+// MARK: - Reference model of the column operations
 
 /// A column operation of the randomized comparisons.
 private enum ColumnOperation: CustomStringConvertible {
@@ -1059,8 +1059,8 @@ private func apply(_ operation: ColumnOperation, to state: inout TrackingState, 
 	}
 }
 
-/// The tiling engine's column operations transcribed onto window ids, on one screen with no
-/// neighbouring screen (so moves past an edge do nothing).
+/// A direct model of the column operations on window ids, on one screen with no neighbouring
+/// screen (so moves past an edge do nothing). The state's operations are checked against it.
 private struct ReferenceTiling {
 	var columns: [[WindowID]]
 	var widthRatios: [CGFloat]?
