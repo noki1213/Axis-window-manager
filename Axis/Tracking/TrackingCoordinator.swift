@@ -1083,7 +1083,8 @@ final class TrackingCoordinator {
 		if !plan.isEmpty {
 			WindowActuator.execute(plan)
 		}
-		WindowActuator.rescueOffScreenWindows(windows: windowInfos(state.records.keys.sorted()))
+		let onDesktop = state.records.values.filter { !$0.observed.isMinimized && !$0.observed.isFullscreen }
+		WindowActuator.rescueOffScreenWindows(windows: windowInfos(onDesktop.map(\.id).sorted()))
 	}
 
 	/// A handle for a tracked window, built from the cached element and the record without asking
@@ -1303,8 +1304,6 @@ private nonisolated struct PendingWork {
 		switch followUp.kind {
 		case .scan(let pid):
 			addScan(pid, due: followUp.at)
-		case .readWindow(let id):
-			addRead(id, due: followUp.at)
 		case .frames:
 			addFrames(due: followUp.at)
 		}

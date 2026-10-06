@@ -10,11 +10,6 @@
 import Foundation
 import CoreGraphics
 
-/// Visibility and session bookkeeping. Fields added here need default values.
-nonisolated struct VisibilityState: Equatable, Sendable {
-	init() {}
-}
-
 nonisolated extension TrackingState {
 	/// The state a record should be in now, highest precedence first.
 	func resolveVisibility(_ record: WindowRecord) -> Visibility {

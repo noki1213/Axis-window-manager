@@ -210,7 +210,7 @@ let topologyTests: [TestCase] = [
 	TestCase("duplicate UUID disambiguation assigns distinct keys in displayID order") {
 		let d1 = testDisplay("Dell", primary: true, displayID: 10)
 		let d2 = testDisplay("Dell", x: 1440, primary: false, displayID: 20)
-		let disambiguated = TopologyState.disambiguate([d1, d2])
+		let disambiguated = DisplayKeys.disambiguate([d1, d2])
 		expectEqual(disambiguated[0].key, testKey("Dell"))
 		expectEqual(disambiguated[1].key, MonitorKey(raw: "\(testKey("Dell").raw)#2"))
 

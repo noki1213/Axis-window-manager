@@ -70,12 +70,6 @@ class HotkeyManager: ObservableObject {
 		destroyEventTap()
 	}
 
-	/// Force a restart (for calling from the menu, etc.)
-	func restart() {
-		stop()
-		start()
-	}
-
 	/// Rebuild the lookup table from HotkeyStore
 	func reloadBindings() {
 		lookupTable = HotkeyStore.shared.buildLookupTable()

@@ -549,7 +549,6 @@ nonisolated extension TrackingState {
 			state.name = app.name
 		}
 		state.isHidden = app.isHidden
-		state.launchedAt = now
 		state.createdSignalPending = true
 		apps[app.pid] = state
 		livenessState.createdSignalAt[app.pid] = now
@@ -572,7 +571,6 @@ nonisolated extension TrackingState {
 	/// that takes focus while its hold lasts gets it handed back.
 	mutating func ingestFocus(_ facts: FocusFacts, now: Time) {
 		let frontmostChanged = facts.frontmostBundleID != focus.frontmostBundleID
-		focus.frontmostPID = facts.frontmostPID
 		focus.frontmostBundleID = facts.frontmostBundleID
 		admissionExpireLaunchAside(now: now)
 		var focusChanged = false
@@ -585,7 +583,6 @@ nonisolated extension TrackingState {
 					focus.previous = last
 				}
 				focus.current = newCurrent
-				focus.changedAt = now
 				emit(.focusChanged(from: oldCurrent, to: newCurrent))
 			}
 			if let newCurrent {

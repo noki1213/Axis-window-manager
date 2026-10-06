@@ -69,8 +69,6 @@ nonisolated enum AXErrorCode {
 	static let invalidUIElement: Int32 = -25202
 	/// The app did not answer in time (busy, hung, or the screen is locked).
 	static let cannotComplete: Int32 = -25204
-	static let apiDisabled: Int32 = -25211
-	static let noValue: Int32 = -25212
 }
 
 // MARK: - Facts gathered by the system layer (built off the main thread)
@@ -829,9 +827,7 @@ nonisolated struct FocusState: Equatable, Sendable {
 	var lastTrackedMonitor: MonitorKey?
 	/// The focused window before `current`. May name a retired window.
 	var previous: WindowID?
-	var frontmostPID: PID?
 	var frontmostBundleID: String?
-	var changedAt: Time?
 
 	init() {}
 }
@@ -843,13 +839,6 @@ nonisolated enum ScanStatus: Hashable, Sendable {
 	case incomplete
 	case failed(Int32)
 	case timedOut
-}
-
-/// Whether the app's Accessibility observer is in place.
-nonisolated enum ObserverState: Hashable, Sendable {
-	case none
-	case registered
-	case failed(retryAt: Time)
 }
 
 /// One running app.
@@ -864,12 +853,9 @@ nonisolated struct AppState: Equatable, Sendable {
 	var unresponsiveSince: Time?
 	/// A window-created signal arrived since the last scan, so new windows are `created`.
 	var createdSignalPending: Bool
-	var observerState: ObserverState
 	/// Unreadable-retry backoff step and when the next retry is due.
 	var retryCount: Int
 	var nextRetryAt: Time?
-	/// When the app launched; its window list is retried until a window shows up.
-	var launchedAt: Time?
 	/// Writes in a row the app did not answer; one it answers starts the count over. The longer the
 	/// run, the longer the wait before the rescan that lets its windows be written again, so an app
 	/// that reads fine but never takes a write is not retried at a fixed pace.
@@ -877,8 +863,8 @@ nonisolated struct AppState: Equatable, Sendable {
 
 	init(pid: PID, bundleID: String? = nil, name: String = "", isHidden: Bool = false,
 		lastScan: ScanStatus = .never, lastScanAt: Time? = nil, unresponsiveSince: Time? = nil,
-		createdSignalPending: Bool = false, observerState: ObserverState = .none,
-		retryCount: Int = 0, nextRetryAt: Time? = nil, launchedAt: Time? = nil, writeFailures: Int = 0) {
+		createdSignalPending: Bool = false,
+		retryCount: Int = 0, nextRetryAt: Time? = nil, writeFailures: Int = 0) {
 		self.pid = pid
 		self.bundleID = bundleID
 		self.name = name
@@ -887,10 +873,8 @@ nonisolated struct AppState: Equatable, Sendable {
 		self.lastScanAt = lastScanAt
 		self.unresponsiveSince = unresponsiveSince
 		self.createdSignalPending = createdSignalPending
-		self.observerState = observerState
 		self.retryCount = retryCount
 		self.nextRetryAt = nextRetryAt
-		self.launchedAt = launchedAt
 		self.writeFailures = writeFailures
 	}
 }
@@ -1150,8 +1134,6 @@ nonisolated struct FollowUp: Hashable, Sendable {
 	nonisolated enum Kind: Hashable, Sendable {
 		/// Rescan one app (confirm scan, unreadable retry, launch retry).
 		case scan(PID)
-		/// Re-read one window's facts.
-		case readWindow(WindowID)
 		/// Run a pass that only re-plans from a fresh snapshot (delayed hide phase, fight retry).
 		case frames
 	}
