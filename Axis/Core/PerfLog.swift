@@ -150,6 +150,11 @@ enum PerfLog {
 		"\(window.app.localizedName ?? "?")/\(window.title)#\(window.id)"
 	}
 
+	/// Short one-line description of a window record for event lines: "App/Title#id"
+	static func describe(_ record: WindowRecord) -> String {
+		"\(record.appName.isEmpty ? "?" : record.appName)/\(record.title)#\(record.id)"
+	}
+
 	/// Comma-separated descriptions of several windows
 	static func describe(_ windows: [WindowInfo]) -> String {
 		windows.map { describe($0) }.joined(separator: ", ")

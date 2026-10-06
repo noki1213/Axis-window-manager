@@ -53,6 +53,8 @@ nonisolated enum FocusReader {
 		guard let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else { return facts }
 
 		let element = unsafeDowncast(focusedRef, to: AXUIElement.self)
+		// Before any call on it: a fresh element would wait the system default for a hung app.
+		AXUIElementSetMessagingTimeout(element, ElementCache.messagingTimeout)
 		let (windowID, idError) = ElementCache.windowNumber(of: element)
 		guard idError == .success else {
 			// A messaging error means the answer is unknown; anything else means the focused
@@ -65,7 +67,6 @@ nonisolated enum FocusReader {
 		guard windowID != 0 else { return facts }
 
 		facts.focused = windowID
-		AXUIElementSetMessagingTimeout(element, ElementCache.messagingTimeout)
 		ElementCache.shared.store(window: windowID, pid: pid, element: element)
 		return facts
 	}
