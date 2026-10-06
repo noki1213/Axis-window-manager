@@ -59,10 +59,11 @@ class HiddenWindowManager {
 	}
 
 	/// Right after hiding it, if that workspace is still showing, move focus to the first remaining tile
+	/// (not one of an app that is not answering: focusing it only makes the main thread wait)
 	private func focusFirstRemainingWindow(in workspace: WorkspaceID) {
 		let state = coordinator.state
 		guard state.isActive(workspace),
-			  let firstID = state.layoutColumns(workspace).first?.first,
+			  let firstID = state.layoutColumns(workspace).joined().first(where: { state.isFocusable($0) }),
 			  let firstWindow = coordinator.windowInfo(firstID) else { return }
 		firstWindow.focus()
 		tilingEngine.moveCursorToWindow(firstWindow)

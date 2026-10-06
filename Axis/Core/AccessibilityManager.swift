@@ -157,28 +157,52 @@ class AccessibilityManager: ObservableObject {
     /// Polls AX about 8 times. Just to confirm whether focus actually moved to the target window
     /// In this case, get just the ID to reduce the wait on the main thread
     func getFocusedWindowID() -> CGWindowID? {
+        if case .window(let id) = readFocusedWindowID() {
+            return id
+        }
+        return nil
+    }
+
+    /// What a read of the focused window's ID found
+    enum FocusedWindowIDRead: Equatable {
+        case window(CGWindowID)
+        /// The app answered, but no window of it is focused (or the focused one has no window ID)
+        case noWindow
+        /// The app ran into the timeout. Asking again only makes the main thread wait for it again
+        case timedOut
+    }
+
+    /// Read the focused window's ID, saying whether the app answered
+    /// - Parameter timeout: the longest the read may block (in seconds)
+    func readFocusedWindowID(timeout: TimeInterval = 0.3) -> FocusedWindowIDRead {
         guard isAccessibilityEnabled,
               let frontApp = NSWorkspace.shared.frontmostApplication else {
-            return nil
+            return .noWindow
         }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        AXUIElementSetMessagingTimeout(axApp, 0.3)
+        AXUIElementSetMessagingTimeout(axApp, Float(timeout))
 
         var focusedWindowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
-              let axWindow = focusedWindowRef else {
-            return nil
+        let start = CFAbsoluteTimeGetCurrent()
+        let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
+        guard result == .success, let axWindow = focusedWindowRef else {
+            // The same error that comes back at once is the app refusing to answer; one that comes
+            // back after the whole timeout is an app that hangs
+            let ranIntoTimeout = result == .cannotComplete && CFAbsoluteTimeGetCurrent() - start >= timeout * 0.8
+            return ranIntoTimeout ? .timedOut : .noWindow
         }
 
         let element = axWindow as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, 0.3)
+        AXUIElementSetMessagingTimeout(element, Float(timeout))
 
         var windowID: CGWindowID = 0
-        guard _AXUIElementGetWindow(element, &windowID) == .success, windowID != 0 else {
-            return nil
+        let idResult = _AXUIElementGetWindow(element, &windowID)
+        if idResult == .success, windowID != 0 {
+            return .window(windowID)
         }
-        return windowID
+        let ranIntoTimeout = idResult == .cannotComplete && CFAbsoluteTimeGetCurrent() - start >= timeout * 0.8
+        return ranIntoTimeout ? .timedOut : .noWindow
     }
 }
 

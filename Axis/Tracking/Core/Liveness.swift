@@ -67,6 +67,10 @@ nonisolated enum LivenessTiming {
 	static let ghostConfirmOffsets: [TimeInterval] = [0.15, 0.35, 1]
 	/// Retry delays for an app that did not answer; the last one repeats.
 	static let unreadableBackoff: [TimeInterval] = [0.5, 1, 2, 4, 5]
+	/// Delays before the scan that follows a write the app did not answer, by how many such writes
+	/// came in a row; the last one repeats. The scan clears the app's unresponsive mark, so its windows
+	/// get their writes again without another event having to scan the app.
+	static let writeFailureRescan: [TimeInterval] = [1, 2, 4, 5]
 	/// Delays between rescans of a launching app that lists no window yet (the last one repeats),
 	/// and how long after the launch to keep trying.
 	static let launchBackoff: [TimeInterval] = [0.3, 1, 2, 4]
@@ -381,6 +385,21 @@ nonisolated extension TrackingState {
 		let delays = LivenessTiming.unreadableBackoff
 		app.nextRetryAt = now + delays[min(app.retryCount, delays.count - 1)]
 		app.retryCount += 1
+	}
+
+	/// The app did not answer a write. Its windows get no writes until a scan of it succeeds, and
+	/// that scan is asked for a moment later: the app is often only busy (a window still animating
+	/// after it was restored), and without the request it would stay marked until some other event
+	/// happened to scan it. An app already marked keeps its schedule.
+	mutating func livenessNoteWriteFailure(pid: PID, now: Time) {
+		var app = apps[pid] ?? AppState(pid: pid)
+		guard app.unresponsiveSince == nil else { return }
+		app.unresponsiveSince = now
+		let delays = LivenessTiming.writeFailureRescan
+		app.nextRetryAt = now + delays[min(app.writeFailures, delays.count - 1)]
+		app.writeFailures += 1
+		apps[pid] = app
+		log("enforce: app \(Self.livenessAppName(app)) did not answer a write; skipping its windows until it answers")
 	}
 
 	private mutating func livenessAdvanceLaunchRetry(_ pid: PID, listsWindow: Bool, now: Time) {
