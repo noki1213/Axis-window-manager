@@ -283,6 +283,13 @@ nonisolated enum Visibility: Hashable, Sendable {
 		}
 	}
 
+	/// Axis keeps the window out of sight: parked at a corner (inactive workspace, Zen mode, the
+	/// palette) or minimized by the hide command. The other states besides visible are the user's,
+	/// the app's or macOS's doing (minimized from the window, fullscreen, another Space, app hidden).
+	var isHiddenByAxis: Bool {
+		isParkedKind || self == .axisMinimized
+	}
+
 	var logName: String {
 		switch self {
 		case .visible: return "visible"

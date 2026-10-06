@@ -19,14 +19,11 @@ nonisolated struct PlanOptions: Equatable, Sendable {
 	var includeHidePhase: Bool
 	/// The left mouse button is down: enforcement writes wait for its release.
 	var mouseDown: Bool
-	/// Windows another component still positions itself while features move over to the core.
-	var externallyPositioned: Set<WindowID>
 
-	init(isCommand: Bool = false, includeHidePhase: Bool = true, mouseDown: Bool = false, externallyPositioned: Set<WindowID> = []) {
+	init(isCommand: Bool = false, includeHidePhase: Bool = true, mouseDown: Bool = false) {
 		self.isCommand = isCommand
 		self.includeHidePhase = includeHidePhase
 		self.mouseDown = mouseDown
-		self.externallyPositioned = externallyPositioned
 	}
 }
 
@@ -186,7 +183,7 @@ nonisolated extension TrackingState {
 			pass.slots = plannerLayOutActiveWorkspaces()
 		}
 		for id in records.keys.sorted() {
-			guard let record = records[id], !options.externallyPositioned.contains(id) else { continue }
+			guard let record = records[id] else { continue }
 			plannerPlan(record, &pass)
 		}
 		plannerState.hidePhaseDue = options.includeHidePhase ? nil : now + PlannerPolicy.hidePhaseDelay
@@ -199,14 +196,22 @@ nonisolated extension TrackingState {
 		plannerState.expected[id]
 	}
 
+	/// The slot the last layout kept free for the placement reservation, where the next window
+	/// goes: its preview. Nil while no reservation waits for a slot in the columns.
+	var reservedSlot: CGRect? {
+		plannerState.reservedSlot
+	}
+
 	/// Takes where the shown windows are in `snapshot` as their last visible frames (and floating
 	/// frames), as a plan does. Without window-move notifications the frames of the last plan can be
 	/// older than where the user has put a floating window since, and a command that takes it out of
-	/// sight would bring it back there. Windows with a floating-frame move still to come keep it.
+	/// sight would bring it back there. Windows with a floating-frame move still to come keep it,
+	/// and so does the Zen window, which goes back there when Zen ends.
 	mutating func noteVisibleFrames(snapshot: ServerSnapshot) {
 		let connected = monitorOrder.compactMap { monitors[$0] }
 		for id in records.keys.sorted() {
-			guard let record = records[id], record.visibility == .visible, !record.pendingFloatRestore else { continue }
+			guard let record = records[id], record.visibility == .visible, !record.pendingFloatRestore, zen?.focus != id
+			else { continue }
 			plannerNoteVisibleFrame(record, snapshot: snapshot, connected: connected)
 		}
 	}

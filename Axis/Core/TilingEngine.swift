@@ -57,6 +57,14 @@ class TilingEngine: ObservableObject {
             .filter { !$0.isEmpty }
     }
 
+    /// The tiles shown on `screen`, without the windows Zen mode keeps out of sight
+    private func columnsOutsideZen(on screen: NSScreen) -> [[WindowInfo]] {
+        let state = coordinator.state
+        return tiledColumns(on: screen)
+            .map { column in column.filter { state.visibility($0.id) != .zenHidden } }
+            .filter { !$0.isEmpty }
+    }
+
     /// The new gap and padding apply from the next layout on (Settings has a re-tile button)
     private func applyLayoutConfig() {
         let config = layoutConfig
@@ -68,14 +76,6 @@ class TilingEngine: ObservableObject {
     
     // MARK: - Public Methods
     
-    /// Lay the windows out again where they are off their slots or out of sight where they should be
-    /// parked, and bring floating windows on the given screen back over the tiles
-    /// - Parameter reason: what triggered this pass (defaults to the caller's function name)
-    func tile(on screen: NSScreen, reason: String = #function) {
-        coordinator.perform("retile") { _ in }
-        raiseFloatingWindows(on: screen)
-    }
-
     /// Raise the floating windows (marked Float, or floating on their own like dialogs) on the given
     /// screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.
@@ -135,8 +135,8 @@ class TilingEngine: ObservableObject {
             guard let record = state.record(entry.id), record.placement != .tiled,
                   var window = coordinator.windowInfo(entry.id) else { continue }
             window.frame = entry.bounds
-            // Windows currently evacuated (another workspace, the palette, Zen) are excluded
-            if let reason = WorkspaceManager.shared.hiddenReason(entry.id) { skip(window, reason); continue }
+            // Only windows shown where they are: not out of sight for another workspace, the palette or Zen
+            guard record.visibility == .visible else { skip(window, record.visibility.logName); continue }
             // Only raise genuine windows (standard windows or dialogs), not other kinds of panels
             let isGenuine = record.subrole == kAXStandardWindowSubrole as String || record.hasCloseButton
                 || record.subrole == kAXDialogSubrole as String || record.subrole == kAXSystemDialogSubrole as String
@@ -354,10 +354,7 @@ class TilingEngine: ObservableObject {
     /// Get the windows on the given screen, or on the neighboring screen in the given direction
     /// Used for focus movement in cursorMonitor mode
     private func getWindowOnScreen(_ screen: NSScreen, direction: Direction) -> WindowInfo? {
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let localColumns = tiledColumns(on: screen).map { col in
-            col.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let localColumns = columnsOutsideZen(on: screen)
 
         // If the screen itself has windows, pick from among them
         if !localColumns.isEmpty {
@@ -375,10 +372,7 @@ class TilingEngine: ObservableObject {
     /// Get the windows on the screen neighboring the given screen (NSScreen version)
     private func getWindowOnAdjacentScreen(from screen: NSScreen, direction: Direction) -> WindowInfo? {
         guard let targetScreen = getAdjacentScreen(from: screen, direction: direction) else { return nil }
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let columns = tiledColumns(on: targetScreen).map { col in
-            col.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let columns = columnsOutsideZen(on: targetScreen)
         guard !columns.isEmpty else { return nil }
         switch direction {
         case .left:  return columns.last?.first
@@ -447,97 +441,12 @@ class TilingEngine: ObservableObject {
         BorderManager.shared.updateBorder()
     }
 
-    /// Given each column's slot count, compute the frame (in AX coordinates) of every slot under an even split
-    func slotFrames(columnSizes: [Int], on screen: NSScreen) -> [[CGRect]] {
-        guard let key = WorkspaceManager.shared.monitorKey(for: screen),
-              let visibleFrame = coordinator.state.monitors[key]?.visibleFrame else { return [] }
-        return ColumnLayout.slotFrames(columnSizes: columnSizes, visibleFrame: visibleFrame, config: layoutConfig)
-    }
-
-    /// Pre-place the existing windows (provisional tiling) to clear space for the reserved slot, and return the reserved slot's CGRect (AX coordinates)
-    func applyReservedSlotLayout(columnIndex: Int, kind: PlacementReservationKind, on screen: NSScreen) -> CGRect? {
-        guard kind != .float else { return nil }
-
-        let columns = tiledColumns(on: screen)
-
-        // When there are zero windows (empty columns): reserve a single slot covering the whole screen
-        if columns.isEmpty || columns.allSatisfy({ $0.isEmpty }) {
-            let frames = slotFrames(columnSizes: [1], on: screen)
-            guard let reservedFrame = frames.first?.first else { return nil }
-            return reservedFrame
-        }
-
-        var columnSizes = columns.map { $0.count }
-        var reservedColIndex: Int = 0
-        var reservedRowIndex: Int = 0
-
-        switch kind {
-        case .aboveInColumn:
-            let clampedCol = min(max(columnIndex, 0), columns.count - 1)
-            columnSizes[clampedCol] += 1
-            reservedColIndex = clampedCol
-            reservedRowIndex = 0
-
-        case .belowInColumn:
-            let clampedCol = min(max(columnIndex, 0), columns.count - 1)
-            columnSizes[clampedCol] += 1
-            reservedColIndex = clampedCol
-            reservedRowIndex = columnSizes[clampedCol] - 1
-
-        case .newColumnLeft:
-            let insertCol = min(max(columnIndex, 0), columns.count)
-            columnSizes.insert(1, at: insertCol)
-            reservedColIndex = insertCol
-            reservedRowIndex = 0
-
-        case .newColumnRight:
-            let insertCol = min(max(columnIndex + 1, 0), columns.count)
-            columnSizes.insert(1, at: insertCol)
-            reservedColIndex = insertCol
-            reservedRowIndex = 0
-
-        case .float:
-            return nil
-        }
-
-        let frames = slotFrames(columnSizes: columnSizes, on: screen)
-        guard reservedColIndex < frames.count, reservedRowIndex < frames[reservedColIndex].count else { return nil }
-        let reservedFrame = frames[reservedColIndex][reservedRowIndex]
-
-        // Place existing real windows into the non-reserved slots
-        for (colIdx, column) in columns.enumerated() {
-            let targetColIdx: Int
-            switch kind {
-            case .aboveInColumn, .belowInColumn:
-                targetColIdx = colIdx
-            case .newColumnLeft, .newColumnRight:
-                targetColIdx = (colIdx >= reservedColIndex) ? colIdx + 1 : colIdx
-            case .float:
-                continue
-            }
-
-            for (rowIdx, window) in column.enumerated() {
-                let targetRowIdx: Int
-                if kind == .aboveInColumn && colIdx == reservedColIndex {
-                    targetRowIdx = rowIdx + 1
-                } else {
-                    targetRowIdx = rowIdx
-                }
-
-                guard targetColIdx < frames.count, targetRowIdx < frames[targetColIdx].count else { continue }
-                let newFrame = frames[targetColIdx][targetRowIdx]
-                window.setFrame(newFrame)
-            }
-        }
-
-        return reservedFrame
-    }
-
-    /// Put every window back into its own column (reset the vertical split)
+    /// Put every window back into its own column (reset the vertical split). Zen mode ends with it.
     func resetToSingleWindowColumns() {
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow),
               let workspace = activeWorkspace(on: screen) else {
+            ZenModeManager.shared.exit(reason: .layoutReset)
             return
         }
         coordinator.perform("reset layout") { state in
@@ -572,11 +481,7 @@ class TilingEngine: ObservableObject {
 
         let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
         guard let targetScreen = adjacentScreen else { return nil }
-        // The current workspace's tiles, without the windows Zen mode moved off-screen
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let columns = tiledColumns(on: targetScreen).map { column in
-            column.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let columns = columnsOutsideZen(on: targetScreen)
         guard !columns.isEmpty else { return nil }
 
         switch direction {

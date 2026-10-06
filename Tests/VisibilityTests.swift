@@ -661,6 +661,21 @@ private let sessionTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("zenExit sends a floating Zen window back to its floating frame, a tiled one to its slot") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testSetColumns(ws, [[1]])
+		state.testAddWindow(2, placement: .floating, workspace: ws)
+		state.zenEnter(2, now: 0)
+		state.zenExit(reason: .user)
+		expectEqual(state.records[2]?.pendingFloatRestore, true)
+
+		state.zenEnter(1, now: 1)
+		state.zenExit(reason: .user)
+		expectEqual(state.records[1]?.pendingFloatRestore, false)
+		expectInvariants(state)
+	},
+
 	TestCase("zenExit on workspace switch ends Zen") {
 		var state = testState()
 		let row = state.testSetRow("Main", negatives: 0, nonNegatives: 2, active: 0)

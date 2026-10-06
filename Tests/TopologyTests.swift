@@ -278,6 +278,23 @@ let topologyTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("the same displays keep the palette and Zen sessions") {
+		var state = testState([
+			testDisplay("Main", primary: true),
+			testDisplay("Ext", x: 1440, primary: false)
+		])
+		state.testSetColumns(state.testActive("Main"), [[1]])
+		state.zenEnter(1, now: 0.5)
+		expect(state.zen != nil)
+		state.reconcileTopology([testDisplay("Main", primary: true), testDisplay("Ext", x: 1440, primary: false)], now: 1.0)
+		expect(state.zen != nil)
+
+		state.paletteBegin(now: 1.5)
+		state.reconcileTopology([testDisplay("Main", primary: true), testDisplay("Ext", x: 1440, primary: false)], now: 2.0)
+		expect(state.palette != nil)
+		expectInvariants(state)
+	},
+
 	TestCase("reconcileTopology emits activeChanged at most once per monitor") {
 		var state = testState([
 			testDisplay("Main", primary: true),
