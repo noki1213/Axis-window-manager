@@ -88,7 +88,7 @@ class WorkspacePeekManager {
 	/// Called when a normal key input (i.e. a shortcut operation) occurs
 	/// Cancel the scheduled peek preview, and dismiss it immediately if it's currently showing.
 	/// Furthermore, don't show it again until the modifier key is released.
-	/// With a usage pattern of holding down the modifier key (a layer key on cornix) while continuing to operate,
+	/// With a usage pattern of holding down the modifier key (for example a layer key on a programmable keyboard) while continuing to operate,
 	/// Because the peek preview popping up every time your hand pauses gets in the way
 	func cancelDueToKeyPress() {
 		cancelPendingShow()

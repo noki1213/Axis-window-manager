@@ -651,7 +651,7 @@ private let launchAndSignalTests: [TestCase] = [
 		state.livenessNoteLaunched(app, now: 10.0)
 
 		expectEqual(state.apps[100]?.createdSignalPending, true)
-		expectEqual(state.apps[100]?.launchedAt, 10.0)
+		expectEqual(state.livenessState.launchRetries[100]?.launchedAt, 10.0)
 		expectEqual(state.livenessState.launchRetries[100]?.attempts, 0)
 		let followUps = state.livenessFollowUps(now: 10.0)
 		expect(followUps.contains { $0.reason == "launch retry" })

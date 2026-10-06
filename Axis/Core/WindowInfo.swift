@@ -8,8 +8,8 @@
 import AppKit
 import ApplicationServices
 
-/// A handle on a window for the features: its facts, focus, raise. Moving, resizing and minimizing
-/// windows go through the tracking state's plans.
+/// A handle on a window for the features: its facts, focus, bringing it to the front. Moving,
+/// resizing and minimizing windows go through the tracking state's plans.
 struct WindowInfo: Identifiable, Equatable {
     let id: CGWindowID
     let axElement: AXUIElement
@@ -17,12 +17,9 @@ struct WindowInfo: Identifiable, Equatable {
     
     var title: String
     var frame: CGRect
-    var isMinimized: Bool
-    var isFullscreen: Bool
 
     // The kind of window (standard window, dialog, floating panel, ...)
     var subrole: String?
-    var role: String?
 
     /// Whether it has a close button (used to supplement standard-window detection)
     var hasCloseButton: Bool
@@ -51,15 +48,8 @@ struct WindowInfo: Identifiable, Equatable {
         
         // Get the frame
         self.frame = Self.getFrame(from: axElement) ?? .zero
-        
-        // Minimized state
-        self.isMinimized = Self.getBool(from: axElement, attribute: kAXMinimizedAttribute) ?? false
-        
-        // Fullscreen state
-        self.isFullscreen = Self.getBool(from: axElement, attribute: "AXFullScreen") ?? false
 
-        // Role / Subrole
-        self.role = Self.getString(from: axElement, attribute: kAXRoleAttribute)
+        // Subrole
         self.subrole = Self.getString(from: axElement, attribute: kAXSubroleAttribute)
 
         // Whether it has a close button (used to detect windows like PowerPoint's with a non-standard subrole)
@@ -80,9 +70,6 @@ struct WindowInfo: Identifiable, Equatable {
         self.app = app
         self.title = facts.title
         self.frame = facts.frame
-        self.isMinimized = facts.isMinimized
-        self.isFullscreen = facts.isFullscreen
-        self.role = facts.role
         self.subrole = facts.subrole
         self.hasCloseButton = facts.hasCloseButton
     }
@@ -301,12 +288,6 @@ struct WindowInfo: Identifiable, Equatable {
             }
             self.verifyFocus(attempt: attempt + 1, focusStart: focusStart, claimedKeyPress: claimedKeyPress)
         }
-    }
-
-    /// Raise the window to the front (without moving focus)
-    /// Used to keep floating windows from getting hidden behind the tiles
-    func raise() {
-        AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
     }
 
     /// Update (re-fetch) the current frame

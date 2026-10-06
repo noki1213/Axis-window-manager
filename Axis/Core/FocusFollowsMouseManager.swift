@@ -264,7 +264,7 @@ class FocusFollowsMouseManager: ObservableObject {
 				// Map it to the AX WindowInfo.
 				// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
 				// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
-				// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
+				// Searching further back here would let focus jump to the tile underneath
 				let appWindows = PerfLog.measure("FFM.topmostWindowAt/getWindowsForPID", threshold: 0.005) {
 					AccessibilityManager.shared.getWindows(forPID: pid)
 				}

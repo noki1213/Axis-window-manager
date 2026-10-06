@@ -417,16 +417,6 @@ nonisolated extension TrackingState {
 		)
 	}
 
-	/// Encodes the current tracking state into serialized JSON data.
-	func encodePersistence() throws -> Data {
-		try snapshot().encode()
-	}
-
-	/// Decodes a persistence snapshot from JSON data.
-	static func decodePersistence(from data: Data) throws -> PersistenceSnapshot {
-		try PersistenceSnapshot.decode(from: data)
-	}
-
 	/// The snapshot to write now, nil when its layout is the one last written or loaded.
 	mutating func persistenceTakeSnapshot() -> PersistenceSnapshot? {
 		let current = snapshot()
@@ -764,25 +754,5 @@ nonisolated extension TrackingState {
 			monitor.activeBeforeHosting = monitor.activeBeforeHosting.map { renamed[$0] ?? $0 }
 			monitors[key] = monitor
 		}
-	}
-
-	/// Overload accepting an app lookup table.
-	mutating func applyPersistence(
-		_ snapshot: PersistenceSnapshot,
-		windows: [WindowFacts],
-		apps: [PID: AppFacts],
-		now: Time = 0
-	) {
-		applyPersistence(snapshot, windows: windows, apps: Array(apps.values), now: now)
-	}
-
-	/// Convenience alias for applying persistence.
-	mutating func apply(
-		_ snapshot: PersistenceSnapshot,
-		windows: [WindowFacts] = [],
-		apps: [AppFacts] = [],
-		now: Time = 0
-	) {
-		applyPersistence(snapshot, windows: windows, apps: apps, now: now)
 	}
 }

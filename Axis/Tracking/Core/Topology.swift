@@ -40,10 +40,8 @@ nonisolated struct TopologyChange: Equatable, Sendable {
 	}
 }
 
-/// Topology bookkeeping. Fields added here need default values.
-nonisolated struct TopologyState: Equatable, Sendable {
-	init() {}
-
+/// Keys of displays that report the same UUID.
+nonisolated enum DisplayKeys {
 	/// Disambiguates displays that report the same UUID: the one with the lowest display ID keeps
 	/// the plain key, and the others get "#2", "#3", ... in display-ID order.
 	static func disambiguate(_ displays: [DisplayFacts]) -> [DisplayFacts] {
@@ -94,7 +92,7 @@ nonisolated extension TrackingState {
 			}
 		}
 
-		let uniqueDisplays = TopologyState.disambiguate(displays)
+		let uniqueDisplays = DisplayKeys.disambiguate(displays)
 		let oldOrder = monitorOrder
 		let oldMonitors = monitors
 		let oldKeys = Set(oldMonitors.keys)

@@ -13,9 +13,6 @@ class WindowPaletteItemView: NSView {
 
 	// MARK: - Properties
 
-	/// Whether this card is selected (highlighted)
-	var isSelected: Bool = false
-
 	private let iconImageView = NSImageView()
 	private let appNameLabel = NSTextField(labelWithString: "")
 	private let titleLabel = NSTextField(labelWithString: "")

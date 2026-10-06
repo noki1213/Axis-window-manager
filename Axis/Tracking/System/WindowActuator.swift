@@ -45,12 +45,6 @@ enum WindowActuator {
 		return results
 	}
 
-	/// Overload supporting labeled plan argument.
-	@discardableResult
-	static func execute(plan: Plan) -> [WriteResult] {
-		execute(plan)
-	}
-
 	// MARK: - Application Group Execution
 
 	/// Executes all actions for a single application group while temporarily disabling animations.
@@ -93,7 +87,7 @@ enum WindowActuator {
 			if unresponsivePIDs.contains(pid) {
 				break
 			}
-			let result = executeAction(action, appElement: appElement)
+			let result = executeAction(action)
 			results.append(result)
 			if result.error == AXErrorCode.cannotComplete {
 				unresponsivePIDs.insert(pid)
@@ -126,7 +120,7 @@ enum WindowActuator {
 	// MARK: - Action Execution
 
 	/// Executes a single plan action.
-	private static func executeAction(_ action: PlanAction, appElement: AXUIElement) -> WriteResult {
+	private static func executeAction(_ action: PlanAction) -> WriteResult {
 		guard let element = ElementCache.shared.windowElement(action.window) else {
 			let target = targetRect(for: action.kind, observed: action.observed)
 			return WriteResult(
@@ -299,13 +293,13 @@ enum WindowActuator {
 	// MARK: - Rescue
 
 	/// Moves windows whose centre is off every screen back inside the nearest screen's visible area,
-	/// with the same writes (animations off per app, read-back) and log lines as a plan.
+	/// with the same writes (animations off per app, read-back) and log lines as a plan. A minimized
+	/// or fullscreen window has no frame to rescue, so the caller leaves those out.
 	static func rescueOffScreenWindows(windows: [WindowInfo]) {
 		guard let mainScreenHeight = NSScreen.screens.first?.frame.height else { return }
 
 		var groups: [PlanGroup] = []
 		for window in windows {
-			guard !window.isMinimized && !window.isFullscreen else { continue }
 			guard window.frame.width > 0 && window.frame.height > 0 else { continue }
 
 			let centerX = window.frame.midX
@@ -471,18 +465,6 @@ enum WindowActuator {
 			&& abs(lhs.origin.y - rhs.origin.y) <= frameTolerance
 			&& abs(lhs.width - rhs.width) <= frameTolerance
 			&& abs(lhs.height - rhs.height) <= frameTolerance
-	}
-
-	private static func prioritizeError(_ errors: [AXError]) -> AXError {
-		for err in errors {
-			if err == .cannotComplete {
-				return .cannotComplete
-			}
-			if err != .success {
-				return err
-			}
-		}
-		return .success
 	}
 
 	private static func writeKind(for kind: PlanAction.Kind) -> WriteKind {

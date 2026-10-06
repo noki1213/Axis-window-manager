@@ -54,8 +54,6 @@ final class AXEventSource {
 
 	init() {}
 
-	var isRunning: Bool { thread != nil }
-
 	/// Starts the observer thread; signals go to `sink` until `stop()`. Calling it while running
 	/// only replaces the sink.
 	func start(sink: @escaping Sink) {
