@@ -418,6 +418,9 @@ final class TrackingCoordinator {
 		}
 		endingReasons = []
 		if !state.monitorOrder.isEmpty && Set(displays.map(\.key)) != Set(state.monitorOrder) {
+			// Zen mode was laid out for the displays that were there; the plan after the rescan
+			// puts its windows back.
+			state.zenExit(reason: .monitorGone)
 			onDisplaySetChanging?()
 		}
 		state.reconcileTopology(displays, now: now)

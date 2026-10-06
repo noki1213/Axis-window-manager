@@ -95,7 +95,7 @@ class FocusHistoryManager: ObservableObject {
 		pendingSettle?.cancel()
 		currentID = targetID
 
-		if ZenModeManager.shared.isActive && ZenModeManager.shared.hiddenWindowIDs.contains(targetID) {
+		if TrackingCoordinator.shared.state.visibility(targetID) == .zenHidden {
 			ZenModeManager.shared.exit()
 		}
 

@@ -111,9 +111,14 @@ nonisolated extension TrackingState {
 		return true
 	}
 
+	/// Ends Zen. The other windows come back with the layout; a floating or unmanaged centred
+	/// window goes back to where it floated before.
 	mutating func zenExit(reason: ZenExitReason) {
-		guard zen != nil else { return }
+		guard let session = zen else { return }
 		zen = nil
+		if let record = records[session.focus], record.placement != .tiled {
+			records[session.focus]?.pendingFloatRestore = true
+		}
 		log("zen: exit (\(reason.logText))")
 		emit(.zenEnded(reason))
 	}

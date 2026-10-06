@@ -202,11 +202,13 @@ nonisolated extension TrackingState {
 	/// Takes where the shown windows are in `snapshot` as their last visible frames (and floating
 	/// frames), as a plan does. Without window-move notifications the frames of the last plan can be
 	/// older than where the user has put a floating window since, and a command that takes it out of
-	/// sight would bring it back there. Windows with a floating-frame move still to come keep it.
+	/// sight would bring it back there. Windows with a floating-frame move still to come keep it,
+	/// and so does the Zen window, which goes back there when Zen ends.
 	mutating func noteVisibleFrames(snapshot: ServerSnapshot) {
 		let connected = monitorOrder.compactMap { monitors[$0] }
 		for id in records.keys.sorted() {
-			guard let record = records[id], record.visibility == .visible, !record.pendingFloatRestore else { continue }
+			guard let record = records[id], record.visibility == .visible, !record.pendingFloatRestore, zen?.focus != id
+			else { continue }
 			plannerNoteVisibleFrame(record, snapshot: snapshot, connected: connected)
 		}
 	}
