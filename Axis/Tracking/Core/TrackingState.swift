@@ -53,8 +53,8 @@ nonisolated struct TrackingState: Equatable, Sendable {
 	/// Destroyed and terminated signals that arrived during a barrier.
 	var pendingDuringBarrier: [PendingSignal] = []
 	var tombstones = TombstoneSet()
-	/// Windows that were tiled when Axis last quit, so they are tiled again even when a stacked
-	/// column left them small enough to look like dialogs.
+	/// Windows the saved layout had tiled, so they are tiled again even when a stacked column left
+	/// them small enough to look like dialogs.
 	var relaunchTiled: Set<WindowID> = []
 
 	// MARK: Enforcement
