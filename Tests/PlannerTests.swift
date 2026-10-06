@@ -191,14 +191,6 @@ private let comparisonTests: [TestCase] = [
 		expect(state.plan(snapshot: before, options: PlanOptions(isCommand: true), now: 1.02).isEmpty)
 	},
 
-	TestCase("windows positioned by another component are left alone") {
-		var (state, _, _) = twoWorkspaces()
-		let away = CGRect(x: 300, y: 200, width: 500, height: 400)
-		let plan = state.plan(snapshot: showing([1: away, 2: away, 3: shownThree], pids: [3: 200], at: 1),
-			options: PlanOptions(externallyPositioned: [1, 3]), now: 1)
-		expectEqual(plan.actions.map(\.window), [2])
-		expectEqual(state.expectedFrame(1), nil)
-	},
 ]
 
 // MARK: - Fights
@@ -472,6 +464,38 @@ private let switchTests: [TestCase] = [
 		expectEqual(state.plannerFollowUps(now: 2.08), [])
 		expectInvariants(state)
 	},
+
+	TestCase("confirming the palette into another workspace brings only that workspace on screen") {
+		var (state, _, other) = twoWorkspaces()
+		state.paletteBegin(now: 1)
+		state.normalize(now: 1)
+		var plan = state.plan(snapshot: settled(at: 1), options: PlanOptions(isCommand: true), now: 1)
+		expectEqual(plan.actions, [
+			park(1, .park(.paletteHidden), observed: leftSlot),
+			park(2, .park(.paletteHidden), observed: rightSlot),
+		])
+		state.recordWrites(landed(plan), now: 1.01)
+		let parkedOne = CGRect(origin: parkPoint, size: leftSlot.size)
+		let parkedTwo = CGRect(origin: parkPoint, size: rightSlot.size)
+
+		// The session ends and the workspace switches in one command.
+		state.paletteEnd()
+		state.switchWorkspace(on: main, to: .id(other))
+		state.normalize(now: 2)
+		plan = state.plan(snapshot: showing([1: parkedOne, 2: parkedTwo, 3: parkedThree], pids: [3: 200], at: 2),
+			options: PlanOptions(isCommand: true, includeHidePhase: false), now: 2)
+		expectEqual(plan.actions, [
+			setFrame(3, fullSlot, .unpark(from: inactive), observed: parkedThree, pid: 200, label: "Other/W3#3"),
+		])
+		state.recordWrites(landed(plan), now: 2.01)
+
+		// The hide phase that follows has nothing to park: the palette parked those windows already.
+		plan = state.plan(snapshot: showing([1: parkedOne, 2: parkedTwo, 3: fullSlot], pids: [3: 200], at: 2.05),
+			options: PlanOptions(), now: 2.05)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.records[1]?.visibility, inactive)
+		expectInvariants(state)
+	},
 ]
 
 // MARK: - Apps
@@ -559,6 +583,41 @@ private let sessionTests: [TestCase] = [
 		plan = state.plan(snapshot: showing([1: centred, 2: parkedTwo], at: 6), options: PlanOptions(isCommand: true), now: 6)
 		expectEqual(state.plannerState.zenRefusal, nil)
 		expectEqual(plan.actions.map(\.kind), [.setFrame(leftSlot), .setFrame(rightSlot)])
+		expectInvariants(state)
+	},
+
+	TestCase("a floating Zen window keeps its floating frame while centred and returns to it when Zen ends") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1]])
+		state.testAddWindow(5, placement: .floating, workspace: home)
+		state.records[5]!.floatingFrame = RelativeFrame(monitor: main, offset: CGPoint(x: 100, y: 50), size: CGSize(width: 500, height: 300))
+		let floated = CGRect(x: 100, y: 75, width: 500, height: 300)
+		let zenFrame = CGRect(x: 180, y: 37, width: 1080, height: 851)
+		let parkedOne = CGRect(origin: parkPoint, size: fullSlot.size)
+
+		expect(state.zenEnter(5, now: 1))
+		state.normalize(now: 1)
+		expectEqual(state.records[1]?.visibility, .zenHidden)
+		var plan = state.plan(snapshot: showing([1: fullSlot, 5: floated], at: 1), options: PlanOptions(isCommand: true), now: 1)
+		expectEqual(plan.actions, [
+			setFrame(5, zenFrame, .zenCentre, observed: floated),
+			park(1, .park(.zenHidden), observed: fullSlot),
+		])
+		state.recordWrites(landed(plan), now: 1.01)
+
+		// Commands note where shown windows are; the centred window keeps the frame it floated at.
+		state.noteVisibleFrames(snapshot: showing([1: parkedOne, 5: zenFrame], at: 2))
+		expectEqual(state.records[5]?.floatingFrame?.frame(in: CGRect(x: 0, y: 25, width: 1440, height: 875)), floated)
+
+		state.zenExit(reason: .user)
+		state.normalize(now: 3)
+		plan = state.plan(snapshot: showing([1: parkedOne, 5: zenFrame], at: 3), options: PlanOptions(isCommand: true), now: 3)
+		expectEqual(plan.actions, [
+			setFrame(1, fullSlot, .unpark(from: .zenHidden), observed: parkedOne),
+			setFrame(5, floated, .floatRestore, observed: zenFrame),
+		])
+		expectEqual(state.records[5]?.pendingFloatRestore, false)
 		expectInvariants(state)
 	},
 
@@ -710,11 +769,38 @@ private let layoutStateTests: [TestCase] = [
 			setFrame(1, CGRect(x: 12, y: 37, width: 464, height: 851), .layout, observed: leftSlot),
 			setFrame(2, CGRect(x: 964, y: 37, width: 464, height: 851), .layout, observed: rightSlot),
 		])
-		expectEqual(state.plannerState.reservedSlot, CGRect(x: 488, y: 37, width: 464, height: 851))
+		expectEqual(state.reservedSlot, CGRect(x: 488, y: 37, width: 464, height: 851))
 
 		state.reservation = nil
 		_ = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 2), options: PlanOptions(), now: 2)
-		expectEqual(state.plannerState.reservedSlot, nil)
+		expectEqual(state.reservedSlot, nil)
+	},
+
+	TestCase("a window opened into the reservation takes the slot its preview showed") {
+		var state = testState()
+		state.testSetColumns(state.testActive(), [[1], [2]])
+		state.reservation = PlacementReservation(kind: .aboveInColumn, monitor: main, columnIndex: 1)
+		var plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 1), options: PlanOptions(isCommand: true), now: 1)
+		let lowerRight = CGRect(x: 726, y: 468.5, width: 702, height: 419.5)
+		expectEqual(plan.actions, [setFrame(2, lowerRight, .layout, observed: rightSlot)])
+		state.recordWrites(landed(plan), now: 1.01)
+		let preview = CGRect(x: 726, y: 37, width: 702, height: 419.5)
+		expectEqual(state.reservedSlot, preview)
+
+		// Later passes keep the slot free until a window takes it.
+		plan = state.plan(snapshot: showing([1: leftSlot, 2: lowerRight], at: 1.5), options: PlanOptions(), now: 1.5)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.reservedSlot, preview)
+
+		let opened = CGRect(x: 300, y: 200, width: 800, height: 600)
+		state.admit(WindowFacts(id: 3, pid: 100, title: "W3", frame: opened, takenAt: 2),
+			app: AppFacts(pid: 100, bundleID: "com.test.app", name: "App"), source: .created, now: 2)
+		expectEqual(state.reservation, nil)
+		state.normalize(now: 2)
+		plan = state.plan(snapshot: showing([1: leftSlot, 2: lowerRight, 3: opened], at: 2), options: PlanOptions(), now: 2)
+		expectEqual(plan.actions, [setFrame(3, preview, .layout, observed: opened)])
+		expectEqual(state.reservedSlot, nil)
+		expectInvariants(state)
 	},
 ]
 

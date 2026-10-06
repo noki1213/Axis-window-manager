@@ -8,7 +8,8 @@
 import AppKit
 import ApplicationServices
 
-/// A struct holding a window's information
+/// A handle on a window for the features: its facts, focus, raise. Moving, resizing and minimizing
+/// windows go through the tracking state's plans.
 struct WindowInfo: Identifiable, Equatable {
     let id: CGWindowID
     let axElement: AXUIElement
@@ -18,9 +19,8 @@ struct WindowInfo: Identifiable, Equatable {
     var frame: CGRect
     var isMinimized: Bool
     var isFullscreen: Bool
-    var minSize: CGSize  // Minimum window size
-    
-    // For determining floating status
+
+    // The kind of window (standard window, dialog, floating panel, ...)
     var subrole: String?
     var role: String?
 
@@ -57,10 +57,7 @@ struct WindowInfo: Identifiable, Equatable {
         
         // Fullscreen state
         self.isFullscreen = Self.getBool(from: axElement, attribute: "AXFullScreen") ?? false
-        
-        // Get the minimum size
-        self.minSize = Self.getSize(from: axElement, attribute: "AXMinimumSize") ?? CGSize(width: 200, height: 200)
-        
+
         // Role / Subrole
         self.role = Self.getString(from: axElement, attribute: kAXRoleAttribute)
         self.subrole = Self.getString(from: axElement, attribute: kAXSubroleAttribute)
@@ -80,7 +77,6 @@ struct WindowInfo: Identifiable, Equatable {
         self.frame = facts.frame
         self.isMinimized = facts.isMinimized
         self.isFullscreen = facts.isFullscreen
-        self.minSize = facts.minSize ?? CGSize(width: 200, height: 200)
         self.role = facts.role
         self.subrole = facts.subrole
         self.hasCloseButton = facts.hasCloseButton
@@ -101,152 +97,6 @@ struct WindowInfo: Identifiable, Equatable {
     
     // MARK: - Window Operations
     
-    /// The tolerance (in px) when verifying that the frame took effect
-    private static let frameTolerance: CGFloat = 2.0
-
-    /// The maximum number of attempts for setting the frame
-    private static let frameMaxAttempts = 3
-
-    /// The frame Axis last applied (window ID → frame)
-    /// Because the watchdog and retiling keep rewriting the same layout over and over,
-    /// Skip the AX write entirely when it's "already meant to be there, and actually is there"
-    private static var lastAppliedFrames: [CGWindowID: CGRect] = [:]
-
-    /// Set the window's position and size
-    /// Modeled on AeroSpace's implementation: set size → position → size, in that order.
-    /// Except that when enlarging a window, the position is decided first (see the ordering note below).
-    /// It also reads back the actual frame after setting it and re-applies if it drifted from the requested value.
-    /// (for apps like Ghostty that round sizes to cell units, setting it just once may not
-    /// because it ends up left smaller than its assigned area, not matching what was requested)
-    func setFrame(_ newFrame: CGRect) {
-        // Do nothing if it's already at the target position and size, and Axis itself was the one that put it there.
-        // The reason for conditioning on "this app placed it" is that right after it's moved by an external cause,
-        // So it doesn't get mistakenly skipped due to a WindowInfo holding a stale frame
-        if Self.isCloseEnough(frame, newFrame),
-           let applied = Self.lastAppliedFrames[id],
-           Self.isCloseEnough(applied, newFrame) {
-            return
-        }
-
-        PerfLog.event("frame: \(PerfLog.describe(self)) \(BorderManager.describe(frame)) -> \(BorderManager.describe(newFrame))")
-
-        // Decides the write order.
-        // When enlarging, writing the size first makes the window — still at its old position — overflow off-screen, and
-        // The app itself can shrink it, so it may not end up at the requested size.
-        // so when expanding, set the position first, then the size
-        let isGrowing = newFrame.width > frame.width + Self.frameTolerance
-            || newFrame.height > frame.height + Self.frameTolerance
-
-        // Disable animation (the technique used by AeroSpace/yabai/Rectangle)
-        disableAnimations {
-            var previousFrame: CGRect?
-
-            for attempt in 0..<Self.frameMaxAttempts {
-                if isGrowing {
-                    // Position → size → position
-                    applyPosition(newFrame.origin)
-                    setSize(newFrame.size)
-                    applyPosition(newFrame.origin)
-                } else {
-                    // Size → position → size (some apps need the size set last to take effect)
-                    setSize(newFrame.size)
-                    applyPosition(newFrame.origin)
-                    setSize(newFrame.size)
-                }
-
-                // Read back the frame that was actually applied and verify it
-                guard let actual = Self.getFrame(from: axElement) else { return }
-                if Self.isCloseEnough(actual, newFrame) {
-                    Self.lastAppliedFrames[id] = newFrame
-                    return
-                }
-
-                // If the requested size is below the minimum, give up since it can't shrink further
-                if newFrame.width < minSize.width - Self.frameTolerance
-                    || newFrame.height < minSize.height - Self.frameTolerance {
-                    return
-                }
-
-                // If nothing changed since the last attempt, retrying is pointless, so bail out
-                if let previous = previousFrame, Self.isCloseEnough(actual, previous) {
-                    return
-                }
-                previousFrame = actual
-
-                // Wait for the app to finish its own relayout before the next attempt
-                if attempt < Self.frameMaxAttempts - 1 {
-                    usleep(15_000)
-                }
-            }
-        }
-    }
-
-    /// Whether two frames match within the allowed tolerance
-    private static func isCloseEnough(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
-        abs(lhs.origin.x - rhs.origin.x) <= frameTolerance
-            && abs(lhs.origin.y - rhs.origin.y) <= frameTolerance
-            && abs(lhs.width - rhs.width) <= frameTolerance
-            && abs(lhs.height - rhs.height) <= frameTolerance
-    }
-    
-    /// Perform the operation with animation disabled
-    private func disableAnimations(_ operation: () -> Void) {
-        let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        
-        // Fetch AXEnhancedUserInterface
-        var wasEnabled: CFTypeRef?
-        AXUIElementCopyAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, &wasEnabled)
-        let wasEnabledBool = (wasEnabled as? Bool) ?? false
-        
-        // While it is on, AX frame changes animate and land on the wrong geometry, so turn it off for the duration
-        if wasEnabledBool {
-            AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
-        }
-        
-        // Perform the operation
-        operation()
-        
-        // Revert it
-        if wasEnabledBool {
-            AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        }
-    }
-    
-    /// Set the window's position
-    func setPosition(_ position: CGPoint) {
-        // The window leaves the frame Axis last applied (hiding it in a corner, for example), so a later
-        // setFrame back to that frame must not be skipped as already in place
-        Self.lastAppliedFrames[id] = nil
-        disableAnimations {
-            applyPosition(position)
-        }
-    }
-
-    /// Write only the position to AX (disabling animation is the caller's responsibility)
-    /// Prevents applying the animation-disable twice when called from within setFrame
-    private func applyPosition(_ position: CGPoint) {
-        var pos = position
-        let positionValue = AXValueCreate(.cgPoint, &pos)!
-        AXUIElementSetAttributeValue(axElement, kAXPositionAttribute as CFString, positionValue)
-    }
-    
-    /// Set the window's size
-    func setSize(_ size: CGSize) {
-        var sz = size
-        let sizeValue = AXValueCreate(.cgSize, &sz)!
-        AXUIElementSetAttributeValue(axElement, kAXSizeAttribute as CFString, sizeValue)
-    }
-    
-    /// Minimize the window (used to hide windows on workspace switches)
-    func minimize() {
-        AXUIElementSetAttributeValue(axElement, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
-    }
-
-    /// Un-minimize the window
-    func unminimize() {
-        AXUIElementSetAttributeValue(axElement, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-    }
-
     /// Set focus to the window
     /// Sometimes only the app activation takes effect and the window designation doesn't, in which case
     /// Focus falls back to another window that same app had just prior.
@@ -421,77 +271,6 @@ struct WindowInfo: Identifiable, Equatable {
         self.frame = Self.getFrame(from: axElement) ?? .zero
     }
     
-    // MARK: - Floating Detection (modeled on AeroSpace/Amethyst)
-    
-    /// Whether it should be managed as a tiling target
-    func shouldBeManaged() -> Bool {
-        // Exclude minimized windows
-        if isMinimized {
-            return false
-        }
-
-        // Exclude fullscreen windows
-        if isFullscreen {
-            return false
-        }
-
-        // A standard-window subrole → managed
-        if subrole == kAXStandardWindowSubrole as String {
-            return true
-        }
-
-        // Even with a non-standard subrole, treat it as a genuine window if it has a close button
-        // (PowerPoint's document window etc. falls into this case)
-        // Implementation modeled on AeroSpace's isWindowHeuristicOld()
-        if hasCloseButton {
-            return true
-        }
-
-        return false
-    }
-    
-    /// Whether it should float (e.g. dialogs)
-    func shouldFloat() -> Bool {
-        // Dialogs float
-        if subrole == kAXDialogSubrole as String {
-            return true
-        }
-        
-        // Floating windows float
-        if subrole == kAXFloatingWindowSubrole as String {
-            return true
-        }
-        
-        // Exclude specific apps (system settings, preferences, etc.)
-        let floatingBundleIds = [
-            "com.apple.systempreferences",
-            "com.apple.SystemPreferences",
-            "com.apple.systemsettings",
-            "com.apple.SystemSettings"
-        ]
-        if let bundleId = app.bundleIdentifier, floatingBundleIds.contains(bundleId) {
-            return true
-        }
-
-        // Explicitly marked as floating by user
-        if WorkspaceManager.shared.isFloating(id) {
-            return true
-        }
-
-        // If already managed as a tiled window in a workspace (or was one when Axis last quit),
-        // do not float it just because tiling or column stacking resized it into smaller dimensions
-        if WorkspaceManager.shared.isWindowInAnyWorkspace(id) || WorkspaceManager.shared.wasTiledBeforeRelaunch(id) {
-            return false
-        }
-
-        // Small windows float initially (modeled on Amethyst dialog heuristics)
-        if frame.width < 500 && frame.height < 500 {
-            return true
-        }
-        
-        return false
-    }
-    
     // MARK: - Private Helpers
     
     private static func getString(from element: AXUIElement, attribute: String) -> String? {
@@ -535,16 +314,7 @@ struct WindowInfo: Identifiable, Equatable {
         AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
         return size
     }
-    
-    private static func getSize(from element: AXUIElement, attribute: String) -> CGSize? {
-        var sizeRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &sizeRef)
-        guard result == .success, let sizeValue = sizeRef else { return nil }
-        
-        var size = CGSize.zero
-        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
-        return size
-    }
+
 }
 
 // MARK: - Private API Declaration

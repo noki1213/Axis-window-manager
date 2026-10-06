@@ -181,9 +181,9 @@ class BorderManager: ObservableObject {
             return
         }
 
-        // Don't show the border on windows evacuated to another workspace, by Zen mode or while the palette is showing
-        if let reason = WorkspaceManager.shared.hiddenReason(focusedWindow.id) {
-            hideBorder(reason: "focused window is \(reason) #\(focusedWindow.id)")
+        // Don't show the border on windows Axis keeps out of sight (another workspace, Zen mode, the palette, hidden)
+        if let visibility = TrackingCoordinator.shared.state.visibility(focusedWindow.id), visibility.isHiddenByAxis {
+            hideBorder(reason: "focused window is \(visibility.logName) #\(focusedWindow.id)")
             return
         }
         

@@ -25,10 +25,6 @@ final class TrackingCoordinator {
 	/// Read through the core's queries; only the coordinator changes it.
 	private(set) var state: TrackingState
 
-	/// Windows that another component still moves by itself (Zen and the palette park and
-	/// restore their windows); plans leave them alone.
-	var externallyPositioned: () -> Set<WindowID> = { [] }
-
 	// MARK: Feature events
 
 	/// Feature reactions to what a step changed, called after the step in the order they were
@@ -107,6 +103,10 @@ final class TrackingCoordinator {
 	/// The windows found at launch have been laid out (`onStarted` was called).
 	private var hasStarted = false
 	private var transitionUntil: Time = 0
+	/// Called once a pass that scans every app has ingested its facts (`rescanAll`), and those
+	/// of the pass in flight.
+	private var rescanWaiters: [() -> Void] = []
+	private var inFlightRescanWaiters: [() -> Void] = []
 
 	/// The barriers the watcher sits out. Mission Control is not one of them: the watcher is
 	/// what notices it close.
@@ -144,6 +144,8 @@ final class TrackingCoordinator {
 		runningApps = [:]
 		hasStarted = false
 		transitionUntil = 0
+		rescanWaiters = []
+		inFlightRescanWaiters = []
 
 		let timer = DispatchSource.makeTimerSource(queue: .main)
 		timer.setEventHandler { [weak self] in
@@ -196,6 +198,8 @@ final class TrackingCoordinator {
 		missionControlTimer = nil
 		inFlight = nil
 		pending = PendingWork()
+		rescanWaiters = []
+		inFlightRescanWaiters = []
 		watcher.stop()
 		watcher.sink = nil
 		watcher.onLog = nil
@@ -418,6 +422,10 @@ final class TrackingCoordinator {
 		}
 		endingReasons = []
 		if !state.monitorOrder.isEmpty && Set(displays.map(\.key)) != Set(state.monitorOrder) {
+			// Zen mode and the palette were laid out for the displays that were there; the plan
+			// after the rescan puts their windows back.
+			state.zenExit(reason: .monitorGone)
+			state.paletteEnd()
 			onDisplaySetChanging?()
 		}
 		state.reconcileTopology(displays, now: now)
@@ -544,6 +552,10 @@ final class TrackingCoordinator {
 		let work = pending.take(dueBy: limit)
 		let lifts = liftOnNextPass
 		liftOnNextPass = false
+		if work.scanAll {
+			inFlightRescanWaiters += rescanWaiters
+			rescanWaiters = []
+		}
 		startPass(work, liftsBarrier: lifts)
 	}
 
@@ -610,6 +622,8 @@ final class TrackingCoordinator {
 			// Facts gathered while a barrier went up may show the lock screen, a sleeping display or
 			// Mission Control: the work is done again after the barrier.
 			pending.requeue(pass.work, due: now)
+			rescanWaiters = inFlightRescanWaiters + rescanWaiters
+			inFlightRescanWaiters = []
 			schedulePassTimer()
 			return
 		}
@@ -621,6 +635,11 @@ final class TrackingCoordinator {
 		if !hasStarted && pass.liftsBarrier && !state.livenessState.liftPending {
 			hasStarted = true
 			onStarted?()
+		}
+		let waiters = inFlightRescanWaiters
+		inFlightRescanWaiters = []
+		for waiter in waiters {
+			waiter()
 		}
 	}
 
@@ -900,6 +919,15 @@ final class TrackingCoordinator {
 		finishStep(now: Self.uptime())
 	}
 
+	/// Reads every app's windows again (their titles, say) and calls `completion` once the facts
+	/// are in the state. Nothing is read while a barrier is up, so it can come later.
+	func rescanAll(then completion: @escaping () -> Void) {
+		guard isRunning else { return }
+		rescanWaiters.append(completion)
+		pending.addScanAll(due: Self.uptime())
+		schedulePassTimer()
+	}
+
 	/// A workspace switch started: for a moment, focus changes and hover belong to it.
 	func beginTransition() {
 		transitionUntil = Self.uptime() + CoordinatorTiming.transition
@@ -964,7 +992,7 @@ final class TrackingCoordinator {
 	/// the layout.
 	private func planAndExecute(_ snapshot: ServerSnapshot, isCommand: Bool, includeHidePhase: Bool, now: Time) {
 		let options = PlanOptions(isCommand: isCommand, includeHidePhase: includeHidePhase,
-			mouseDown: SystemSignals.isLeftMouseDown, externallyPositioned: externallyPositioned())
+			mouseDown: SystemSignals.isLeftMouseDown)
 		let plan = Self.withoutUnseenFrames(state.plan(snapshot: snapshot, options: options, now: now), snapshot: snapshot)
 		// The planner's enforcement lines come before the actuator's frame lines.
 		drainLog()

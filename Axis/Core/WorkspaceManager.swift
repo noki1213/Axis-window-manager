@@ -32,25 +32,16 @@ class WorkspaceManager {
 		coordinator.addEventHandler { [weak self] event in
 			self?.handle(event)
 		}
-		coordinator.externallyPositioned = { [weak self] in
-			self?.externallyPositionedWindows() ?? []
-		}
 		coordinator.onDisplaySetChanging = { [weak self] in
-			self?.exitSpecialModesForScreenChange()
+			self?.closePaletteForScreenChange()
 		}
 		coordinator.onStarted = ready
 		coordinator.start(config: TilingEngine.shared.layoutConfig, relaunchTiled: Self.tiledAtLastQuit())
 	}
 
-	/// Puts every window moved out of sight back on screen and stops tracking
+	/// Puts every window moved out of sight back on screen (those of Zen mode and the palette too)
+	/// and stops tracking
 	func prepareForQuit() {
-		// Zen mode and the palette moved their windows out of sight themselves
-		for (id, frame) in ZenModeManager.shared.exitAndHandOffHiddenFrames() {
-			coordinator.windowInfo(id)?.setFrame(frame)
-		}
-		if HotkeyManager.shared.currentMode == .windowPalette {
-			WindowPaletteManager.shared.endPalette()
-		}
 		coordinator.prepareForQuit()
 		coordinator.stop()
 	}
@@ -58,21 +49,20 @@ class WorkspaceManager {
 	/// What the other components do when windows come and go or a workspace changes on its own
 	private func handle(_ event: TrackingEvent) {
 		switch event {
-		case .admitted(let id):
+		case .admitted:
 			PlacementReservationManager.shared.noteWindowAdmitted()
-			ZenModeManager.shared.noteAdmitted(id)
-		case .retired(let id, _):
-			ZenModeManager.shared.noteRetired(id)
+		case .retired:
 			// Dropping an emptied workspace can renumber the others
 			postWorkspaceChangedOnce()
 		case .rekeyed(let old, let new):
 			FocusHistoryManager.shared.replace(old, with: new)
-			ZenModeManager.shared.noteRekeyed(to: new)
 		case .activeChanged(_, _, let workspace, let cause):
 			activeWorkspaceChanged(to: workspace, cause: cause)
 		case .returnFocus(let bundleID):
 			LaunchAsideManager.shared.returnFocus(ifTakenBy: bundleID)
-		case .zenEnded, .focusChanged:
+		case .zenEnded:
+			ZenModeManager.shared.noteEnded()
+		case .focusChanged:
 			break
 		}
 	}
@@ -85,11 +75,6 @@ class WorkspaceManager {
 		coordinator.perform("float") { state in
 			state.toggleFloat(windowID)
 		}
-	}
-
-	/// Returns whether the window is currently Float
-	func isFloating(_ windowID: CGWindowID) -> Bool {
-		state.isFloating(windowID)
 	}
 
 	/// The windows that are Float
@@ -107,10 +92,6 @@ class WorkspaceManager {
 	private static func tiledAtLastQuit() -> Set<WindowID> {
 		let ids = UserDefaults.standard.array(forKey: tiledAtQuitKey) as? [UInt32] ?? []
 		return Set(ids)
-	}
-
-	func wasTiledBeforeRelaunch(_ windowID: CGWindowID) -> Bool {
-		state.relaunchTiled.contains(windowID)
 	}
 
 	/// Record the tiled windows so the next launch can tell them from genuinely small windows
@@ -165,27 +146,6 @@ class WorkspaceManager {
 		state.isTracked(windowID)
 	}
 
-	/// Whether Axis put the window out of sight: parked for another workspace, Zen mode or the palette,
-	/// or minimized by the hide command
-	func isWindowHidden(_ windowID: CGWindowID) -> Bool {
-		hiddenReason(windowID) != nil
-	}
-
-	/// Why Axis put the window out of sight (for logs), nil when it did not. Windows macOS keeps out of
-	/// sight on its own (minimized from the Dock, fullscreen, another Space) are not hidden by Axis.
-	func hiddenReason(_ windowID: CGWindowID) -> String? {
-		if let visibility = state.visibility(windowID), visibility.isParkedKind || visibility == .axisMinimized {
-			return visibility.logName
-		}
-		if ZenModeManager.shared.hiddenWindowIDs.contains(windowID) {
-			return "zenHidden"
-		}
-		if WindowPaletteManager.shared.isWindowHidden(windowID) {
-			return "paletteHidden"
-		}
-		return nil
-	}
-
 	// MARK: - Workspace Switching
 
 	/// Switch workspaces
@@ -199,10 +159,12 @@ class WorkspaceManager {
 
 	/// Switch to a workspace by its id, on the monitor that shows it (the palette lists workspaces
 	/// by id, so a renumbering while it was open does not send it elsewhere)
-	func switchWorkspace(to workspace: WorkspaceID, focusWindowID: CGWindowID? = nil) {
+	/// - Parameter endingPalette: the palette's session ends with the same command, so the windows
+	///   it took out of sight come back already in the new layout
+	func switchWorkspace(to workspace: WorkspaceID, focusWindowID: CGWindowID? = nil, endingPalette: Bool = false) {
 		guard let host = state.workspaces[workspace]?.host, let screen = screen(for: host),
 			  let number = state.number(of: workspace) else { return }
-		switchWorkspace(.id(workspace), number: number, on: screen, focusWindowID: focusWindowID)
+		switchWorkspace(.id(workspace), number: number, on: screen, focusWindowID: focusWindowID, endingPalette: endingPalette)
 	}
 
 	/// Move to the next workspace (+1), created past the last one
@@ -216,7 +178,8 @@ class WorkspaceManager {
 	}
 
 	/// `number`: the workspace number the target has before the switch, for the log
-	private func switchWorkspace(_ target: WorkspaceTarget, number: Int, on screen: NSScreen, focusWindowID: CGWindowID? = nil) {
+	private func switchWorkspace(_ target: WorkspaceTarget, number: Int, on screen: NSScreen, focusWindowID: CGWindowID? = nil,
+		endingPalette: Bool = false) {
 		guard let key = monitorKey(for: screen) else { return }
 		let current = currentWorkspace(on: screen)
 		guard number != current else { return }
@@ -224,12 +187,14 @@ class WorkspaceManager {
 		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(current + 1) -> ws\(number + 1)"
 			+ (focusWindowID.map { " (focus #\($0))" } ?? ""))
-		endZenForSwitch(on: screen)
 
 		// The new workspace's windows come on screen first; the old ones leave a moment later,
 		// so an empty screen never shows
 		var destination: WorkspaceID?
 		coordinator.perform("switch", delaysHidePhase: true) { state in
+			if endingPalette {
+				state.paletteEnd()
+			}
 			destination = state.switchWorkspace(on: key, to: target)
 		}
 		finishSwitch(to: destination, focusWindowID: focusWindowID)
@@ -256,20 +221,12 @@ class WorkspaceManager {
 		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(currentWorkspace(on: screen) + 1) -> ws\(number + 1)"
 			+ " (focus #\(focusedID))")
-		endZenForSwitch(on: screen)
 
 		var destination: WorkspaceID?
 		coordinator.perform("move to workspace", delaysHidePhase: true) { state in
 			destination = state.moveWindowToWorkspace(focusedID, on: key, to: target)
 		}
 		finishSwitch(to: destination, focusWindowID: focusedID)
-	}
-
-	/// Zen mode is per monitor: a switch on its monitor ends it, one on another monitor does not
-	private func endZenForSwitch(on screen: NSScreen) {
-		if ZenModeManager.shared.isActive, let monitor = ZenModeManager.shared.activeMonitor, monitor == monitorKey(for: screen) {
-			ZenModeManager.shared.exit(reason: .workspaceSwitched)
-		}
 	}
 
 	/// Focus, border, cursor and menu bar after a switch
@@ -347,27 +304,15 @@ class WorkspaceManager {
 		}
 	}
 
-	// MARK: - Windows other components move
+	// MARK: - Display changes
 
-	/// Windows Zen mode and the palette park and restore by themselves
-	private func externallyPositionedWindows() -> Set<WindowID> {
-		var ids = ZenModeManager.shared.hiddenWindowIDs.union(WindowPaletteManager.shared.hiddenWindowIDs)
-		if ZenModeManager.shared.isActive, let focused = ZenModeManager.shared.focusedWindowID {
-			ids.insert(focused)
-		}
-		return ids
-	}
-
-	/// Zen mode and the palette are laid out for the old screens, so leave them before the screens change
-	private func exitSpecialModesForScreenChange() {
-		if ZenModeManager.shared.isActive {
-			ZenModeManager.shared.exit(reason: .monitorGone)
-		}
-		if HotkeyManager.shared.currentMode == .windowPalette {
-			WindowPaletteManager.shared.endPalette()
-			HotkeyManager.shared.currentMode = .normal
-			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
-		}
+	/// The palette is laid out for the old screens, so it closes before the screens change (the
+	/// tracking state ended its session, and the windows come back with the next layout)
+	private func closePaletteForScreenChange() {
+		guard HotkeyManager.shared.currentMode == .windowPalette else { return }
+		WindowPaletteManager.shared.dismiss()
+		HotkeyManager.shared.currentMode = .normal
+		NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
 	}
 
 	// MARK: - Focused monitor
