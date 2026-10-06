@@ -145,27 +145,6 @@ class WorkspaceManager {
 			|| WindowPaletteManager.shared.isWindowHidden(windowID)
 	}
 
-	/// Window IDs across every monitor and workspace number in tiling order (used by the window palette)
-	/// Columns go left-to-right, and within each column, top-to-bottom; windows outside the columns follow
-	func windowIDsInTilingOrder() -> [MonitorKey: [Int: [CGWindowID]]] {
-		var result: [MonitorKey: [Int: [CGWindowID]]] = [:]
-		for key in state.monitorOrder {
-			var workspaces: [Int: [CGWindowID]] = [:]
-			for workspace in state.workspaceOrder(on: key) {
-				guard let number = state.number(of: workspace) else { continue }
-				workspaces[number] = state.orderedWindows(workspace)
-			}
-			result[key] = workspaces
-		}
-		return result
-	}
-
-	/// The window IDs of the given monitor and workspace number in tiling order (used by the peek feature)
-	func windowIDsInTilingOrder(workspace: Int, on screen: NSScreen) -> [CGWindowID] {
-		guard let key = monitorKey(for: screen), let id = state.workspace(number: workspace, on: key) else { return [] }
-		return state.orderedWindows(id)
-	}
-
 	/// One line per monitor describing its workspaces, for diagnosing monitor-change layouts
 	func layoutSummaryLines() -> [String] {
 		state.monitorOrder.compactMap { key in
@@ -365,6 +344,14 @@ class WorkspaceManager {
 		switchWorkspace(.number(workspace), number: workspace, on: screen, focusWindowID: focusWindowID)
 	}
 
+	/// Switch to a workspace by its id, on the monitor that shows it (the palette lists workspaces
+	/// by id, so a renumbering while it was open does not send it elsewhere)
+	func switchWorkspace(to workspace: WorkspaceID, focusWindowID: CGWindowID? = nil) {
+		guard let host = state.workspaces[workspace]?.host, let screen = screen(for: host),
+			  let number = state.number(of: workspace) else { return }
+		switchWorkspace(.id(workspace), number: number, on: screen, focusWindowID: focusWindowID)
+	}
+
 	/// Move to the next workspace (+1), created past the last one
 	func switchToNextWorkspace(on screen: NSScreen) {
 		switchWorkspace(.next, number: currentWorkspace(on: screen) + 1, on: screen)
@@ -435,7 +422,7 @@ class WorkspaceManager {
 
 	/// Zen mode is per monitor: a switch on its monitor ends it, one on another monitor does not
 	private func endZenForSwitch(on screen: NSScreen) {
-		if ZenModeManager.shared.isActive, ZenModeManager.shared.activeScreen == screen {
+		if ZenModeManager.shared.isActive, let monitor = ZenModeManager.shared.activeMonitor, monitor == monitorKey(for: screen) {
 			ZenModeManager.shared.toggle()
 		}
 	}
