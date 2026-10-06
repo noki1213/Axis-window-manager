@@ -378,6 +378,18 @@ struct ScenarioWorld {
 		assertInvariants()
 	}
 
+	/// What a relaunch does at its first pass: the saved layout is applied from the windows every
+	/// app lists, before any window is admitted. `answering` limits it to the apps that answer.
+	mutating func restoreSavedLayout(_ snapshot: PersistenceSnapshot, answering pids: Set<PID>? = nil) {
+		var scans: [PID: ScanResult] = [:]
+		for pid in apps.keys where pids?.contains(pid) ?? true {
+			scans[pid] = .complete(windows.values.filter { $0.pid == pid }.sorted { $0.id < $1.id })
+		}
+		state.applyPersistence(snapshot, scans: scans, apps: apps.keys.sorted().compactMap { apps[$0] }, now: currentTime)
+		drainOutputs()
+		assertInvariants()
+	}
+
 	private mutating func drainOutputs() {
 		capturedLogs.append(contentsOf: state.drainLog().map(\.message))
 		capturedEvents.append(contentsOf: state.drainEvents())
