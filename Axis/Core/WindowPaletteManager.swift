@@ -383,71 +383,42 @@ class WindowPaletteManager {
 
 	// MARK: - Data Collection
 
-	/// Collect window info for every workspace, grouped by Display
+	/// Collect window info for every workspace, grouped by Display. The workspaces, their order and the
+	/// windows' titles come from the tracking state
 	private func collectDisplays() -> [WindowPaletteDisplay] {
-		// Get every workspace's window IDs in tiling order (left-to-right, top-to-bottom)
-		let allWorkspaces = workspaceManager.windowIDsInTilingOrder()
+		let coordinator = TrackingCoordinator.shared
+		let state = coordinator.state
 
-		// Get info for every current window (via the AX API)
-		let allWindows = accessibilityManager.getAllWindows()
-
-		// Build a dictionary of window ID -> WindowInfo (for fast lookup)
-		var windowInfoMap: [CGWindowID: WindowInfo] = [:]
-		for window in allWindows {
-			windowInfoMap[window.id] = window
+		func item(_ windowID: CGWindowID, workspace: WorkspaceID?, monitor: MonitorKey) -> WindowPaletteItem? {
+			guard let record = state.record(windowID) else { return nil }
+			let app = coordinator.runningApp(record.pid)
+			return WindowPaletteItem(
+				windowID: windowID,
+				appName: app?.localizedName ?? (record.appName.isEmpty ? "Unknown App" : record.appName),
+				windowTitle: record.title,
+				appIcon: app?.icon,
+				workspace: workspace,
+				monitor: monitor
+			)
 		}
 
-		// Lookup table from monitor to monitor number (1-based)
-		var displayNumberMap: [MonitorKey: Int] = [:]
-		for (index, key) in workspaceManager.monitorKeys.enumerated() {
-			displayNumberMap[key] = index + 1
-		}
+		var result: [WindowPaletteDisplay] = []
+		for (index, monitor) in state.monitorOrder.enumerated() {
+			var display = WindowPaletteDisplay(displayNumber: index + 1, monitor: monitor, spaces: [])
 
-		// Build the data per Display
-		var displayMap: [MonitorKey: WindowPaletteDisplay] = [:]
+			// Windows the user deliberately floated with Ctrl+Option+F
+			// They belong to a workspace, but are grouped into a section of their own
+			var floatItems: [WindowPaletteItem] = []
 
-		// Windows the user deliberately floated with Ctrl+Option+F (per Display)
-		// It normally appears in its own workspace's section, but pull it out here and group it into a separate section
-		var userFloatItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
-
-		for (screenID, workspaces) in allWorkspaces {
-			let displayNumber = displayNumberMap[screenID] ?? 1
-
-			// Create an entry for this Display if one doesn't exist
-			if displayMap[screenID] == nil {
-				displayMap[screenID] = WindowPaletteDisplay(
-					displayNumber: displayNumber,
-					monitor: screenID,
-					spaces: []
-				)
-			}
-
-			let sortedWorkspaces = workspaces.keys.sorted()
-
-			for workspace in sortedWorkspaces {
-				guard let windowIDs = workspaces[workspace] else { continue }
-
+			for workspace in state.workspaceOrder(on: monitor) {
+				guard let number = state.number(of: workspace) else { continue }
 				var items: [WindowPaletteItem] = []
-				for windowID in windowIDs {
-					// Windows hidden (minimized) with Ctrl+Opt+X are excluded from the normal Space section, and
-					// Add them together later as the Hidden section
-					guard !HiddenWindowManager.shared.isHidden(windowID) else { continue }
-
-					guard let windowInfo = windowInfoMap[windowID] else { continue }
-
-					let item = WindowPaletteItem(
-						windowID: windowID,
-						appName: windowInfo.app.localizedName ?? "Unknown App",
-						windowTitle: windowInfo.title,
-						appIcon: windowInfo.app.icon,
-						workspace: workspace,
-						monitor: screenID
-					)
-
-					// Windows the user has floated are excluded from the normal Space section, and
-					// Add them together later as the Float section
-					if workspaceManager.isFloating(windowID) {
-						userFloatItemsByScreen[screenID, default: []].append(item)
+				for windowID in state.orderedWindows(workspace) {
+					// Windows hidden (minimized) with Ctrl+Opt+X are listed in the Hidden section
+					guard !HiddenWindowManager.shared.isHidden(windowID),
+						  let item = item(windowID, workspace: workspace, monitor: monitor) else { continue }
+					if state.isFloating(windowID) {
+						floatItems.append(item)
 					} else {
 						items.append(item)
 					}
@@ -455,30 +426,23 @@ class WindowPaletteManager {
 
 				// Only add Spaces that have windows
 				if !items.isEmpty {
-					let section = WindowPaletteSection(kind: .space(workspace), items: items)
-					displayMap[screenID]?.spaces.append(section)
+					display.spaces.append(WindowPaletteSection(kind: .space(number), items: items))
 				}
 			}
-		}
 
-		// Sort by Display number
-		var result = Array(displayMap.values)
-		result.sort { $0.displayNumber < $1.displayNumber }
-
-		// --- Add the Float section (windows the user deliberately floated) to each Display ---
-		// The real workspace number is kept on each item
-		for i in result.indices {
-			if let floatItems = userFloatItemsByScreen[result[i].monitor], !floatItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
+			if !floatItems.isEmpty {
+				display.spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
 			}
+			result.append(display)
 		}
 
 		// --- Add the System section (floating windows not registered to any workspace) to the end of each Display ---
 		// Since system-originated floating windows like the Settings app or dialogs aren't registered to a workspace,
 		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section.
+		let allWindows = accessibilityManager.getAllWindows()
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 		let myPID = ProcessInfo.processInfo.processIdentifier
-		var systemFloatItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
+		var systemFloatItemsByMonitor: [MonitorKey: [WindowPaletteItem]] = [:]
 
 		for window in allWindows {
 			// Excludes Axis's own windows (palette, border, etc.)
@@ -497,7 +461,7 @@ class WindowPaletteManager {
 
 			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
 			let screen = screenForWindow(window) ?? NSScreen.screens.first
-			guard let targetScreen = screen, let screenID = workspaceManager.monitorKey(for: targetScreen) else { continue }
+			guard let targetScreen = screen, let monitor = workspaceManager.monitorKey(for: targetScreen) else { continue }
 
 			let item = WindowPaletteItem(
 				windowID: window.id,
@@ -505,35 +469,27 @@ class WindowPaletteManager {
 				windowTitle: window.title,
 				appIcon: window.app.icon,
 				workspace: nil,
-				monitor: screenID
+				monitor: monitor
 			)
-			systemFloatItemsByScreen[screenID, default: []].append(item)
+			systemFloatItemsByMonitor[monitor, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let systemFloatItems = systemFloatItemsByScreen[result[i].monitor], !systemFloatItems.isEmpty {
+			if let systemFloatItems = systemFloatItemsByMonitor[result[i].monitor], !systemFloatItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .system, items: systemFloatItems))
 			}
 		}
 
 		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
-		var hiddenItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
+		var hiddenItemsByMonitor: [MonitorKey: [WindowPaletteItem]] = [:]
 		for windowID in HiddenWindowManager.shared.hiddenWindowIDs {
-			guard let windowInfo = windowInfoMap[windowID],
-				  let location = TrackingCoordinator.shared.state.location(windowID) else { continue }
-			let item = WindowPaletteItem(
-				windowID: windowID,
-				appName: windowInfo.app.localizedName ?? "Unknown App",
-				windowTitle: windowInfo.title,
-				appIcon: windowInfo.app.icon,
-				workspace: location.number,
-				monitor: location.monitor
-			)
-			hiddenItemsByScreen[location.monitor, default: []].append(item)
+			guard let location = state.location(windowID),
+				  let item = item(windowID, workspace: location.workspace, monitor: location.monitor) else { continue }
+			hiddenItemsByMonitor[location.monitor, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let hiddenItems = hiddenItemsByScreen[result[i].monitor], !hiddenItems.isEmpty {
+			if let hiddenItems = hiddenItemsByMonitor[result[i].monitor], !hiddenItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .hidden, items: hiddenItems))
 			}
 		}
@@ -543,36 +499,25 @@ class WindowPaletteManager {
 
 	/// Switch to the selected window's workspace and focus it
 	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
-		guard let screen = workspaceManager.screen(for: item.monitor) else {
-			return
-		}
-
-		let currentWS = workspaceManager.currentWorkspace(on: screen)
-
-		// Switch if it's on a different workspace
-		// (System section windows don't belong to a workspace, so they aren't switched)
-		if let workspace = item.workspace, workspace != currentWS {
-			workspaceManager.switchWorkspace(to: workspace, on: screen)
+		// System section windows don't belong to a workspace, so they aren't switched
+		if let workspace = item.workspace {
+			workspaceManager.switchWorkspace(to: workspace)
 		}
 
 		// Focus the target window
-		let allWindows = accessibilityManager.getAllWindows()
-		for window in allWindows {
-			if window.id == item.windowID {
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-					window.focus()
+		guard let window = TrackingCoordinator.shared.windowInfo(item.windowID)
+				?? accessibilityManager.getAllWindows().first(where: { $0.id == item.windowID }) else { return }
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+			window.focus()
 
-					// Move the mouse cursor to the center of the window
-					let centerX = window.frame.midX
-					let centerY = window.frame.midY
-					CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
+			// Move the mouse cursor to the center of the window, where the switch put it
+			var current = window
+			current.refreshFrame()
+			CGWarpMouseCursorPosition(CGPoint(x: current.frame.midX, y: current.frame.midY))
 
-					// Update the border
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						BorderManager.shared.updateBorder()
-					}
-				}
-				break
+			// Update the border
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+				BorderManager.shared.updateBorder()
 			}
 		}
 	}

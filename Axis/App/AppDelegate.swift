@@ -523,7 +523,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let appearedIDs = currentIDs.subtracting(lastWindowIDs)
 
         // The name of the monitor Zen is active on (to distinguish changes coming from a different monitor)
-        let zenScreenName = zen.activeScreen?.localizedName ?? "?"
+        let zenScreenName = zen.activeMonitor.flatMap { workspaceManager.screen(for: $0)?.localizedName } ?? "?"
 
         PerfLog.logf(
             "Zen auto-cancel: previous=%d current=%d vanished=%d appeared=%d Zen monitor=%@",
@@ -637,9 +637,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Zen is a per-monitor feature, so on monitors where Zen isn't active,
             // Don't cancel it just for a window count change (e.g. simply opening Finder on another monitor)
-            let zenScreen = ZenModeManager.shared.activeScreen
+            let zenMonitor = ZenModeManager.shared.activeMonitor
             let appearedOnZenScreen = managedZen.contains { window in
-                appearedZen.contains(window.id) && screenContainingWindow(window) === zenScreen
+                appearedZen.contains(window.id)
+                    && screenContainingWindow(window).flatMap { workspaceManager.monitorKey(for: $0) } == zenMonitor
             }
             // Closing the centered window itself also ends Zen mode, bringing back the rest of its workspace
             let zenFocusedVanished = ZenModeManager.shared.focusedWindowID.map { vanishedZen.contains($0) } ?? false

@@ -995,20 +995,27 @@ final class TrackingCoordinator {
 	/// A handle for a tracked window, built from the cached element and the record without asking
 	/// the app anything; nil when the window or its app is gone.
 	func windowInfo(_ id: WindowID) -> WindowInfo? {
-		guard let record = state.records[id], let element = ElementCache.shared.windowElement(id) else { return nil }
-		let app: NSRunningApplication
-		if let known = runningApps[record.pid], !known.isTerminated {
-			app = known
-		} else {
-			guard let found = NSRunningApplication(processIdentifier: record.pid), !found.isTerminated else { return nil }
-			runningApps[record.pid] = found
-			app = found
-		}
+		guard let record = state.records[id], let element = ElementCache.shared.windowElement(id),
+			let app = runningApp(record.pid)
+		else { return nil }
 		let observed = record.observed
 		let facts = WindowFacts(id: id, pid: record.pid, role: record.role, subrole: record.subrole, title: record.title,
 			frame: observed.frame ?? .zero, isMinimized: observed.isMinimized, isFullscreen: observed.isFullscreen,
 			hasCloseButton: record.hasCloseButton, minSize: observed.minSize, takenAt: observed.frameAt ?? 0)
 		return WindowInfo(facts: facts, element: element, app: app)
+	}
+
+	/// The running app of a tracked window's process (its name and icon), nil once it quit.
+	func runningApp(_ pid: PID) -> NSRunningApplication? {
+		if let known = runningApps[pid], !known.isTerminated {
+			return known
+		}
+		guard let found = NSRunningApplication(processIdentifier: pid), !found.isTerminated else {
+			runningApps[pid] = nil
+			return nil
+		}
+		runningApps[pid] = found
+		return found
 	}
 
 	/// Plans against `snapshot` and executes the plan. In state-only mode a window the window

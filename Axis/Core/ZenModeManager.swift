@@ -16,8 +16,8 @@ class ZenModeManager: ObservableObject {
     
     private(set) var focusedWindowID: CGWindowID?
 
-    /// The screen Zen mode is active on (used so a Space switch on another monitor doesn't cancel it)
-    private(set) var activeScreen: NSScreen?
+    /// The monitor Zen mode is active on (used so a workspace switch on another monitor doesn't cancel it)
+    private(set) var activeMonitor: MonitorKey?
 
     /// The window width fraction while in Zen mode (default 75%)
     private var widthRatio: CGFloat = 0.75
@@ -72,7 +72,7 @@ class ZenModeManager: ObservableObject {
         guard isActive else { return [:] }
         isActive = false
         focusedWindowID = nil
-        activeScreen = nil
+        activeMonitor = nil
         widthRatio = 0.75
         let frames = hiddenWindowFrames
         hiddenWindowFrames.removeAll()
@@ -92,7 +92,7 @@ class ZenModeManager: ObservableObject {
 
         // Save the state
         focusedWindowID = focusedWindow.id
-        activeScreen = screen
+        activeMonitor = WorkspaceManager.shared.monitorKey(for: screen)
         isActive = true
         PerfLog.event("zen: enter \(PerfLog.describe(focusedWindow)) on \(PerfLog.describe(screen))")
 
@@ -123,7 +123,7 @@ class ZenModeManager: ObservableObject {
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
         focusedWindowID = nil
-        activeScreen = nil
+        activeMonitor = nil
         widthRatio = 0.75
         
         // Move a window that ended up off-screen back to its original position
