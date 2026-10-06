@@ -285,13 +285,15 @@ class BorderManager: ObservableObject {
         let posResult = AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
         let sizeResult = AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
 
-        // Extract the value from an AXValue (it can't be cast directly).
+        // Extract the value from an AXValue (it can't be cast directly; a value of another type counts
+        // as unreadable).
         // If a tracked window is torn down by the app quitting or a close, an AX error comes back here
         // (the pid check above can't catch it, since the foreground app itself doesn't change).
         // Left alone, the border would keep sitting at a position with no window there, so clear it first, then
         // Re-fetch the current focus
         guard posResult == .success, sizeResult == .success,
-              let posValue = positionRef, let szValue = sizeRef else {
+              let posValue = positionRef, let szValue = sizeRef,
+              CFGetTypeID(posValue) == AXValueGetTypeID(), CFGetTypeID(szValue) == AXValueGetTypeID() else {
             hideBorder()
             scheduleUpdateBorder()
             return
@@ -300,8 +302,8 @@ class BorderManager: ObservableObject {
         var position = CGPoint.zero
         var size = CGSize.zero
 
-        AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
-        AXValueGetValue(szValue as! AXValue, .cgSize, &size)
+        AXValueGetValue(unsafeDowncast(posValue, to: AXValue.self), .cgPoint, &position)
+        AXValueGetValue(unsafeDowncast(szValue, to: AXValue.self), .cgSize, &size)
 
         let newFrame = CGRect(origin: position, size: size)
         let expectedBorderRect = calculateBorderRect(for: newFrame)

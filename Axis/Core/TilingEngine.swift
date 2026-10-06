@@ -260,9 +260,7 @@ class TilingEngine: ObservableObject {
         case .left:
             if columnIndex > 0 {
                 // The same row (or the last row) of the column to the left
-                let leftColumn = columns[columnIndex - 1]
-                let targetRow = min(rowIndex, leftColumn.count - 1)
-                targetWindow = leftColumn[targetRow]
+                targetWindow = window(atRow: rowIndex, orLastOf: columns[columnIndex - 1])
             } else {
                 // If at the left edge, go to the monitor on the left
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .left)
@@ -274,9 +272,7 @@ class TilingEngine: ObservableObject {
         case .right:
             if columnIndex < columns.count - 1 {
                 // The same row (or the last row) of the column to the right
-                let rightColumn = columns[columnIndex + 1]
-                let targetRow = min(rowIndex, rightColumn.count - 1)
-                targetWindow = rightColumn[targetRow]
+                targetWindow = window(atRow: rowIndex, orLastOf: columns[columnIndex + 1])
             } else {
                 // If at the right edge, go to the monitor on the right
                 targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .right)
@@ -314,6 +310,12 @@ class TilingEngine: ObservableObject {
             return target.id
         }
         return nil
+    }
+
+    /// The window at `row` of `column`, or the last one of a shorter column (nil for an empty column,
+    /// which must never be indexed)
+    private func window(atRow row: Int, orLastOf column: [WindowInfo]) -> WindowInfo? {
+        column.indices.contains(row) ? column[row] : column.last
     }
 
     /// The window closest to `origin` whose center lies in the given direction;
