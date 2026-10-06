@@ -14,14 +14,14 @@ struct WindowPaletteItem {
 	let windowTitle: String
 	let appIcon: NSImage?
 	/// nil for windows that don't belong to any workspace (the System section)
-	let workspace: Int?
-	let screenID: ScreenIdentifier
+	let workspace: WorkspaceID?
+	let monitor: MonitorKey
 }
 
 /// A section of the palette: one workspace (Space), or one of the special groups
 struct WindowPaletteSection {
 	enum Kind: Equatable {
-		/// A workspace, by number
+		/// A workspace, by the number it shows (0 = home, negatives to the left)
 		case space(Int)
 		/// Windows the user deliberately floated
 		case float
@@ -38,7 +38,7 @@ struct WindowPaletteSection {
 /// Data for a single monitor (Display)
 struct WindowPaletteDisplay {
 	let displayNumber: Int
-	let screenID: ScreenIdentifier
+	let monitor: MonitorKey
 	var spaces: [WindowPaletteSection]
 }
 

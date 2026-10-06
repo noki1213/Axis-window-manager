@@ -71,6 +71,21 @@ struct WindowInfo: Identifiable, Equatable {
         self.hasCloseButton = (closeResult == .success && closeButtonRef != nil)
     }
     
+    /// A handle built from facts already known about the window, without asking the app.
+    init(facts: WindowFacts, element: AXUIElement, app: NSRunningApplication) {
+        self.id = facts.id
+        self.axElement = element
+        self.app = app
+        self.title = facts.title
+        self.frame = facts.frame
+        self.isMinimized = facts.isMinimized
+        self.isFullscreen = facts.isFullscreen
+        self.minSize = facts.minSize ?? CGSize(width: 200, height: 200)
+        self.role = facts.role
+        self.subrole = facts.subrole
+        self.hasCloseButton = facts.hasCloseButton
+    }
+
     /// Whether the window holds keyboard focus within its own app.
     /// Read live rather than cached at init: it changes on every click, with nothing about the window list
     /// changing along with it. A panel that can never become key reads false at all times
@@ -569,6 +584,16 @@ enum FrontProcessAPI {
     static let postEventRecord = lookup("SLPSPostEventRecordTo", as: PostEventRecord.self)
     static let processForPID = lookup("GetProcessForPID", as: ProcessForPID.self)
 
+}
+
+extension WindowFacts {
+    /// What a window read through Accessibility says about itself, as read at `takenAt`.
+    init(info: WindowInfo, takenAt: Time) {
+        self.init(id: info.id, pid: info.app.processIdentifier, role: info.role, subrole: info.subrole,
+                  title: info.title, frame: info.frame, isMinimized: info.isMinimized,
+                  isFullscreen: info.isFullscreen, hasCloseButton: info.hasCloseButton,
+                  minSize: info.minSize, takenAt: takenAt)
+    }
 }
 
 extension WindowInfo {

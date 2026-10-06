@@ -220,10 +220,9 @@ class BorderManager: ObservableObject {
             return
         }
 
-        // Don't show the border on windows evacuated to another workspace or while the palette is showing
-        if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
-           WindowPaletteManager.shared.isWindowHidden(focusedWindow.id) {
-            hideBorder(reason: "focused window is evacuated #\(focusedWindow.id)")
+        // Don't show the border on windows evacuated to another workspace, by Zen mode or while the palette is showing
+        if let reason = WorkspaceManager.shared.hiddenReason(focusedWindow.id) {
+            hideBorder(reason: "focused window is \(reason) #\(focusedWindow.id)")
             return
         }
         
@@ -239,7 +238,7 @@ class BorderManager: ObservableObject {
 
         // The focused window changed = it left the empty monitor
         if windowChanged {
-            TilingEngine.shared.cursorScreen = nil
+            TilingEngine.shared.cursorMonitor = nil
         }
 
         if let existingWindow = borderWindow, existingWindow.isVisible {
