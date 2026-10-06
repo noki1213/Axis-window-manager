@@ -11,6 +11,9 @@ import AppKit
 /// Fetch and display the window list across all workspaces, and
 /// Switch to the selected window's workspace and focus it
 ///
+/// While the palette shows, its session in the tracking state keeps every window out of sight
+/// (ending Zen mode); closing it puts them back where the layout says.
+///
 /// Layout:
 ///   Vertical (rows) → Displays (monitors)
 ///   Horizontal (sections) → Spaces (workspaces)
@@ -39,27 +42,18 @@ class WindowPaletteManager {
 	/// The currently selected window
 	private var selectedItemIndex: Int = 0
 
-	/// The original position of windows stashed off screen while the palette is showing
-	private var hiddenWindowFrames: [CGWindowID: CGRect] = [:]
-
-	/// Whether there's a frame carried over from Zen mode etc. (re-tiling is needed on exit)
-	private var needsRetileOnClose = false
-
 	private let workspaceManager = WorkspaceManager.shared
 	private let accessibilityManager = AccessibilityManager.shared
+	private var coordinator: TrackingCoordinator { TrackingCoordinator.shared }
 
 	private init() {}
 
-	/// Returns whether the given window is stashed off screen while the palette is showing (used to control border display)
-	func isWindowHidden(_ windowID: CGWindowID) -> Bool {
-		return hiddenWindowFrames[windowID] != nil
-	}
-
 	// MARK: - Public Methods
 
-	/// Start palette mode
-	/// - Parameter inheritedHiddenFrames: the original positions of windows carried over from Zen mode etc.
-	func startPalette(inheritedHiddenFrames: [CGWindowID: CGRect] = [:]) {
+	/// Start palette mode: every window leaves the screen (Zen mode ends with it) and the panel
+	/// lists them. The titles are those last read from each app; every app is read again right away
+	/// and the cards follow when a title changed meanwhile.
+	func startPalette() {
 		// Get the currently focused window's ID before opening the palette
 		let focusedWindowID = accessibilityManager.getFocusedWindow()?.id
 
@@ -76,14 +70,10 @@ class WindowPaletteManager {
 		selectedSpaceIndex = initialSelection?.spaceIndex ?? 0
 		selectedItemIndex = initialSelection?.itemIndex ?? 0
 
-		// Temporarily hide the on-screen window (for visibility)
-		hideOnScreenWindows()
-
-		// Overwrite with the original position of windows carried over from Zen mode etc.
-		// (Prefer the original pre-Zen position over the one the palette saved)
-		needsRetileOnClose = !inheritedHiddenFrames.isEmpty
-		for (id, frame) in inheritedHiddenFrames {
-			hiddenWindowFrames[id] = frame
+		// The windows leave the screen while the palette is showing (for visibility)
+		let now = ProcessInfo.processInfo.systemUptime
+		coordinator.perform("palette") { state in
+			state.paletteBegin(now: now)
 		}
 
 		if panel == nil {
@@ -96,24 +86,22 @@ class WindowPaletteManager {
 			itemIndex: selectedItemIndex
 		)
 
+		coordinator.rescanAll { [weak self] in
+			self?.refreshAfterRescan()
+		}
 	}
 
-	/// End palette mode (cancel)
+	/// End palette mode (cancel): the windows come back where the layout puts them
 	func endPalette() {
+		dismiss()
+		endSession()
+	}
+
+	/// Close the panel without touching the windows (the tracking state already ended the
+	/// palette's session, as it does when the displays change)
+	func dismiss() {
 		// Close the palette (hide with animation)
 		panel?.hidePanel()
-
-		// Restore the window that was hidden (restored immediately, without waiting for the animation to finish)
-		restoreHiddenWindows()
-
-		// If it was carried over from Zen mode, re-tiling and restoring the border are required
-		if needsRetileOnClose {
-			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-				TilingEngine.shared.tileAllScreens()
-				BorderManager.shared.updateBorder()
-			}
-			needsRetileOnClose = false
-		}
 
 		displays.removeAll()
 		selectedDisplayIndex = 0
@@ -227,26 +215,19 @@ class WindowPaletteManager {
 		// Close the panel
 		panel?.hidePanel()
 
-		// Restore the window that was hidden
-		restoreHiddenWindows()
-
-		// If it was carried over from Zen mode, re-tiling and restoring the border are required
-		if needsRetileOnClose {
-			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-				TilingEngine.shared.tileAllScreens()
-				BorderManager.shared.updateBorder()
-			}
-			needsRetileOnClose = false
-		}
-
-		// Selecting from the Hidden section (windows hidden with Ctrl+Opt+X)
-		// Route it through the neighbor-memory restore logic instead of a normal workspace switch
+		// The palette's session ends in the same command that brings the selected window on screen,
+		// so the workspace being left never shows in between
 		if space.kind == .hidden {
-			HiddenWindowManager.shared.restore(windowID: selectedItem.windowID)
+			// Selecting from the Hidden section (windows hidden with Ctrl+Opt+X)
+			// Route it through the neighbor-memory restore logic instead of a normal workspace switch
+			HiddenWindowManager.shared.restore(windowID: selectedItem.windowID, endingPalette: true)
 		} else {
 			// Switch to the selected window's workspace
 			switchToWindowWorkspace(selectedItem)
 		}
+		// Nothing to switch or restore (the window is in a workspace shown already, or its state
+		// changed meanwhile): the session still ends
+		endSession()
 
 		// Clear the data
 		displays.removeAll()
@@ -313,137 +294,94 @@ class WindowPaletteManager {
 		}
 	}
 
-	// MARK: - Window Hide / Restore (the corner approach)
+	// MARK: - Session
 
-	/// The corner used to hide a window
-	private func optimalHideCorner(for screen: NSScreen) -> HideCorner {
-		HideCorner.best(for: screen)
+	/// Ends the palette's session in the tracking state unless a command already did
+	private func endSession() {
+		guard coordinator.state.palette != nil else { return }
+		coordinator.perform("palette") { state in
+			state.paletteEnd()
+		}
 	}
 
-	private func hidePosition(for window: WindowInfo, corner: HideCorner, on screen: NSScreen) -> CGPoint {
-		corner.position(forWindowWidth: window.frame.width, on: screen)
+	/// Every app was read again after the palette opened: show the titles that changed (and any
+	/// window that came or went), keeping the selected window selected
+	private func refreshAfterRescan() {
+		guard !displays.isEmpty, coordinator.state.palette != nil else { return }
+		let fresh = collectDisplays()
+		guard !fresh.isEmpty, Self.listing(fresh) != Self.listing(displays) else { return }
+
+		let selectedID = selectedItem()?.windowID
+		displays = fresh
+		if let selectedID, let position = findWindowPosition(windowID: selectedID) {
+			(selectedDisplayIndex, selectedSpaceIndex, selectedItemIndex) = position
+		} else {
+			selectedDisplayIndex = min(selectedDisplayIndex, displays.count - 1)
+			clampSelectionToCurrentDisplay()
+		}
+		panel?.showWithDisplays(
+			displays,
+			displayIndex: selectedDisplayIndex,
+			spaceIndex: selectedSpaceIndex,
+			itemIndex: selectedItemIndex
+		)
 	}
 
-	/// Determine which screen a window is on
-	private func screenForWindow(_ window: WindowInfo) -> NSScreen? {
-		window.screen
-	}
-
-	/// Stash an on-screen window off screen (the corner approach)
-	/// By shrinking the window down to a tiny size before stashing it in the corner,
-	/// Prevents the shadow or corner areas from being visible
-	private func hideOnScreenWindows() {
-		hiddenWindowFrames.removeAll()
-
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let allWindows = accessibilityManager.getAllWindows()
-
-		for window in allWindows {
-			// Only targets managed windows currently shown on screen
-			guard onScreenIDs.contains(window.id) else { continue }
-			guard window.shouldBeManaged() else { continue }
-
-			// Save the original position and size
-			hiddenWindowFrames[window.id] = window.frame
-
-			// Get the screen the window belongs to and stash it in the corner
-			if let screen = screenForWindow(window) {
-				let corner = optimalHideCorner(for: screen)
-				let hidePos = hidePosition(for: window, corner: corner, on: screen)
-				window.setPosition(hidePos)
-			} else {
-				// Fall back to the main screen's corner if the screen can't be determined
-				if let mainScreen = NSScreen.main {
-					let corner = optimalHideCorner(for: mainScreen)
-					let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
-					window.setPosition(hidePos)
-				}
+	/// What the cards show, to tell whether a fresh read changed anything
+	private static func listing(_ displays: [WindowPaletteDisplay]) -> [String] {
+		displays.flatMap { display in
+			display.spaces.flatMap { space in
+				["\(display.monitor.raw) \(space.kind)"] + space.items.map { "\($0.windowID) \($0.appName) \($0.windowTitle)" }
 			}
 		}
-
 	}
 
-	/// Return the stashed window to its original position
-	private func restoreHiddenWindows() {
-		let allWindows = accessibilityManager.getAllWindows()
-
-		for window in allWindows {
-			if let savedFrame = hiddenWindowFrames[window.id] {
-				window.setFrame(savedFrame)
-			}
-		}
-
-		hiddenWindowFrames.removeAll()
+	/// The window under the selection, if any
+	private func selectedItem() -> WindowPaletteItem? {
+		guard displays.indices.contains(selectedDisplayIndex) else { return nil }
+		let spaces = displays[selectedDisplayIndex].spaces
+		guard spaces.indices.contains(selectedSpaceIndex) else { return nil }
+		let items = spaces[selectedSpaceIndex].items
+		return items.indices.contains(selectedItemIndex) ? items[selectedItemIndex] : nil
 	}
 
 	// MARK: - Data Collection
 
-	/// Collect window info for every workspace, grouped by Display
+	/// Collect window info for every workspace, grouped by Display. The workspaces, their order and the
+	/// windows' titles come from the tracking state
 	private func collectDisplays() -> [WindowPaletteDisplay] {
-		// Get every workspace's window IDs in tiling order (left-to-right, top-to-bottom)
-		let allWorkspaces = workspaceManager.windowIDsInTilingOrder()
+		let state = coordinator.state
 
-		// Get info for every current window (via the AX API)
-		let allWindows = accessibilityManager.getAllWindows()
-
-		// Build a dictionary of window ID -> WindowInfo (for fast lookup)
-		var windowInfoMap: [CGWindowID: WindowInfo] = [:]
-		for window in allWindows {
-			windowInfoMap[window.id] = window
+		func item(_ windowID: CGWindowID, workspace: WorkspaceID?, monitor: MonitorKey) -> WindowPaletteItem? {
+			guard let record = state.record(windowID) else { return nil }
+			let app = coordinator.runningApp(record.pid)
+			return WindowPaletteItem(
+				windowID: windowID,
+				appName: app?.localizedName ?? (record.appName.isEmpty ? "Unknown App" : record.appName),
+				windowTitle: record.title,
+				appIcon: app?.icon,
+				workspace: workspace,
+				monitor: monitor
+			)
 		}
 
-		// Lookup table from ScreenIdentifier to monitor number (1-based)
-		var displayNumberMap: [ScreenIdentifier: Int] = [:]
-		for (index, screen) in NSScreen.screens.enumerated() {
-			let sid = ScreenIdentifier(from: screen)
-			displayNumberMap[sid] = index + 1
-		}
+		var result: [WindowPaletteDisplay] = []
+		for (index, monitor) in state.monitorOrder.enumerated() {
+			var display = WindowPaletteDisplay(displayNumber: index + 1, monitor: monitor, spaces: [])
 
-		// Build the data per Display
-		var displayMap: [ScreenIdentifier: WindowPaletteDisplay] = [:]
+			// Windows the user deliberately floated with Ctrl+Option+F
+			// They belong to a workspace, but are grouped into a section of their own
+			var floatItems: [WindowPaletteItem] = []
 
-		// Windows the user deliberately floated with Ctrl+Option+F (per Display)
-		// It normally appears in its own workspace's section, but pull it out here and group it into a separate section
-		var userFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
-
-		for (screenID, workspaces) in allWorkspaces {
-			let displayNumber = displayNumberMap[screenID] ?? 1
-
-			// Create an entry for this Display if one doesn't exist
-			if displayMap[screenID] == nil {
-				displayMap[screenID] = WindowPaletteDisplay(
-					displayNumber: displayNumber,
-					screenID: screenID,
-					spaces: []
-				)
-			}
-
-			let sortedWorkspaces = workspaces.keys.sorted()
-
-			for workspace in sortedWorkspaces {
-				guard let windowIDs = workspaces[workspace] else { continue }
-
+			for workspace in state.workspaceOrder(on: monitor) {
+				guard let number = state.number(of: workspace) else { continue }
 				var items: [WindowPaletteItem] = []
-				for windowID in windowIDs {
-					// Windows hidden (minimized) with Ctrl+Opt+X are excluded from the normal Space section, and
-					// Add them together later as the Hidden section
-					guard !HiddenWindowManager.shared.isHidden(windowID) else { continue }
-
-					guard let windowInfo = windowInfoMap[windowID] else { continue }
-
-					let item = WindowPaletteItem(
-						windowID: windowID,
-						appName: windowInfo.app.localizedName ?? "Unknown App",
-						windowTitle: windowInfo.title,
-						appIcon: windowInfo.app.icon,
-						workspace: workspace,
-						screenID: screenID
-					)
-
-					// Windows the user has floated are excluded from the normal Space section, and
-					// Add them together later as the Float section
-					if workspaceManager.isFloating(windowID) {
-						userFloatItemsByScreen[screenID, default: []].append(item)
+				for windowID in state.orderedWindows(workspace) {
+					// Windows hidden (minimized) with Ctrl+Opt+X are listed in the Hidden section
+					guard !HiddenWindowManager.shared.isHidden(windowID),
+						  let item = item(windowID, workspace: workspace, monitor: monitor) else { continue }
+					if state.isFloating(windowID) {
+						floatItems.append(item)
 					} else {
 						items.append(item)
 					}
@@ -451,85 +389,49 @@ class WindowPaletteManager {
 
 				// Only add Spaces that have windows
 				if !items.isEmpty {
-					let section = WindowPaletteSection(kind: .space(workspace), items: items)
-					displayMap[screenID]?.spaces.append(section)
+					display.spaces.append(WindowPaletteSection(kind: .space(number), items: items))
 				}
 			}
-		}
 
-		// Sort by Display number
-		var result = Array(displayMap.values)
-		result.sort { $0.displayNumber < $1.displayNumber }
-
-		// --- Add the Float section (windows the user deliberately floated) to each Display ---
-		// The real workspace number is kept on each item
-		for i in result.indices {
-			if let floatItems = userFloatItemsByScreen[result[i].screenID], !floatItems.isEmpty {
-				result[i].spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
+			if !floatItems.isEmpty {
+				display.spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
 			}
+			result.append(display)
 		}
 
 		// --- Add the System section (floating windows not registered to any workspace) to the end of each Display ---
 		// Since system-originated floating windows like the Settings app or dialogs aren't registered to a workspace,
 		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section.
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let myPID = ProcessInfo.processInfo.processIdentifier
-		var systemFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		var systemFloatItemsByMonitor: [MonitorKey: [WindowPaletteItem]] = [:]
 
-		for window in allWindows {
-			// Excludes Axis's own windows (palette, border, etc.)
-			guard window.app.processIdentifier != myPID else { continue }
-			// Only windows currently shown on screen
-			guard onScreenIDs.contains(window.id) else { continue }
-			// Excluded if it's already registered to some workspace, since it already shows up in the normal section
-			guard !workspaceManager.isWindowInAnyWorkspace(window.id) else { continue }
-			// Minimized and fullscreen windows are excluded
-			guard !window.isMinimized && !window.isFullscreen else { continue }
-			// Only targets real windows (standard windows or dialogs)
-			// (So invisible helper windows, like the ones Arc has, don't show up in the list)
-			guard window.shouldBeManaged()
-				|| window.subrole == kAXDialogSubrole as String
-				|| window.subrole == kAXSystemDialogSubrole as String else { continue }
+		for windowID in state.records.keys.sorted() {
+			guard let record = state.record(windowID), record.workspace == nil else { continue }
+			// Only windows that are on screen (the palette leaves these where they are; minimized and
+			// fullscreen ones are in other states)
+			guard record.visibility == .visible, record.observed.onScreen else { continue }
 
-			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
-			let screen = screenForWindow(window) ?? NSScreen.screens.first
-			guard let targetScreen = screen else { continue }
-			let screenID = ScreenIdentifier(from: targetScreen)
-
-			let item = WindowPaletteItem(
-				windowID: window.id,
-				appName: window.app.localizedName ?? "Unknown App",
-				windowTitle: window.title,
-				appIcon: window.app.icon,
-				workspace: nil,
-				screenID: screenID
-			)
-			systemFloatItemsByScreen[screenID, default: []].append(item)
+			// The monitor the window is on (falls back to the main one if it can't be determined)
+			guard let monitor = record.observed.frame.flatMap({ state.monitorKey(for: $0) }) ?? state.primaryMonitor,
+				  let item = item(windowID, workspace: nil, monitor: monitor) else { continue }
+			systemFloatItemsByMonitor[monitor, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let systemFloatItems = systemFloatItemsByScreen[result[i].screenID], !systemFloatItems.isEmpty {
+			if let systemFloatItems = systemFloatItemsByMonitor[result[i].monitor], !systemFloatItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .system, items: systemFloatItems))
 			}
 		}
 
 		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
-		var hiddenItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
-		for record in HiddenWindowManager.shared.hiddenStack {
-			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
-			let item = WindowPaletteItem(
-				windowID: record.windowID,
-				appName: windowInfo.app.localizedName ?? "Unknown App",
-				windowTitle: windowInfo.title,
-				appIcon: windowInfo.app.icon,
-				workspace: record.workspace,
-				screenID: record.screenID
-			)
-			hiddenItemsByScreen[record.screenID, default: []].append(item)
+		var hiddenItemsByMonitor: [MonitorKey: [WindowPaletteItem]] = [:]
+		for windowID in HiddenWindowManager.shared.hiddenWindowIDs {
+			guard let location = state.location(windowID),
+				  let item = item(windowID, workspace: location.workspace, monitor: location.monitor) else { continue }
+			hiddenItemsByMonitor[location.monitor, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let hiddenItems = hiddenItemsByScreen[result[i].screenID], !hiddenItems.isEmpty {
+			if let hiddenItems = hiddenItemsByMonitor[result[i].monitor], !hiddenItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .hidden, items: hiddenItems))
 			}
 		}
@@ -537,38 +439,27 @@ class WindowPaletteManager {
 		return result
 	}
 
-	/// Switch to the selected window's workspace and focus it
+	/// Switch to the selected window's workspace (ending the palette's session in the same command)
+	/// and focus it
 	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
-		guard let screen = workspaceManager.screen(for: item.screenID) else {
-			return
-		}
-
-		let currentWS = workspaceManager.currentWorkspace(on: screen)
-
-		// Switch if it's on a different workspace
-		// (System section windows don't belong to a workspace, so they aren't switched)
-		if let workspace = item.workspace, workspace != currentWS {
-			workspaceManager.switchWorkspace(to: workspace, on: screen)
+		// System section windows don't belong to a workspace, so they aren't switched
+		if let workspace = item.workspace, !coordinator.state.isActive(workspace) {
+			workspaceManager.switchWorkspace(to: workspace, endingPalette: true)
 		}
 
 		// Focus the target window
-		let allWindows = accessibilityManager.getAllWindows()
-		for window in allWindows {
-			if window.id == item.windowID {
-				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-					window.focus()
+		guard let window = coordinator.windowInfo(item.windowID) else { return }
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+			window.focus()
 
-					// Move the mouse cursor to the center of the window
-					let centerX = window.frame.midX
-					let centerY = window.frame.midY
-					CGWarpMouseCursorPosition(CGPoint(x: centerX, y: centerY))
+			// Move the mouse cursor to the center of the window, where the switch put it
+			var current = window
+			current.refreshFrame()
+			CGWarpMouseCursorPosition(CGPoint(x: current.frame.midX, y: current.frame.midY))
 
-					// Update the border
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-						BorderManager.shared.updateBorder()
-					}
-				}
-				break
+			// Update the border
+			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+				BorderManager.shared.updateBorder()
 			}
 		}
 	}

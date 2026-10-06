@@ -26,9 +26,12 @@ class AccessibilityManager: ObservableObject {
     ]
 
     @Published var isAccessibilityEnabled: Bool = false
-    
+
+    /// The reason the last getFocusedWindow() call failed (AXError)
+    private(set) var lastFocusedWindowError: AXError?
+
     private var pollTimer: Timer?
-    
+
     private init() {
         _ = checkAccessibility()
     }
@@ -65,158 +68,13 @@ class AccessibilityManager: ObservableObject {
     }
     
     // MARK: - Window Access
-    
-    /// Get the windows of every application
-    func getAllWindows() -> [WindowInfo] {
-        guard isAccessibilityEnabled else {
+
+    /// Get the windows of the application with the given PID (an app that can't be read is
+    /// reported as having no windows)
+    func getWindows(forPID pid: pid_t) -> [WindowInfo] {
+        guard isAccessibilityEnabled, let app = NSRunningApplication(processIdentifier: pid) else {
             return []
         }
-
-        // A very short-lived cache.
-        // Within a single key press or hover, focus moves, tiling, border updates, and so on
-        // Since each one triggered a full scan independently, it was measured running 2-5 times per second (10-125ms each).
-        // Whenever Axis itself moves a window, invalidateWindowCache() always discards it, so
-        // It never gets placed using stale coordinates
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - cachedAllWindowsTime < Self.allWindowsCacheTTL {
-            return cachedAllWindows
-        }
-
-        let perfStart = now
-
-        let runningApps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy == .regular
-        }
-
-        // Run the per-app AX queries in parallel.
-        // Running them serially means a slow-responding app (measured: Activity Monitor at 187ms, Outlook at 149ms)
-        // The wait times just summed up, adding up to 25-390ms overall.
-        // Running them in parallel cuts the wait down to just the slowest single app.
-        // Write results back by index to preserve the original app order
-        var results = [[WindowInfo]](repeating: [], count: runningApps.count)
-        var failedPIDs = Set<pid_t>()
-        var incompletePIDs = Set<pid_t>()
-        if !runningApps.isEmpty {
-            let lock = NSLock()
-            DispatchQueue.concurrentPerform(iterations: runningApps.count) { index in
-                let fetched = self.fetchWindows(for: runningApps[index])
-                let pid = runningApps[index].processIdentifier
-                lock.lock()
-                results[index] = fetched?.windows ?? []
-                if fetched == nil {
-                    failedPIDs.insert(pid)
-                } else if fetched?.complete == false {
-                    incompletePIDs.insert(pid)
-                }
-                lock.unlock()
-            }
-        }
-        let windows = results.flatMap { $0 }
-        lastScanFailedPIDs = failedPIDs
-        lastScanIncompletePIDs = incompletePIDs
-        for window in windows {
-            knownWindowOwners[window.id] = window.app.processIdentifier
-        }
-
-        // Record windows that disappeared since the last scan (for diagnostics).
-        // A genuine close also shows up here, but if it appears right before "assigned the whole screen,"
-        // Serves as evidence that a miss broke the layout
-        if PerfLog.enabled {
-            let currentIDs = Set(windows.map { $0.id })
-            let disappeared = previousScanWindows.filter { !currentIDs.contains($0.key) }
-            if !disappeared.isEmpty {
-                let names = disappeared.values.joined(separator: ", ")
-                PerfLog.logf("★ Windows vanished: %@ (%d -> %d) load=%@", names, previousScanWindows.count, windows.count, PerfLog.loadAverage())
-            }
-            previousScanWindows = Dictionary(uniqueKeysWithValues: windows.map {
-                ($0.id, "\($0.app.localizedName ?? "?")/\($0.title)")
-            })
-        }
-
-        cachedAllWindows = windows
-        cachedAllWindowsTime = CFAbsoluteTimeGetCurrent()
-
-        let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
-        if PerfLog.enabled && perfElapsed >= 0.005 {
-            PerfLog.logf("AX.getAllWindows: %.1fms (%d windows)", perfElapsed * 1000, windows.count)
-        }
-
-        return windows
-    }
-
-    // MARK: - Window list cache
-
-    /// The cache's lifetime (in seconds)
-    /// Short enough to feel like a single action to a person, yet long enough to batch together consecutive internal operations
-    private static let allWindowsCacheTTL: TimeInterval = 0.1
-
-    private var cachedAllWindows: [WindowInfo] = []
-    private var cachedAllWindowsTime: CFAbsoluteTime = 0
-
-    /// Windows visible on the previous scan (for diagnostics: ID → app name/title)
-    private var previousScanWindows: [CGWindowID: String] = [:]
-
-    /// Discard the window list cache
-    /// Always call this right after Axis changes state — moving a window, shifting focus, etc.
-    func invalidateWindowCache() {
-        cachedAllWindowsTime = 0
-        cachedFocusedWindowTime = 0
-    }
-
-    /// The focused window cache
-    /// Within a single operation, many call sites were each querying independently, and
-    /// Measured running nearly 10 times per second (6-282ms each)
-    private var cachedFocusedWindow: WindowInfo?
-    private var cachedFocusedWindowTime: CFAbsoluteTime = 0
-
-    /// The reason the last getFocusedWindow() call failed (AXError)
-    private(set) var lastFocusedWindowError: AXError?
-
-    /// Apps whose window list could not be read in the last full scan (usually an AX timeout under heavy CPU load).
-    /// Their windows are missing from that scan's result without having been closed
-    private(set) var lastScanFailedPIDs: Set<pid_t> = []
-
-    /// Apps that answered the last full scan but returned windows whose details couldn't be read.
-    /// While the screen is locked every app answers this way. Some apps (Finder's desktop) always do,
-    /// so this alone doesn't mean a window was hidden from the scan
-    private(set) var lastScanIncompletePIDs: Set<pid_t> = []
-
-    /// Owner process of every window seen in any scan so far, so a window that has since vanished
-    /// from the AX list can still be traced back to its app
-    private var knownWindowOwners: [CGWindowID: pid_t] = [:]
-
-    /// Of the given windows, those whose app failed to answer in the last scan.
-    /// Such windows have merely become unreadable, not closed
-    func windowsUnreadableInLastScan(_ windowIDs: Set<CGWindowID>) -> Set<CGWindowID> {
-        guard !lastScanFailedPIDs.isEmpty else { return [] }
-        return windowIDs.filter { id in
-            guard let pid = knownWindowOwners[id] else { return false }
-            return lastScanFailedPIDs.contains(pid)
-        }
-    }
-
-    /// Of the given windows, those whose app failed to answer the last scan, or answered without
-    /// the details of every window. Pair this with a window-server existence check before treating
-    /// such a window as still open, since an incomplete answer can also come from an app that's fine
-    func windowsPossiblyUnreadableInLastScan(_ windowIDs: Set<CGWindowID>) -> Set<CGWindowID> {
-        let suspectPIDs = lastScanFailedPIDs.union(lastScanIncompletePIDs)
-        guard !suspectPIDs.isEmpty else { return [] }
-        return windowIDs.filter { id in
-            guard let pid = knownWindowOwners[id] else { return false }
-            return suspectPIDs.contains(pid)
-        }
-    }
-
-    /// Get the windows of a specific application (an unreadable app is reported as having no windows)
-    func getWindows(for app: NSRunningApplication) -> [WindowInfo] {
-        return fetchWindows(for: app)?.windows ?? []
-    }
-
-    /// Get the windows of a specific application.
-    /// - Returns: nil when the app's window list could not be read at all (timeout etc.),
-    ///   as opposed to an empty array for an app that genuinely has no windows.
-    ///   `complete` is false when some of the listed windows couldn't be turned into a WindowInfo
-    private func fetchWindows(for app: NSRunningApplication) -> (windows: [WindowInfo], complete: Bool)? {
         let perfStart = CFAbsoluteTimeGetCurrent()
         defer {
             let perfElapsed = CFAbsoluteTimeGetCurrent() - perfStart
@@ -226,94 +84,16 @@ class AccessibilityManager: ObservableObject {
             }
         }
 
-        guard let axApp = AXUIElementCreateApplication(app.processIdentifier) as AXUIElement? else {
-            return ([], true)
-        }
+        let axApp = AXUIElementCreateApplication(pid)
         // Set a timeout so the main thread doesn't block on a slow-responding app
-        // (too short and it misses slow apps' windows, breaking the layout)
         AXUIElementSetMessagingTimeout(axApp, 0.3)
 
         var windowsRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef)
-
-        guard result == .success, let axWindows = windowsRef as? [AXUIElement] else {
-            // The query failed (usually cut off by a timeout).
-            // This app's windows get reported downstream as "not existing," and
-            // This can break the layout, so always log when it happens
-            if PerfLog.enabled {
-                PerfLog.logf("★ AX miss: %@ (result=%d)", app.localizedName ?? "?", result.rawValue)
-            }
-            return nil
-        }
-
-        let windows = axWindows.compactMap { axWindow -> WindowInfo? in
-            return WindowInfo(axElement: axWindow, app: app)
-        }
-
-        // Also counts as a miss when AX returned a window but a WindowInfo couldn't be built for it
-        if PerfLog.enabled && windows.count < axWindows.count {
-            PerfLog.logf("★ AX miss (info fetch failed): %@ (%d windows, only %d usable)",
-                         app.localizedName ?? "?", axWindows.count, windows.count)
-        }
-
-        return (windows, windows.count == axWindows.count)
-    }
-
-    /// Get the windows of the application with the given PID
-    func getWindows(forPID pid: pid_t) -> [WindowInfo] {
-        guard isAccessibilityEnabled else {
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let axWindows = windowsRef as? [AXUIElement] else {
             return []
         }
-        guard let app = NSRunningApplication(processIdentifier: pid) else {
-            return []
-        }
-        return getWindows(for: app)
-    }
-    
-    /// Fetch the windows for multiple PIDs together (querying each app in parallel)
-    func getWindows(forPIDs pids: Set<pid_t>) -> [WindowInfo] {
-        guard isAccessibilityEnabled, !pids.isEmpty else {
-            return []
-        }
-
-        let apps = pids.compactMap { NSRunningApplication(processIdentifier: $0) }
-        guard !apps.isEmpty else { return [] }
-
-        var results = [[WindowInfo]](repeating: [], count: apps.count)
-        let lock = NSLock()
-        DispatchQueue.concurrentPerform(iterations: apps.count) { index in
-            let appWindows = self.getWindows(for: apps[index])
-            lock.lock()
-            results[index] = appWindows
-            lock.unlock()
-        }
-        return results.flatMap { $0 }
-    }
-
-    /// Get the set of window IDs currently showing in the current Space (on screen)
-    /// Using kCGWindowListOptionOnScreenOnly excludes windows on other Spaces
-    func getOnScreenWindowIDs() -> Set<CGWindowID> {
-        let options = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
-        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-
-        var windowIDs = Set<CGWindowID>()
-        for windowInfo in windowList {
-            if let windowNumber = windowInfo[kCGWindowNumber as String] as? CGWindowID {
-                windowIDs.insert(windowNumber)
-            }
-        }
-        return windowIDs
-    }
-    
-    /// Get the IDs of every window that still exists, wherever it is (other Spaces, minimized,
-    /// moved out of sight). Read from the window server, so an app too busy to answer AX still counts
-    func getExistingWindowIDs() -> Set<CGWindowID> {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-        return Set(windowList.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+        return axWindows.compactMap { WindowInfo(axElement: $0, app: app) }
     }
 
     /// Get the focused window
@@ -329,13 +109,6 @@ class AccessibilityManager: ObservableObject {
         guard isAccessibilityEnabled else {
             lastFocusedWindowError = nil
             return nil
-        }
-
-        // The same very-short-lived cache as getAllWindows.
-        // Whenever Axis itself moves focus, always discard it via invalidateWindowCache()
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - cachedFocusedWindowTime < Self.allWindowsCacheTTL {
-            return cachedFocusedWindow
         }
 
         guard let frontApp = NSWorkspace.shared.frontmostApplication else {
@@ -366,8 +139,14 @@ class AccessibilityManager: ObservableObject {
             return nil
         }
 
-        // Treat it as an AXUIElement
-        let windowElement = axWindow as! AXUIElement
+        // Only an AXUIElement can be a window; a value of any other type from a misbehaving app
+        // counts as no focused window
+        guard CFGetTypeID(axWindow) == AXUIElementGetTypeID() else {
+            lastFocusedWindowError = nil
+            PerfLog.reportFocusLost(reason: "focused window is not an element", app: appName)
+            return nil
+        }
+        let windowElement = unsafeDowncast(axWindow, to: AXUIElement.self)
         guard let window = WindowInfo(axElement: windowElement, app: frontApp) else {
             lastFocusedWindowError = nil
             // When AX returned a window but its window ID couldn't be obtained
@@ -376,60 +155,61 @@ class AccessibilityManager: ObservableObject {
         }
         lastFocusedWindowError = nil
         PerfLog.reportFocusRecovered(app: appName)
-        cachedFocusedWindow = window
-        cachedFocusedWindowTime = CFAbsoluteTimeGetCurrent()
         return window
     }
     
     /// Get just the ID of the focused window
-    /// getFocusedWindow() queries several AX attributes — title, size, role, etc. — to build a WindowInfo
-    /// Polls AX about 8 times. Just to confirm whether focus actually moved to the target window
-    /// In this case, get just the ID to reduce the wait on the main thread
+    /// getFocusedWindow() queries several AX attributes (title, frame, subrole, ...) to build a WindowInfo.
+    /// Callers that only need to know which window has focus use this instead, to cut the wait
+    /// on the main thread
     func getFocusedWindowID() -> CGWindowID? {
+        if case .window(let id) = readFocusedWindowID() {
+            return id
+        }
+        return nil
+    }
+
+    /// What a read of the focused window's ID found
+    enum FocusedWindowIDRead: Equatable {
+        case window(CGWindowID)
+        /// The app answered, but no window of it is focused (or the focused one has no window ID)
+        case noWindow
+        /// The app ran into the timeout. Asking again only makes the main thread wait for it again
+        case timedOut
+    }
+
+    /// Read the focused window's ID, saying whether the app answered
+    /// - Parameter timeout: the longest the read may block (in seconds)
+    func readFocusedWindowID(timeout: TimeInterval = 0.3) -> FocusedWindowIDRead {
         guard isAccessibilityEnabled,
               let frontApp = NSWorkspace.shared.frontmostApplication else {
-            return nil
+            return .noWindow
         }
 
         let axApp = AXUIElementCreateApplication(frontApp.processIdentifier)
-        AXUIElementSetMessagingTimeout(axApp, 0.3)
+        AXUIElementSetMessagingTimeout(axApp, Float(timeout))
 
         var focusedWindowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
-              let axWindow = focusedWindowRef else {
-            return nil
+        let start = CFAbsoluteTimeGetCurrent()
+        let result = AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
+        guard result == .success, let axWindow = focusedWindowRef else {
+            // The same error that comes back at once is the app refusing to answer; one that comes
+            // back after the whole timeout is an app that hangs
+            let ranIntoTimeout = result == .cannotComplete && CFAbsoluteTimeGetCurrent() - start >= timeout * 0.8
+            return ranIntoTimeout ? .timedOut : .noWindow
         }
 
-        let element = axWindow as! AXUIElement
-        AXUIElementSetMessagingTimeout(element, 0.3)
+        guard CFGetTypeID(axWindow) == AXUIElementGetTypeID() else { return .noWindow }
+        let element = unsafeDowncast(axWindow, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(element, Float(timeout))
 
         var windowID: CGWindowID = 0
-        guard _AXUIElementGetWindow(element, &windowID) == .success, windowID != 0 else {
-            return nil
+        let idResult = _AXUIElementGetWindow(element, &windowID)
+        if idResult == .success, windowID != 0 {
+            return .window(windowID)
         }
-        return windowID
-    }
-
-    /// Get the window at the given coordinates (screen coordinate system: bottom-left origin)
-    func getWindowAt(_ point: CGPoint) -> WindowInfo? {
-        // Target only on-screen windows
-        let onScreenIDs = getOnScreenWindowIDs()
-        let allWindows = getAllWindows().filter { onScreenIDs.contains($0.id) }
-        
-        // We'd like to check in Z-order (frontmost first), but getAllWindows returns them in app order
-        // so ideally we'd use WindowList to sort by Z-order, but
-        // As a simple heuristic, the smallest window by area among the ones found (accounting for overlap), or
-        // Simply returns whatever hits.
-        // This simply returns whatever hits, but with overlapping windows the result can depend on app order.
-        // In practice, since this is a tiling WM, overlap should be rare.
-        
-        // Convert to the Accessibility API's coordinate system (top-left origin)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let axPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
-        
-        return allWindows.first { window in
-            window.frame.contains(axPoint)
-        }
+        let ranIntoTimeout = idResult == .cannotComplete && CFAbsoluteTimeGetCurrent() - start >= timeout * 0.8
+        return ranIntoTimeout ? .timedOut : .noWindow
     }
 }
 

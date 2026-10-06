@@ -23,7 +23,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
 - Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
-- State Persistence: Workspaces and window positions are preserved across sleep and lock. Launching Axis starts every window on workspace 0 of its monitor.
+- State Persistence: Workspaces and window positions are preserved across sleep and lock. After Axis is relaunched or updated, the workspaces, their order, the columns and the floating windows come back as they were; windows that no longer exist are skipped.
 - Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
 ## Customizing Keyboard Shortcuts
@@ -66,8 +66,8 @@ If the key combination is already used by another action, a conflict warning wil
 - A rescue shortcut brings all floating windows to the front at once
 
 ### Zen Mode
-- Centers the focused window and hides all other windows on the primary monitor
-- If the window is on a secondary monitor, it will be moved to the primary monitor
+- Centers the focused window on its own monitor and hides the other windows shown on that monitor
+- Other monitors are left as they are
 - When exiting Zen Mode, the window is restored to its original position
 
 ### Gap Adjustment
@@ -201,7 +201,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示。現在のモードに応じてメニューバーのアイコンが変化
 - スマートワークスペース：ワークスペース間の移動と、ウィンドウの移動を効率的に実行。空のワークスペースは自動削除されます
 - カスタムキーボードショートカット：設定画面からすべてのショートカットを自由に変更できます
-- 状態の永続化：スリープやロックからの復帰後もワークスペースとウィンドウ配置を維持します
+- 状態の永続化：スリープやロックからの復帰後もワークスペースとウィンドウ配置を維持します。Axis を再起動・アップデートしたあとも、ワークスペースとその並び順、カラム、フローティングウィンドウが元のとおりに戻ります（なくなったウィンドウは無視されます）
 - 安全な終了：Axis 終了時、すべてのウィンドウを画面内の見える位置に復元します
 
 ## ショートカットの設定方法
@@ -244,9 +244,9 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - 救出キーで、すべての浮遊ウィンドウをまとめて最前面に出せる
 
 ### Zen モード
-- フォーカス中のウィンドウをメインモニターの中央に表示
-- 他のすべてのウィンドウを非表示にして、集中できる環境を作成
-- サブモニターのウィンドウも Zen モードにするとメインモニターに移動
+- フォーカス中のウィンドウを、そのウィンドウがあるモニターの中央に表示
+- そのモニターに表示されている他のウィンドウを非表示にして、集中できる環境を作成
+- 他のモニターはそのまま
 - Zen モード解除時は、ウィンドウは元の位置に復元される
 
 ### ギャップ操作
@@ -287,7 +287,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - 空のワークスペースは自動的に削除され、ID が再割り当てされます
 
 ### アプリを脇に起動する
-アプリを、使っているワークスペースの右隣の空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
+アプリを、使用中のいちばん右のワークスペースのさらに右にある空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
 
 | 入口 | 動作 |
 |---|---|

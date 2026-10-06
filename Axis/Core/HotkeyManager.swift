@@ -70,12 +70,6 @@ class HotkeyManager: ObservableObject {
 		destroyEventTap()
 	}
 
-	/// Force a restart (for calling from the menu, etc.)
-	func restart() {
-		stop()
-		start()
-	}
-
 	/// Rebuild the lookup table from HotkeyStore
 	func reloadBindings() {
 		lookupTable = HotkeyStore.shared.buildLookupTable()
@@ -379,19 +373,14 @@ class HotkeyManager: ObservableObject {
 		case .floatToggle:
 			DispatchQueue.main.async { [weak self] in
 				guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-				let wasFloating = WorkspaceManager.shared.isFloating(focusedWindow.id)
+				// Turning Float on centers the window on its monitor; turning it off tiles it
+				// where it is (the command lays the windows out)
 				WorkspaceManager.shared.toggleFloat(windowID: focusedWindow.id)
 
-				// When turning Float on, move the window to the center of the monitor
-				if !wasFloating, let screen = WorkspaceManager.shared.focusedScreen() {
-					let visibleFrame = screen.visibleFrame
-					let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-					let centerX = visibleFrame.midX - focusedWindow.frame.width / 2
-					let centerY = mainScreenHeight - visibleFrame.midY - focusedWindow.frame.height / 2
-					focusedWindow.setPosition(CGPoint(x: centerX, y: centerY))
+				// Floating windows stay over the tiles that moved
+				for screen in NSScreen.screens {
+					self?.tilingEngine.raiseFloatingWindows(on: screen)
 				}
-
-				self?.tilingEngine.tileAllScreens()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
 					BorderManager.shared.updateBorder()
 				}
@@ -401,8 +390,7 @@ class HotkeyManager: ObservableObject {
 			DispatchQueue.main.async {
 				let floatIDs = WorkspaceManager.shared.floatWindowIDs
 				guard !floatIDs.isEmpty else { return }
-				let allWindows = AccessibilityManager.shared.getAllWindows()
-				let floatWindows = allWindows.filter { floatIDs.contains($0.id) }
+				let floatWindows = TrackingCoordinator.shared.windowInfos(floatIDs.sorted())
 					.sorted { $0.frame.midX < $1.frame.midX }
 				guard !floatWindows.isEmpty else { return }
 
@@ -454,23 +442,16 @@ class HotkeyManager: ObservableObject {
 
 		case .windowPaletteMode:
 			DispatchQueue.main.async { [weak self] in
-				var zenFrames: [CGWindowID: CGRect] = [:]
-				if ZenModeManager.shared.isActive {
-					zenFrames = ZenModeManager.shared.exitAndHandOffHiddenFrames()
-				}
+				// The palette takes every window out of sight, so Zen mode ends with it
 				self?.currentMode = .windowPalette
-				self?.windowPaletteManager.startPalette(inheritedHiddenFrames: zenFrames)
+				self?.windowPaletteManager.startPalette()
 				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
 			}
 
 		// MARK: Layout
 		case .resetLayout:
 			DispatchQueue.main.async { [weak self] in
-				// Zen mode keeps the other windows hidden in a corner; laying them out underneath it
-				// would leave Zen half-applied, so bring them back first
-				if ZenModeManager.shared.isActive {
-					ZenModeManager.shared.exit()
-				}
+				// Zen mode ends with the reset: its windows come back into their new slots
 				self?.tilingEngine.resetToSingleWindowColumns()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
 					BorderManager.shared.updateBorder()
@@ -500,7 +481,7 @@ class HotkeyManager: ObservableObject {
 		// MARK: Workspace
 		case .workspaceNext:
 			DispatchQueue.main.async {
-				// If cursorScreen is set (we're on an empty monitor), prefer that
+				// If the cursor was moved to an empty monitor, prefer that one
 				guard let screen = TilingEngine.shared.cursorScreen ?? WorkspaceManager.shared.focusedScreen() else { return }
 				WorkspaceManager.shared.switchToNextWorkspace(on: screen)
 			}

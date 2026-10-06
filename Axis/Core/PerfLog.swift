@@ -30,8 +30,9 @@ enum PerfLog {
 	/// Where the logs are kept (since NSLog doesn't always flow into the log stream depending on the environment,
 	/// Also write the same content to a file that's guaranteed to be readable)
 	private static let logDirectory: URL = {
-		let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-			.appendingPathComponent("Logs", isDirectory: true)
+		let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+			?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).appendingPathComponent("Library", isDirectory: true)
+		let dir = library.appendingPathComponent("Logs", isDirectory: true)
 		try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 		return dir
 	}()
@@ -148,11 +149,6 @@ enum PerfLog {
 	/// Short one-line description of a window for event lines: "App/Title#id"
 	static func describe(_ window: WindowInfo) -> String {
 		"\(window.app.localizedName ?? "?")/\(window.title)#\(window.id)"
-	}
-
-	/// Comma-separated descriptions of several windows
-	static func describe(_ windows: [WindowInfo]) -> String {
-		windows.map { describe($0) }.joined(separator: ", ")
 	}
 
 	/// Short description of a screen for event lines
