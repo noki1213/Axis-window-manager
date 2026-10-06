@@ -164,7 +164,7 @@ class WorkspacePeekManager {
 
 	/// Decide which monitor to show the peek preview on
 	/// Shown, as a rule, on the monitor the focused window is on.
-	/// cursorScreen (remembering that we're on an empty monitor) can keep lingering, and
+	/// The empty monitor the cursor was moved to (TilingEngine.cursorMonitor) can keep lingering, and
 	/// Since preferring it as-is would make it show up on a different monitor,
 	/// Only use it when the mouse is actually on that monitor right now
 	private func targetScreen() -> NSScreen? {

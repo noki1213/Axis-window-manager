@@ -32,6 +32,9 @@ class WorkspaceManager {
 		coordinator.onActiveChanged = { [weak self] _, _, workspace, cause in
 			self?.activeWorkspaceChanged(to: workspace, cause: cause)
 		}
+		coordinator.onRekeyed = { old, new in
+			FocusHistoryManager.shared.replace(old, with: new)
+		}
 		coordinator.externallyPositioned = { [weak self] in
 			self?.externallyPositionedWindows() ?? []
 		}
@@ -137,12 +140,25 @@ class WorkspaceManager {
 		state.isTracked(windowID)
 	}
 
-	/// Whether the window is out of sight: in another workspace, minimized or otherwise not shown
-	/// according to the tracking state, or parked by Zen or the palette
+	/// Whether Axis put the window out of sight: parked for another workspace, Zen mode or the palette,
+	/// or minimized by the hide command
 	func isWindowHidden(_ windowID: CGWindowID) -> Bool {
-		state.isHidden(windowID)
-			|| ZenModeManager.shared.hiddenWindowIDs.contains(windowID)
-			|| WindowPaletteManager.shared.isWindowHidden(windowID)
+		hiddenReason(windowID) != nil
+	}
+
+	/// Why Axis put the window out of sight (for logs), nil when it did not. Windows macOS keeps out of
+	/// sight on its own (minimized from the Dock, fullscreen, another Space) are not hidden by Axis.
+	func hiddenReason(_ windowID: CGWindowID) -> String? {
+		if let visibility = state.visibility(windowID), visibility.isParkedKind || visibility == .axisMinimized {
+			return visibility.logName
+		}
+		if ZenModeManager.shared.hiddenWindowIDs.contains(windowID) {
+			return "zenHidden"
+		}
+		if WindowPaletteManager.shared.isWindowHidden(windowID) {
+			return "paletteHidden"
+		}
+		return nil
 	}
 
 	/// One line per monitor describing its workspaces, for diagnosing monitor-change layouts

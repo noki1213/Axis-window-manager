@@ -35,7 +35,12 @@ class TilingEngine: ObservableObject {
     /// Record the monitor when the mouse moves to an empty one
     /// Used for focus movement and Space switching when there's no focused window
     /// Automatically reset to nil once focus moves to the window
-    var cursorScreen: NSScreen?
+    var cursorMonitor: MonitorKey?
+
+    /// The screen of `cursorMonitor`, while it is connected
+    var cursorScreen: NSScreen? {
+        cursorMonitor.flatMap { WorkspaceManager.shared.screen(for: $0) }
+    }
 
     private let accessibilityManager = AccessibilityManager.shared
     private var coordinator: TrackingCoordinator { TrackingCoordinator.shared }
@@ -196,11 +201,11 @@ class TilingEngine: ObservableObject {
     @discardableResult
     func moveFocus(direction: Direction) -> CGWindowID? {
 
-        // cursorScreen being set means the mouse is on an empty monitor
-        // Use cursorScreen as the reference for finding the destination, instead of the focused window
+        // cursorMonitor being set means the mouse is on an empty monitor
+        // Use its screen as the reference for finding the destination, instead of the focused window
         if let cursorScr = cursorScreen {
             if let target = getWindowOnScreen(cursorScr, direction: direction) {
-                cursorScreen = nil
+                cursorMonitor = nil
                 target.focus()
                 moveCursorToWindow(target)
                 return target.id
@@ -222,7 +227,7 @@ class TilingEngine: ObservableObject {
             let mouseLocation = NSEvent.mouseLocation
             if let cursorScr = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
                 if let target = getWindowOnScreen(cursorScr, direction: direction) {
-                    cursorScreen = nil
+                    cursorMonitor = nil
                     target.focus()
                     moveCursorToWindow(target)
                     return target.id
@@ -350,10 +355,10 @@ class TilingEngine: ObservableObject {
     }
 
     /// When the neighboring monitor is empty, move the mouse cursor to its center
-    /// Update cursorScreen and hide the focus border
+    /// Update cursorMonitor and hide the focus border
     private func moveCursorToAdjacentScreen(from screen: NSScreen, direction: Direction) {
         guard let adjacentScreen = getAdjacentScreen(from: screen, direction: direction) else { return }
-        cursorScreen = adjacentScreen
+        cursorMonitor = WorkspaceManager.shared.monitorKey(for: adjacentScreen)
         let centerX = adjacentScreen.frame.midX
         let centerY = adjacentScreen.frame.midY
         // Convert since CGWarpMouseCursorPosition uses a top-left origin
@@ -365,7 +370,7 @@ class TilingEngine: ObservableObject {
     }
 
     /// Get the windows on the given screen, or on the neighboring screen in the given direction
-    /// Used for focus movement in cursorScreen mode
+    /// Used for focus movement in cursorMonitor mode
     private func getWindowOnScreen(_ screen: NSScreen, direction: Direction) -> WindowInfo? {
         let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
         let localColumns = tiledColumns(on: screen).map { col in
