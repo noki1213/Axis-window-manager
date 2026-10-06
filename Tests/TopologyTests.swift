@@ -276,5 +276,57 @@ let topologyTests: [TestCase] = [
 		expectEqual(state.palette, nil)
 		expectEqual(state.reservation, nil)
 		expectInvariants(state)
+	},
+
+	TestCase("reconcileTopology emits activeChanged at most once per monitor") {
+		var state = testState([
+			testDisplay("Main", primary: true),
+			testDisplay("Ext", x: 1440, primary: false)
+		])
+		let mainWs = state.testActive("Main")
+		let extWs = state.testActive("Ext")
+
+		// Unplug external monitor.
+		state.reconcileTopology([testDisplay("Main", primary: true)], now: 10.0)
+		expectEqual(state.testRow("Main"), [mainWs, extWs])
+
+		// User activates the hosted workspace while external is disconnected.
+		state.monitors[main]?.active = extWs
+		_ = state.drainEvents()
+
+		// Replug external monitor: hosted workspace leaves, host must fall back to activeBeforeHosting.
+		state.reconcileTopology([
+			testDisplay("Main", primary: true),
+			testDisplay("Ext", x: 1440, primary: false)
+		], now: 20.0)
+		let activeChanges = state.events.filter {
+			if case .activeChanged(monitor: main, _, _, _) = $0 { return true }
+			return false
+		}
+		expectEqual(activeChanges.count, 1)
+		expectInvariants(state)
+	},
+
+	TestCase("returning monitor swap when adopter is removed adopts the removed monitor's workspaces") {
+		var state = testState([testDisplay("BuiltIn", primary: true)])
+		let builtInKey = testKey("BuiltIn")
+		let originalRow = state.testSetRow("BuiltIn", negatives: 1, nonNegatives: 2, active: 1)
+
+		// 1:1 adopt by external monitor (clamshell mode).
+		let externalKey = testKey("External")
+		let change1 = state.reconcileTopology([testDisplay("External", primary: true)], now: 1.0)
+		expectEqual(change1.adopted, [externalKey: builtInKey])
+		expectEqual(state.testRow("External"), originalRow)
+
+		// 1:1 swap: external unplugged while lid opens. Returning monitor BuiltIn takes over removed adopter.
+		let change2 = state.reconcileTopology([testDisplay("BuiltIn", primary: true)], now: 2.0)
+		expectEqual(change2.removed, [externalKey])
+		expectEqual(change2.added, [builtInKey])
+		expectEqual(change2.adopted, [builtInKey: externalKey])
+		expectEqual(state.testRow("BuiltIn"), originalRow)
+		expectEqual(state.monitors[externalKey], nil)
+		expectEqual(state.monitors[builtInKey]?.negativeCount, 1)
+		expectEqual(state.testActive("BuiltIn"), originalRow[2])
+		expectInvariants(state)
 	}
 ]
