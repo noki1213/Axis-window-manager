@@ -118,9 +118,9 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		// --- Guard based on Axis's own state (prevents mis-focus specific to the built-in display) ---
 
-		// Do nothing while a space switch is in progress (the switch logic focuses the correct window)
-		guard !WorkspaceManager.shared.isSwitching else {
-			logSkipReason("isSwitching")
+		// Do nothing while a workspace switch settles (the switch logic focuses the correct window)
+		guard !TrackingCoordinator.shared.isInTransition else {
+			logSkipReason("workspace switch")
 			return
 		}
 
@@ -131,7 +131,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		}
 
 		// Do nothing while Mission Control is showing
-		guard !BorderManager.shared.isInMissionControl else {
+		guard !TrackingCoordinator.shared.isMissionControlActive else {
 			logSkipReason("missionControl")
 			return
 		}
@@ -213,8 +213,7 @@ class FocusFollowsMouseManager: ObservableObject {
 	}
 
 	/// Return the frontmost window at the given coordinates (screen coordinates, bottom-left origin)
-	/// Since AccessibilityManager.getWindowAt returns the first hit in app order,
-	/// The correct frontmost window can't be picked when a floating window overlaps a tile.
+	/// Hit-testing frames in app order can't pick the frontmost window when a floating window overlaps a tile.
 	/// Here, after identifying the window ID via CGWindowList (Z-order: front to back),
 	/// Mapping it to WindowInfo ensures it always picks the visible window directly under the mouse.
 	///
