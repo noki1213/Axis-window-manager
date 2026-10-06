@@ -14,9 +14,6 @@ import SwiftUI
 import ServiceManagement
 
 struct SettingsView: View {
-    @ObservedObject private var tilingEngine = TilingEngine.shared
-    @ObservedObject private var accessibilityManager = AccessibilityManager.shared
-    
     var body: some View {
         TabView {
             GeneralSettingsView()

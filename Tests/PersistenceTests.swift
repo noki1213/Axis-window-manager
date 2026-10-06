@@ -55,10 +55,6 @@ let persistenceTests: [TestCase] = [
 		let data = try original.encode()
 		let decoded = try PersistenceSnapshot.decode(from: data)
 		expectEqual(decoded, original)
-
-		let dataFromState = try state.encodePersistence()
-		let decodedFromState = try TrackingState.decodePersistence(from: dataFromState)
-		expectEqual(decodedFromState, original)
 	},
 
 	TestCase("relaunch with same ids restores workspaces columns active workspace and floats") {

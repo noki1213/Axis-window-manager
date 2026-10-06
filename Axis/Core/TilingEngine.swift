@@ -172,8 +172,7 @@ class TilingEngine: ObservableObject {
     }
 
     /// Lay out every screen again
-    /// - Parameter reason: what triggered this pass (defaults to the caller's function name)
-    func tileAllScreens(reason: String = #function) {
+    func tileAllScreens() {
         coordinator.perform("retile") { _ in }
         for screen in NSScreen.screens {
             raiseFloatingWindows(on: screen)

@@ -99,14 +99,8 @@ class WindowPalettePanel: NSPanel {
 	/// The margin around the panel
 	private let panelPadding: CGFloat = 16
 
-	/// The height of the Space label
-	private let labelHeight: CGFloat = 18
-
 	/// The spacing between the Space label and the card row
 	private let labelSpacing: CGFloat = 4
-
-	/// The height of the Display title
-	private let displayTitleHeight: CGFloat = 22
 
 	/// The spacing between the Display title and the Space row
 	private let displayTitleSpacing: CGFloat = 6
@@ -398,7 +392,6 @@ class WindowPalettePanel: NSPanel {
 					let isSel = (dIndex == selectedDisplayIndex
 						&& sIndex == selectedSpaceIndex
 						&& iIndex == selectedItemIndex)
-					card.isSelected = isSel
 					if isSel {
 						selectedCardView = card
 					}

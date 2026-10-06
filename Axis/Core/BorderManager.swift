@@ -56,7 +56,6 @@ class BorderManager: ObservableObject {
     private init() {
         lastFrontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         setupNotifications()
-        setupBorderWindow()
     }
     
     private func setupNotifications() {
@@ -115,7 +114,6 @@ class BorderManager: ObservableObject {
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.wantsLayer = true
-        view.mainColor = .white // White in normal mode
         view.showsFill = false // No fill in normal mode!
         view.isDashed = isDashed // Keep the dashed style even if the border is rebuilt while waiting
         view.autoresizingMask = [.width, .height]
@@ -124,11 +122,6 @@ class BorderManager: ObservableObject {
         return (overlay, view)
     }
     
-    // Don't call setupBorderWindow during initialization (updateBorder creates it)
-    private func setupBorderWindow() {
-        // Do nothing
-    }
-
     /// After a focus move, retry until focus actually reaches the target window, then update the border
     /// Works around macOS sometimes taking a while to update focus state
     func updateBorderExpecting(windowID: CGWindowID, retryCount: Int = 0) {
@@ -386,15 +379,6 @@ class SelectionBorderView: NSView {
     /// Whether to draw the border dashed (set true only while waiting for a placement reservation, as the signal that the mode was entered)
     var isDashed: Bool = false {
         didSet { self.setNeedsDisplay(bounds) }
-    }
-
-    /// For compatibility with the older interface (setting it applies to both)
-    var mainColor: NSColor {
-        get { return borderColor }
-        set {
-            borderColor = newValue
-            fillColor = newValue.withAlphaComponent(0.15)
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
