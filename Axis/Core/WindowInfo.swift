@@ -580,16 +580,6 @@ enum FrontProcessAPI {
 
 }
 
-extension WindowFacts {
-    /// What a window read through Accessibility says about itself, as read at `takenAt`.
-    init(info: WindowInfo, takenAt: Time) {
-        self.init(id: info.id, pid: info.app.processIdentifier, role: info.role, subrole: info.subrole,
-                  title: info.title, frame: info.frame, isMinimized: info.isMinimized,
-                  isFullscreen: info.isFullscreen, hasCloseButton: info.hasCloseButton,
-                  minSize: info.minSize, takenAt: takenAt)
-    }
-}
-
 extension WindowInfo {
     /// The window's center in screen coordinates. Window frames come from
     /// Accessibility, with the origin at the top-left of the primary display;

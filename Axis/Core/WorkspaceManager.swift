@@ -19,6 +19,8 @@ class WorkspaceManager {
 	private let accessibilityManager = AccessibilityManager.shared
 	private var coordinator: TrackingCoordinator { TrackingCoordinator.shared }
 	private var state: TrackingState { coordinator.state }
+	/// A workspace-change notice is on its way (several windows closing at once send one)
+	private var isWorkspaceChangePosted = false
 
 	private init() {}
 
@@ -62,7 +64,7 @@ class WorkspaceManager {
 		case .retired(let id, _):
 			ZenModeManager.shared.noteRetired(id)
 			// Dropping an emptied workspace can renumber the others
-			NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+			postWorkspaceChangedOnce()
 		case .rekeyed(let old, let new):
 			FocusHistoryManager.shared.replace(old, with: new)
 			ZenModeManager.shared.noteRekeyed(to: new)
@@ -127,11 +129,6 @@ class WorkspaceManager {
 		DisplayReader.screen(for: key)
 	}
 
-	/// The connected monitors in screen order
-	var monitorKeys: [MonitorKey] {
-		state.monitorOrder
-	}
-
 	// MARK: - Queries
 
 	/// Get the given monitor's current workspace number
@@ -187,18 +184,6 @@ class WorkspaceManager {
 			return "paletteHidden"
 		}
 		return nil
-	}
-
-	/// One line per monitor describing its workspaces, for diagnosing monitor-change layouts
-	func layoutSummaryLines() -> [String] {
-		state.monitorOrder.compactMap { key in
-			guard let monitor = state.monitors[key] else { return nil }
-			let spaces = monitor.order.map { workspace in
-				let ids = state.orderedWindows(workspace).map(String.init).joined(separator: ",")
-				return "\(state.describeWorkspace(workspace))=[\(ids)]"
-			}.joined(separator: " ")
-			return "\(monitor.name) active=\(state.describeWorkspace(monitor.active)) \(spaces)"
-		}
 	}
 
 	// MARK: - Workspace Switching
@@ -298,6 +283,15 @@ class WorkspaceManager {
 		}
 		syncBorderAndCursor(to: focusedID)
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+	}
+
+	private func postWorkspaceChangedOnce() {
+		guard !isWorkspaceChangePosted else { return }
+		isWorkspaceChangePosted = true
+		DispatchQueue.main.async { [weak self] in
+			self?.isWorkspaceChangePosted = false
+			NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+		}
 	}
 
 	/// The state switched a monitor to another workspace on its own: the active one emptied and

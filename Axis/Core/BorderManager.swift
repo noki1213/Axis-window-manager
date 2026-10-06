@@ -20,7 +20,7 @@ class BorderManager: ObservableObject {
 
     private var isUpdating = false // Guards against concurrent updates
     private var pendingUpdate = false // Whether a new request arrived during an update
-    private(set) var isInMissionControl = false // True while Mission Control is showing (read-only externally)
+    private var isInMissionControl = false // True while Mission Control is showing
     private var isAnimating = false // True while the focus border slide animation is running
 
     // Settings
@@ -56,18 +56,12 @@ class BorderManager: ObservableObject {
     private init() {
         lastFrontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         setupNotifications()
-        setupMissionControlObserver()
         setupBorderWindow()
     }
     
     private func setupNotifications() {
         // Receive all notifications on the main thread to serialize them
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleUpdateBorder() }
-            .store(in: &cancellables)
-            
-        NotificationCenter.default.publisher(for: Notification.Name("WindowMoved"))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.scheduleUpdateBorder() }
             .store(in: &cancellables)
@@ -133,39 +127,6 @@ class BorderManager: ObservableObject {
     // Don't call setupBorderWindow during initialization (updateBorder creates it)
     private func setupBorderWindow() {
         // Do nothing
-    }
-
-    /// Watch for Mission Control (Exposé) starting and ending
-    private func setupMissionControlObserver() {
-        // Because notification-based detection doesn't work on newer macOS versions,
-        // Detect Mission Control inside checkWindowFrame()
-    }
-
-    /// Check whether Mission Control is currently showing
-    private func checkMissionControlActive() -> Bool {
-        // Check the Dock process's windows
-        let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-
-        for window in windowList {
-            guard let ownerName = window[kCGWindowOwnerName as String] as? String,
-                  ownerName == "Dock" else { continue }
-
-            // Check Mission Control's window name
-            if let windowName = window[kCGWindowName as String] as? String {
-                if windowName.contains("Mission Control") ||
-                   windowName.contains("Exposé") ||
-                   windowName.contains("Expose") {
-                    return true
-                }
-            }
-
-            // A Dock layer of 18 or higher means Mission Control is showing
-            // Normally the Dock's only window is at layer=-2147483624 (the wallpaper layer)
-            if let layer = window[kCGWindowLayer as String] as? Int, layer >= 18 {
-                return true
-            }
-        }
-        return false
     }
 
     /// After a focus move, retry until focus actually reaches the target window, then update the border
@@ -282,8 +243,8 @@ class BorderManager: ObservableObject {
     }
     
     private func checkWindowFrame() {
-        // Check Mission Control's state
-        let missionControlActive = checkMissionControlActive()
+        // Mission Control's state, as the window tracking's watcher last saw it
+        let missionControlActive = TrackingCoordinator.shared.isMissionControlActive
 
         if missionControlActive != isInMissionControl {
             isInMissionControl = missionControlActive
