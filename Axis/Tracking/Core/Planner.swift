@@ -196,6 +196,12 @@ nonisolated extension TrackingState {
 		plannerState.expected[id]
 	}
 
+	/// The slot the last layout kept free for the placement reservation, where the next window
+	/// goes: its preview. Nil while no reservation waits for a slot in the columns.
+	var reservedSlot: CGRect? {
+		plannerState.reservedSlot
+	}
+
 	/// Takes where the shown windows are in `snapshot` as their last visible frames (and floating
 	/// frames), as a plan does. Without window-move notifications the frames of the last plan can be
 	/// older than where the user has put a floating window since, and a command that takes it out of
