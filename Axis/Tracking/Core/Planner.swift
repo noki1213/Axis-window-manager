@@ -199,6 +199,18 @@ nonisolated extension TrackingState {
 		plannerState.expected[id]
 	}
 
+	/// Takes where the shown windows are in `snapshot` as their last visible frames (and floating
+	/// frames), as a plan does. Without window-move notifications the frames of the last plan can be
+	/// older than where the user has put a floating window since, and a command that takes it out of
+	/// sight would bring it back there. Windows with a floating-frame move still to come keep it.
+	mutating func noteVisibleFrames(snapshot: ServerSnapshot) {
+		let connected = monitorOrder.compactMap { monitors[$0] }
+		for id in records.keys.sorted() {
+			guard let record = records[id], record.visibility == .visible, !record.pendingFloatRestore else { continue }
+			plannerNoteVisibleFrame(record, snapshot: snapshot, connected: connected)
+		}
+	}
+
 	/// Delayed hide phases, fight retries, give-up expiries.
 	func plannerFollowUps(now: Time) -> [FollowUp] {
 		var followUps: [FollowUp] = []
@@ -346,7 +358,7 @@ nonisolated extension TrackingState {
 			plannerState.expected[id] = desired
 			plannerState.parked[id] = nil
 			if !isZenFocus {
-				plannerNoteVisibleFrame(record, pass: pass)
+				plannerNoteVisibleFrame(record, snapshot: pass.snapshot, connected: pass.monitors)
 			}
 			return
 		}
@@ -375,7 +387,7 @@ nonisolated extension TrackingState {
 		guard record.pendingFloatRestore else {
 			plannerState.expected[id] = nil
 			plannerState.parked[id] = nil
-			plannerNoteVisibleFrame(record, pass: pass)
+			plannerNoteVisibleFrame(record, snapshot: pass.snapshot, connected: pass.monitors)
 			return
 		}
 		guard writable else { return }
@@ -589,11 +601,11 @@ nonisolated extension TrackingState {
 	/// Keeps a shown window's last visible frame, and a floating or unmanaged window's floating
 	/// frame, current from the window server's bounds, unless a write of ours is newer than them or
 	/// the window is out of sight.
-	private mutating func plannerNoteVisibleFrame(_ record: WindowRecord, pass: PlannerPass) {
+	private mutating func plannerNoteVisibleFrame(_ record: WindowRecord, snapshot: ServerSnapshot, connected: [MonitorState]) {
 		let id = record.id
-		guard let bounds = pass.snapshot.windows[id]?.bounds,
-			ledger[id].map({ $0.at <= pass.snapshot.takenAt }) ?? true,
-			!ParkGeometry.isEffectivelyHidden(bounds, monitors: pass.monitors)
+		guard let bounds = snapshot.windows[id]?.bounds,
+			ledger[id].map({ $0.at <= snapshot.takenAt }) ?? true,
+			!ParkGeometry.isEffectivelyHidden(bounds, monitors: connected)
 		else { return }
 		if record.lastVisibleFrame != bounds {
 			records[id]?.lastVisibleFrame = bounds
