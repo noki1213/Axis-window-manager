@@ -765,7 +765,7 @@ nonisolated struct ZenSession: Equatable, Sendable {
 	}
 }
 
-/// The window palette is open: every window that would be visible is parked meanwhile.
+/// The window palette is open: every managed window that would be visible is parked meanwhile.
 nonisolated struct PaletteSession: Equatable, Sendable {
 	var startedAt: Time
 }
@@ -870,11 +870,15 @@ nonisolated struct AppState: Equatable, Sendable {
 	var nextRetryAt: Time?
 	/// When the app launched; its window list is retried until a window shows up.
 	var launchedAt: Time?
+	/// Writes in a row the app did not answer; one it answers starts the count over. The longer the
+	/// run, the longer the wait before the rescan that lets its windows be written again, so an app
+	/// that reads fine but never takes a write is not retried at a fixed pace.
+	var writeFailures: Int
 
 	init(pid: PID, bundleID: String? = nil, name: String = "", isHidden: Bool = false,
 		lastScan: ScanStatus = .never, lastScanAt: Time? = nil, unresponsiveSince: Time? = nil,
 		createdSignalPending: Bool = false, observerState: ObserverState = .none,
-		retryCount: Int = 0, nextRetryAt: Time? = nil, launchedAt: Time? = nil) {
+		retryCount: Int = 0, nextRetryAt: Time? = nil, launchedAt: Time? = nil, writeFailures: Int = 0) {
 		self.pid = pid
 		self.bundleID = bundleID
 		self.name = name
@@ -887,6 +891,7 @@ nonisolated struct AppState: Equatable, Sendable {
 		self.retryCount = retryCount
 		self.nextRetryAt = nextRetryAt
 		self.launchedAt = launchedAt
+		self.writeFailures = writeFailures
 	}
 }
 

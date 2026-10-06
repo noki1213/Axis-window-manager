@@ -26,7 +26,10 @@ nonisolated extension TrackingState {
 		if apps[record.pid]?.isHidden == true { return .appHidden }
 		if !observed.listedInLastCompleteScan && observed.serverHas && !observed.onScreen { return .otherSpace }
 		if let workspace = record.workspace, !isActive(workspace) { return .parked(.workspaceInactive) }
-		if palette != nil { return .paletteHidden }
+		// The palette takes the windows Axis manages out of sight. A window no workspace owns keeps its
+		// place: it is not Axis's to move, and an overlay that refuses to leave would be parked again
+		// and again.
+		if palette != nil, record.placement != .unmanaged { return .paletteHidden }
 		if let zen, zen.workspace == record.workspace, record.id != zen.focus { return .zenHidden }
 		return .visible
 	}
