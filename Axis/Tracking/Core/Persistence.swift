@@ -202,6 +202,12 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 		self.floatingFrame = floatingFrame
 		self.observedFrame = observedFrame
 	}
+
+	/// The same window in the same place: everything but the title and the observed frame.
+	func hasSamePlacement(as other: PersistedWindow) -> Bool {
+		id == other.id && pid == other.pid && bundleID == other.bundleID && isFloating == other.isFloating
+			&& workspace == other.workspace && floatingFrame == other.floatingFrame
+	}
 }
 
 /// Disconnected monitor state remembered so returning displays reclaim their layout.
@@ -211,19 +217,23 @@ nonisolated struct PersistedMemory: Codable, Equatable, Sendable {
 	var order: [WorkspaceID]
 	var negativeCount: Int
 	var active: WorkspaceID
+	/// The monitor that took over the whole state, so the returning monitor does not take it back.
+	var adoptedBy: MonitorKey?
 
 	init(
 		key: MonitorKey,
 		name: String,
 		order: [WorkspaceID],
 		negativeCount: Int,
-		active: WorkspaceID
+		active: WorkspaceID,
+		adoptedBy: MonitorKey? = nil
 	) {
 		self.key = key
 		self.name = name
 		self.order = order
 		self.negativeCount = negativeCount
 		self.active = active
+		self.adoptedBy = adoptedBy
 	}
 }
 
@@ -257,6 +267,73 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 	static func decode(from data: Data) throws -> PersistenceSnapshot {
 		let decoder = JSONDecoder()
 		return try decoder.decode(PersistenceSnapshot.self, from: data)
+	}
+
+	var windowCount: Int {
+		windows.count
+	}
+
+	var workspaceCount: Int {
+		monitors.reduce(0) { $0 + $1.workspaces.count }
+	}
+
+	/// What makes the snapshot unusable, nil when it is consistent. The JSON decoder only checks the
+	/// shape: a damaged or hand-edited file can still decode into rows that list a workspace twice
+	/// or put a window in two columns, and that must never reach the state.
+	func validationProblem() -> String? {
+		var monitorKeys = Set<MonitorKey>()
+		var workspaceIDs = Set<WorkspaceID>()
+		var columnWindows = Set<WindowID>()
+		for monitor in monitors {
+			guard monitorKeys.insert(monitor.key).inserted else {
+				return "monitor \(monitor.key) is listed twice"
+			}
+			guard !monitor.order.isEmpty else {
+				return "monitor \(monitor.key) has no workspace"
+			}
+			guard monitor.negativeCount >= 0, monitor.negativeCount < monitor.order.count else {
+				return "monitor \(monitor.key) has \(monitor.order.count) workspaces and negative count \(monitor.negativeCount)"
+			}
+			guard monitor.order.contains(monitor.active) else {
+				return "monitor \(monitor.key) is active on a workspace it does not list"
+			}
+			let saved = monitor.workspaces.map(\.id)
+			guard saved.count == monitor.order.count, Set(saved) == Set(monitor.order) else {
+				return "monitor \(monitor.key) lists workspaces that do not match the saved ones"
+			}
+			for workspace in monitor.workspaces {
+				guard workspaceIDs.insert(workspace.id).inserted else {
+					return "workspace \(workspace.id) is saved twice"
+				}
+				for column in workspace.columns {
+					guard !column.isEmpty else {
+						return "workspace \(workspace.id) has an empty column"
+					}
+					for window in column {
+						guard columnWindows.insert(window).inserted else {
+							return "window #\(window) is in two columns"
+						}
+					}
+				}
+			}
+		}
+		var windowIDs = Set<WindowID>()
+		for window in windows {
+			guard windowIDs.insert(window.id).inserted else {
+				return "window #\(window.id) is saved twice"
+			}
+		}
+		return nil
+	}
+
+	/// Whether both snapshots hold the same workspaces, columns, floats, hidden stack and remembered
+	/// monitors. Titles and observed frames change all the time and only help match windows after a
+	/// reboot, so they are left out.
+	func hasSameLayout(as other: PersistenceSnapshot) -> Bool {
+		guard monitors == other.monitors, hiddenStack == other.hiddenStack, memory == other.memory,
+			windows.count == other.windows.count
+		else { return false }
+		return zip(windows, other.windows).allSatisfy { $0.hasSamePlacement(as: $1) }
 	}
 }
 
@@ -327,7 +404,8 @@ nonisolated extension TrackingState {
 				name: mem.name,
 				order: mem.order,
 				negativeCount: mem.negativeCount,
-				active: mem.active
+				active: mem.active,
+				adoptedBy: mem.adoptedBy
 			))
 		}
 
@@ -349,19 +427,68 @@ nonisolated extension TrackingState {
 		try PersistenceSnapshot.decode(from: data)
 	}
 
-	/// Restores persisted layout before the first window admission.
-	/// Live candidate windows are matched against the snapshot by (window ID, PID) first,
-	/// then by (bundle ID, title). Stale entries are dropped, and unmatched candidate windows
-	/// remain unmanaged so they fall back to normal admission.
+	/// The snapshot to write now, nil when its layout is the one last written or loaded.
+	mutating func persistenceTakeSnapshot() -> PersistenceSnapshot? {
+		let current = snapshot()
+		if let last = persistenceState.lastSnapshot, last.hasSameLayout(as: current) {
+			return nil
+		}
+		persistenceState.lastSnapshot = current
+		return current
+	}
+
+	/// The write of the snapshot last taken failed: the next take offers the layout again.
+	mutating func persistenceNoteWriteFailed() {
+		persistenceState.lastSnapshot = nil
+	}
+
+	/// Restores the saved layout before the first window is admitted. Live windows are matched to
+	/// the snapshot by (window ID, PID) first, then by (bundle ID, title) for windows whose ID
+	/// changed. A matched window takes its saved workspace, column and placement; entries without a
+	/// live window are dropped, and so are the workspaces they leave empty. Every other window is
+	/// left to normal admission. Monitors that are not connected now are remembered for when they
+	/// return.
 	mutating func applyPersistence(
 		_ snapshot: PersistenceSnapshot,
 		windows: [WindowFacts] = [],
 		apps: [AppFacts] = [],
 		now: Time = 0
 	) {
+		guard records.isEmpty else {
+			log("persist: ignored (windows are already tracked)")
+			return
+		}
+
 		// Populate known application facts for bundle matching.
 		for app in apps where self.apps[app.pid] == nil {
 			self.apps[app.pid] = AppState(pid: app.pid, bundleID: app.bundleID, name: app.name, isHidden: app.isHidden)
+		}
+		var appBundles: [PID: String] = [:]
+		var appNames: [PID: String] = [:]
+		for (pid, app) in self.apps {
+			appBundles[pid] = app.bundleID
+			appNames[pid] = app.name
+		}
+		for app in apps {
+			if let bundleID = app.bundleID {
+				appBundles[app.pid] = bundleID
+			}
+			appNames[app.pid] = app.name
+		}
+
+		// Helper windows are never tracked, and dialogs and settings panes are matched by their id
+		// only, never by their title. A window's size does not count: a stacked column leaves tiled
+		// windows small.
+		var candidates: [WindowFacts] = []
+		var tiledClass = Set<WindowID>()
+		var seen = Set<WindowID>()
+		for facts in windows where !tombstones.contains(facts.id) && seen.insert(facts.id).inserted {
+			let windowClass = Classifier.classify(facts, bundleID: appBundles[facts.pid], ownPID: ownPID, relaunchTiled: [facts.id])
+			guard windowClass != .ignore else { continue }
+			candidates.append(facts)
+			if windowClass == .tiled {
+				tiledClass.insert(facts.id)
+			}
 		}
 
 		struct MatchedPair {
@@ -372,66 +499,60 @@ nonisolated extension TrackingState {
 			let sameApp: Bool
 		}
 
+		let persistedByID = Dictionary(snapshot.windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 		var matchedCandidateIDs = Set<WindowID>()
 		var matchedPersistedIDs = Set<WindowID>()
 		var pairs: [MatchedPair] = []
 		var rekeyed = [WindowID: WindowID]()
 
-		// Primary matching: exact window ID and PID from the same boot.
-		for candidate in windows {
-			guard !matchedCandidateIDs.contains(candidate.id) else { continue }
-			if let persisted = snapshot.windows.first(where: {
-				!matchedPersistedIDs.contains($0.id) && $0.id == candidate.id && $0.pid == candidate.pid
-			}) {
-				matchedCandidateIDs.insert(candidate.id)
-				matchedPersistedIDs.insert(persisted.id)
-				let bundle = apps.first(where: { $0.pid == candidate.pid })?.bundleID ?? self.apps[candidate.pid]?.bundleID ?? persisted.bundleID
-				let appName = apps.first(where: { $0.pid == candidate.pid })?.name ?? self.apps[candidate.pid]?.name ?? ""
-				pairs.append(MatchedPair(
-					persisted: persisted, candidate: candidate, bundleID: bundle, appName: appName, sameApp: true
-				))
-			}
-		}
-
-		// Fallback matching: bundle identifier and title for windows whose ID changed across relaunches.
-		for candidate in windows where !matchedCandidateIDs.contains(candidate.id) {
-			let candidateBundle = apps.first(where: { $0.pid == candidate.pid })?.bundleID ?? self.apps[candidate.pid]?.bundleID
-			guard let bundle = candidateBundle, !bundle.isEmpty else { continue }
-			let eligible = snapshot.windows.filter {
-				!matchedPersistedIDs.contains($0.id) && $0.bundleID == bundle && $0.title == candidate.title
-			}
-			guard !eligible.isEmpty else { continue }
-			let best = eligible.min { a, b in
-				let distA = hypot(candidate.frame.midX - (a.observedFrame?.midX ?? candidate.frame.midX),
-				                  candidate.frame.midY - (a.observedFrame?.midY ?? candidate.frame.midY))
-				let distB = hypot(candidate.frame.midX - (b.observedFrame?.midX ?? candidate.frame.midX),
-				                  candidate.frame.midY - (b.observedFrame?.midY ?? candidate.frame.midY))
-				return distA < distB
-			}!
+		// Primary matching: exact window ID and PID, which a relaunch of Axis leaves as they were.
+		for candidate in candidates {
+			guard let persisted = persistedByID[candidate.id], persisted.pid == candidate.pid else { continue }
 			matchedCandidateIDs.insert(candidate.id)
-			matchedPersistedIDs.insert(best.id)
-			rekeyed[best.id] = candidate.id
-			let appName = apps.first(where: { $0.pid == candidate.pid })?.name ?? self.apps[candidate.pid]?.name ?? ""
+			matchedPersistedIDs.insert(persisted.id)
 			pairs.append(MatchedPair(
-				persisted: best, candidate: candidate, bundleID: bundle, appName: appName, sameApp: false
+				persisted: persisted, candidate: candidate, bundleID: appBundles[candidate.pid] ?? persisted.bundleID,
+				appName: appNames[candidate.pid] ?? "", sameApp: true
 			))
 		}
 
-		// Update workspace ID counter so restored IDs are strictly below the counter.
-		var maxRaw = nextWorkspaceRaw
-		for m in snapshot.monitors {
-			for ws in m.workspaces {
-				if ws.id.raw >= maxRaw { maxRaw = ws.id.raw + 1 }
+		// Fallback matching: bundle identifier and title for windows whose ID changed. The saved
+		// frame closest to the window's own breaks ties between equal titles.
+		for candidate in candidates where !matchedCandidateIDs.contains(candidate.id) && tiledClass.contains(candidate.id) {
+			guard let bundle = appBundles[candidate.pid], !bundle.isEmpty, !candidate.title.isEmpty else { continue }
+			func distance(_ saved: PersistedWindow) -> CGFloat {
+				guard let frame = saved.observedFrame else { return 0 }
+				return hypot(candidate.frame.midX - frame.midX, candidate.frame.midY - frame.midY)
 			}
-			if m.active.raw >= maxRaw { maxRaw = m.active.raw + 1 }
-		}
-		for m in snapshot.memory {
-			for wsID in m.order {
-				if wsID.raw >= maxRaw { maxRaw = wsID.raw + 1 }
+			let eligible = snapshot.windows.filter {
+				!matchedPersistedIDs.contains($0.id) && $0.bundleID == bundle && $0.title == candidate.title
 			}
-			if m.active.raw >= maxRaw { maxRaw = m.active.raw + 1 }
+			guard let best = eligible.min(by: { distance($0) < distance($1) }) else { continue }
+			matchedCandidateIDs.insert(candidate.id)
+			matchedPersistedIDs.insert(best.id)
+			rekeyed[best.id] = candidate.id
+			pairs.append(MatchedPair(
+				persisted: best, candidate: candidate, bundleID: bundle,
+				appName: appNames[candidate.pid] ?? "", sameApp: false
+			))
 		}
-		nextWorkspaceRaw = maxRaw
+
+		// New workspace ids start above every saved one, so an id is never used twice.
+		var nextRaw = nextWorkspaceRaw
+		for monitor in snapshot.monitors {
+			for id in monitor.order + monitor.workspaces.map(\.id) + [monitor.active] {
+				nextRaw = max(nextRaw, id.raw + 1)
+			}
+		}
+		for mem in snapshot.memory {
+			for id in mem.order + [mem.active] {
+				nextRaw = max(nextRaw, id.raw + 1)
+			}
+		}
+		nextWorkspaceRaw = nextRaw
+
+		let connected = Set(snapshot.monitors.map(\.key).filter { monitors[$0] != nil })
+		persistenceReplacePlaceholders(restoring: connected)
 
 		// Disconnected monitors from previous sessions remain in memory.
 		for mem in snapshot.memory where monitors[mem.key] == nil && memory[mem.key] == nil {
@@ -441,7 +562,7 @@ nonisolated extension TrackingState {
 				order: mem.order,
 				negativeCount: mem.negativeCount,
 				active: mem.active,
-				adoptedBy: nil,
+				adoptedBy: mem.adoptedBy,
 				at: now
 			)
 		}
@@ -462,14 +583,7 @@ nonisolated extension TrackingState {
 		let hiddenIDs = Set(snapshot.hiddenStack.map { rekeyed[$0.window] ?? $0.window })
 
 		// Restore connected monitors and workspaces.
-		for m in snapshot.monitors where monitors[m.key] != nil {
-			// Drop temporary placeholder workspaces created during monitor discovery.
-			if let current = monitors[m.key] {
-				for wsID in current.order where !m.order.contains(wsID) {
-					workspaces.removeValue(forKey: wsID)
-				}
-			}
-
+		for m in snapshot.monitors where connected.contains(m.key) {
 			for persistedWS in m.workspaces {
 				var restoredColumns: [[WindowID]] = []
 				var survivingColumnIndices: [Int] = []
@@ -477,8 +591,9 @@ nonisolated extension TrackingState {
 				for (colIdx, col) in persistedWS.columns.enumerated() {
 					var newCol: [WindowID] = []
 					for oldID in col {
-						guard matchedPersistedIDs.contains(oldID) else { continue }
-						guard let pers = snapshot.windows.first(where: { $0.id == oldID }), !pers.isFloating else { continue }
+						guard matchedPersistedIDs.contains(oldID), let saved = persistedByID[oldID],
+							!saved.isFloating, saved.workspace == persistedWS.id
+						else { continue }
 						let newID = rekeyed[oldID] ?? oldID
 						// Hidden stack entries leave columns with slot memory.
 						guard !hiddenIDs.contains(newID) else { continue }
@@ -501,7 +616,7 @@ nonisolated extension TrackingState {
 					? persistedWS.widthRatios
 					: nil
 
-				let ws = Workspace(
+				workspaces[persistedWS.id] = Workspace(
 					id: persistedWS.id,
 					host: m.key,
 					origin: m.key,
@@ -510,7 +625,6 @@ nonisolated extension TrackingState {
 					widthRatios: restoredWidthRatios,
 					rowRatios: restoredRowRatios
 				)
-				workspaces[persistedWS.id] = ws
 			}
 
 			monitors[m.key]?.order = m.order
@@ -556,10 +670,6 @@ nonisolated extension TrackingState {
 			draft.visibility = resolveVisibility(draft)
 			records[newID] = draft
 
-			if !persisted.isFloating {
-				relaunchTiled.insert(newID)
-			}
-
 			if let oldID = rekeyed.first(where: { $0.value == newID })?.key {
 				log("track: rekey #\(oldID) -> #\(newID) (\(pair.sameApp ? "same app and title" : "same bundle and title"))")
 				emit(.rekeyed(from: oldID, to: newID))
@@ -578,8 +688,82 @@ nonisolated extension TrackingState {
 			}
 		}
 
+		// A window that was minimized or hidden with its app when the snapshot was taken may be back
+		// by now, and the other way round: it joins or leaves the columns the way such a change
+		// during a run would.
+		for id in records.keys.sorted() {
+			guard let record = records[id], record.placement == .tiled, let workspace = record.workspace else { continue }
+			let inColumns = workspaces[workspace]?.columns.contains { $0.contains(id) } ?? false
+			if record.visibility.keepsSlot && !inColumns {
+				insertByMidX(id, midX: record.observed.frame?.midX ?? .greatestFiniteMagnitude, into: workspace)
+			} else if !record.visibility.keepsSlot && inColumns {
+				let memory = removeFromColumns(id)
+				records[id]?.slotMemory = memory
+			}
+		}
+
+		// Tiled windows no scan listed (their app was busy) are tiled when they show up, however
+		// small a stacked column left them.
+		for saved in snapshot.windows where !saved.isFloating && saved.workspace != nil {
+			relaunchTiled.insert(rekeyed[saved.id] ?? saved.id)
+		}
+
+		// Workspaces whose windows are all gone go too, like at the end of a run.
+		for m in snapshot.monitors where connected.contains(m.key) {
+			compact(m.key, keepingActive: true)
+		}
+
+		let restored = records.values.filter { $0.source == .restored }
+		let restoredWorkspaces = Set(restored.compactMap(\.workspace))
+		log("persist: restored \(restored.count) windows, \(restoredWorkspaces.count) workspaces")
+
 		persistenceState.lastSnapshot = snapshot
 		normalize(now: now)
+	}
+
+	/// Restores the saved layout from the windows that the first scan of every app listed.
+	mutating func applyPersistence(
+		_ snapshot: PersistenceSnapshot,
+		scans: [PID: ScanResult],
+		apps: [AppFacts],
+		now: Time = 0
+	) {
+		var windows: [WindowFacts] = []
+		for pid in scans.keys.sorted() {
+			windows += (scans[pid]?.windows ?? []).filter { $0.pid == pid }
+		}
+		applyPersistence(snapshot, windows: windows, apps: apps, now: now)
+	}
+
+	/// Clears the way for the saved workspace ids. Monitors found at launch got an empty workspace
+	/// numbered from this run's counter, which can equal an id the snapshot saved for another
+	/// monitor: a monitor that is restored drops its empty workspaces (its saved row replaces
+	/// them), and any other connected monitor gets an empty workspace under a new id.
+	private mutating func persistenceReplacePlaceholders(restoring restored: Set<MonitorKey>) {
+		for key in monitorOrder {
+			guard var monitor = monitors[key] else { continue }
+			if restored.contains(key) {
+				for id in monitor.order {
+					workspaces[id] = nil
+				}
+				continue
+			}
+			var renamed: [WorkspaceID: WorkspaceID] = [:]
+			for id in monitor.order {
+				guard let old = workspaces[id] else { continue }
+				let fresh = makeWorkspaceID()
+				workspaces[id] = nil
+				workspaces[fresh] = Workspace(
+					id: fresh, host: old.host, origin: old.origin, side: old.side,
+					columns: old.columns, widthRatios: old.widthRatios, rowRatios: old.rowRatios
+				)
+				renamed[id] = fresh
+			}
+			monitor.order = monitor.order.map { renamed[$0] ?? $0 }
+			monitor.active = renamed[monitor.active] ?? monitor.active
+			monitor.activeBeforeHosting = monitor.activeBeforeHosting.map { renamed[$0] ?? $0 }
+			monitors[key] = monitor
+		}
 	}
 
 	/// Overload accepting an app lookup table.

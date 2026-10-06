@@ -10,6 +10,8 @@
 //	display changes, Mission Control) hold the passes back; once every reason has ended and the
 //	displays have been stable for a moment, the monitors are reconciled and a full rescan lifts the
 //	barrier. Commands from the features change the state and run the same plan and execution.
+//	The layout of workspaces and columns is saved a moment after it changes and at quit, and the
+//	first rescan after launch puts it back for the windows that still exist.
 //
 
 import AppKit
@@ -108,6 +110,18 @@ final class TrackingCoordinator {
 	private var rescanWaiters: [() -> Void] = []
 	private var inFlightRescanWaiters: [() -> Void] = []
 
+	// MARK: Persistence
+
+	/// The saved layout read at launch, applied by the pass that lifts the starting barrier, before
+	/// any window is admitted.
+	private var pendingRestore: PersistenceSnapshot?
+	private var persistTimer: DispatchSourceTimer?
+	/// A save is scheduled.
+	private var isPersistArmed = false
+	private var persistSavedLoggedAt: Time = -.infinity
+	/// A failed write is logged once, until a write succeeds again.
+	private var persistFailureLogged = false
+
 	/// The barriers the watcher sits out. Mission Control is not one of them: the watcher is
 	/// what notices it close.
 	private static let watcherPausingBarriers: Set<BarrierReason> = [.starting, .locked, .asleep, .displayChanging]
@@ -119,16 +133,14 @@ final class TrackingCoordinator {
 	// MARK: - Lifecycle
 
 	/// Starts tracking. The "starting" barrier holds every pass until the displays are stable;
-	/// then the monitors are read and a full scan admits the windows of every app.
-	/// `relaunchTiled`: windows that were tiled when Axis last quit, so they tile again even where
-	/// a stacked column left them looking like small dialogs.
-	func start(config: LayoutConfig = LayoutConfig(), relaunchTiled: Set<WindowID> = []) {
+	/// then the monitors are read and a full scan admits the windows of every app, putting back
+	/// the workspaces and columns of the saved layout where the file has one.
+	func start(config: LayoutConfig = LayoutConfig()) {
 		guard !isRunning else { return }
 		isRunning = true
 		runID += 1
 		let now = Self.uptime()
 		state = TrackingState(config: config, ownPID: ownPID)
-		state.relaunchTiled = relaunchTiled
 		pending = PendingWork()
 		inFlight = nil
 		endingReasons = []
@@ -154,6 +166,18 @@ final class TrackingCoordinator {
 		timer.schedule(deadline: .distantFuture)
 		timer.resume()
 		passTimer = timer
+
+		let saveTimer = DispatchSource.makeTimerSource(queue: .main)
+		saveTimer.setEventHandler { [weak self] in
+			self?.persistTimerFired()
+		}
+		saveTimer.schedule(deadline: .distantFuture)
+		saveTimer.resume()
+		persistTimer = saveTimer
+		isPersistArmed = false
+		persistSavedLoggedAt = -.infinity
+		persistFailureLogged = false
+		loadSavedLayout()
 
 		state.setBarrier(.starting, active: true, now: now)
 		drainLog()
@@ -188,10 +212,11 @@ final class TrackingCoordinator {
 		guard isRunning else { return }
 		isRunning = false
 		runID += 1
-		for timer in [passTimer, sampler, lockTimer, asleepTimer, missionControlTimer] {
+		for timer in [passTimer, persistTimer, sampler, lockTimer, asleepTimer, missionControlTimer] {
 			timer?.cancel()
 		}
 		passTimer = nil
+		persistTimer = nil
 		sampler = nil
 		lockTimer = nil
 		asleepTimer = nil
@@ -634,6 +659,7 @@ final class TrackingCoordinator {
 		finishStep(now: now)
 		if !hasStarted && pass.liftsBarrier && !state.livenessState.liftPending {
 			hasStarted = true
+			schedulePersist()
 			onStarted?()
 		}
 		let waiters = inFlightRescanWaiters
@@ -665,7 +691,14 @@ final class TrackingCoordinator {
 		let serverHas = Set(ServerProbe.exists(candidates, now: now).windows.keys)
 
 		// App names, bundle identifiers and hidden flags first: admissions copy them.
-		state.ingestApps(appFacts(for: scannedPIDs), now: now)
+		let scannedApps = appFacts(for: scannedPIDs)
+		// The saved layout comes back before any window is admitted: the windows it names take
+		// their workspaces and columns, the others are admitted below like on any first scan.
+		if pass.liftsBarrier, let saved = pendingRestore {
+			pendingRestore = nil
+			state.applyPersistence(saved, scans: scans, apps: scannedApps, now: now)
+		}
+		state.ingestApps(scannedApps, now: now)
 		state.ingestServer(snapshot)
 		for pid in scannedPIDs {
 			if let result = scans[pid] {
@@ -710,6 +743,7 @@ final class TrackingCoordinator {
 			pending.add(followUp)
 		}
 		schedulePassTimer()
+		schedulePersist()
 	}
 
 	private func scanTargets(for work: PassWork) -> [PID] {
@@ -815,6 +849,75 @@ final class TrackingCoordinator {
 			} else {
 				self.event("track: retired #\(id) stays on the window server off screen (closed, kept by its app)")
 			}
+		}
+	}
+
+	// MARK: - Persistence
+
+	/// Reads the saved layout; the pass that lifts the starting barrier puts it back. A file that
+	/// cannot be used is left as it is and logged once: the first save replaces it.
+	private func loadSavedLayout() {
+		pendingRestore = nil
+		switch PersistenceStore.load() {
+		case .missing:
+			event("persist: ignored (no saved layout)")
+		case .snapshot(let snapshot):
+			pendingRestore = snapshot
+		case .ignored(let reason):
+			event("persist: ignored (\(reason))")
+		}
+	}
+
+	/// Schedules a save for after the changes of the moment, so a burst of them shares one write
+	/// (the timer fires once a second at most; whether the layout differs from the file's is
+	/// decided then).
+	private func schedulePersist() {
+		guard hasStarted, !isPersistArmed, let persistTimer else { return }
+		isPersistArmed = true
+		persistTimer.schedule(deadline: .now() + CoordinatorTiming.persistDelay, leeway: .milliseconds(100))
+	}
+
+	/// Writes the layout when it changed. Nothing is written while a barrier is up or coming down:
+	/// the state then holds what was seen before the lock, the sleep or the display change; the
+	/// step that ends the barrier schedules the next save.
+	private func persistTimerFired() {
+		isPersistArmed = false
+		guard isRunning, hasStarted, state.barrier.isEmpty, !state.livenessState.liftPending,
+			let snapshot = state.persistenceTakeSnapshot()
+		else { return }
+		PersistenceStore.save(snapshot) { [weak self] error in
+			self?.persistFinished(snapshot, error: error)
+		}
+	}
+
+	private func persistFinished(_ snapshot: PersistenceSnapshot, error: Error?) {
+		guard isRunning else { return }
+		if let error {
+			// The next step offers the layout again.
+			state.persistenceNoteWriteFailed()
+			guard !persistFailureLogged else { return }
+			persistFailureLogged = true
+			event("persist: write failed (\(error.localizedDescription))")
+			return
+		}
+		persistFailureLogged = false
+		let now = Self.uptime()
+		guard now - persistSavedLoggedAt >= CoordinatorTiming.persistLogSpacing else { return }
+		persistSavedLoggedAt = now
+		event("persist: saved (\(snapshot.windowCount) windows, \(snapshot.workspaceCount) workspaces)")
+	}
+
+	/// The layout as it is before the quit plan moves any window: what the next launch restores.
+	/// Before the first scan has been ingested the state is empty, and saving it would replace the
+	/// layout of the last run with nothing.
+	private func saveForQuit() {
+		guard hasStarted else { return }
+		let snapshot = state.snapshot()
+		do {
+			try PersistenceStore.saveNow(snapshot)
+			event("persist: saved (\(snapshot.windowCount) windows, \(snapshot.workspaceCount) workspaces) at quit")
+		} catch {
+			event("persist: write failed (\(error.localizedDescription)) at quit")
 		}
 	}
 
@@ -938,6 +1041,7 @@ final class TrackingCoordinator {
 	/// every screen, before Axis quits.
 	func prepareForQuit() {
 		guard isRunning else { return }
+		saveForQuit()
 		let plan = state.quitPlan()
 		if !plan.isEmpty {
 			WindowActuator.execute(plan)
@@ -1094,6 +1198,10 @@ private nonisolated enum CoordinatorTiming {
 	static let retireCheckDelay: TimeInterval = 2
 	/// How long after a workspace switch focus changes and hover still belong to the switch.
 	static let transition: TimeInterval = 0.5
+	/// A change of the layout is saved this long after it, so a burst of changes shares one write.
+	static let persistDelay: TimeInterval = 1
+	/// The saved line goes to the log at most this often.
+	static let persistLogSpacing: TimeInterval = 10
 }
 
 /// Refresh work waiting for a pass. Each item keeps the time it is due and a pass takes only

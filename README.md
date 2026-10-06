@@ -23,7 +23,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
 - Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
-- State Persistence: Workspaces and window positions are preserved across sleep and lock. Launching Axis starts every window on workspace 0 of its monitor.
+- State Persistence: Workspaces and window positions are preserved across sleep and lock. After Axis is relaunched or updated, the workspaces, their order, the columns and the floating windows come back as they were; windows that no longer exist are skipped.
 - Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
 ## Customizing Keyboard Shortcuts
@@ -201,7 +201,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - ビジュアルフィードバック：フォーカス中のウィンドウに枠線を表示。現在のモードに応じてメニューバーのアイコンが変化
 - スマートワークスペース：ワークスペース間の移動と、ウィンドウの移動を効率的に実行。空のワークスペースは自動削除されます
 - カスタムキーボードショートカット：設定画面からすべてのショートカットを自由に変更できます
-- 状態の永続化：スリープやロックからの復帰後もワークスペースとウィンドウ配置を維持します
+- 状態の永続化：スリープやロックからの復帰後もワークスペースとウィンドウ配置を維持します。Axis を再起動・アップデートしたあとも、ワークスペースとその並び順、カラム、フローティングウィンドウが元のとおりに戻ります（なくなったウィンドウは無視されます）
 - 安全な終了：Axis 終了時、すべてのウィンドウを画面内の見える位置に復元します
 
 ## ショートカットの設定方法
