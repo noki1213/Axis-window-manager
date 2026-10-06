@@ -101,8 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        workspaceManager.rememberTiledWindowsForRelaunch()
-        // Bring every window Axis moved out of sight back on screen
+        // Save the layout, then bring every window Axis moved out of sight back on screen
         workspaceManager.prepareForQuit()
         hotkeyManager.stop()
     }
@@ -247,8 +246,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PerfLog.event("load: \(PerfLog.loadAverage())")
         }
 
-        // Track the windows of every app: each monitor starts on an empty workspace 0 that the
-        // windows on it join, and focus goes to the first window once they are laid out
+        // Track the windows of every app: the saved workspaces and columns come back for the windows
+        // that still exist, the others join the shown workspace of their monitor, and focus goes to
+        // the first window once they are laid out
         focusFollower.start()
         workspaceManager.start { [weak self] in
             self?.focusFirstWindow()
