@@ -11,6 +11,7 @@ import CoreGraphics
 
 let plannerTests: [TestCase] = comparisonTests + fightTests + parkTests + barrierTests + mouseTests
 	+ switchTests + appTests + sessionTests + minimizeTests + layoutStateTests + quitTests + bookkeepingTests
+	+ visibleFrameTests
 
 private let main = testKey("Main")
 
@@ -761,6 +762,30 @@ private let bookkeepingTests: [TestCase] = [
 		expectEqual(state.expectedFrame(3), nil)
 		expectEqual(state.plannerState.parked[3], nil)
 		expectEqual(state.ledger[3], nil)
+		expectInvariants(state)
+	},
+]
+
+private let visibleFrameTests: [TestCase] = [
+	TestCase("shown windows take their frames from the window server without a plan") {
+		var (state, _, _) = twoWorkspaces()
+		let home = state.testActive()
+		state.testAddWindow(5, placement: .floating, workspace: home)
+		state.records[5]!.floatingFrame = RelativeFrame(monitor: main, offset: CGPoint(x: 100, y: 50), size: CGSize(width: 500, height: 300))
+		state.testAddWindow(6, placement: .floating, workspace: home)
+		let pending = RelativeFrame(monitor: main, offset: CGPoint(x: 10, y: 10), size: CGSize(width: 500, height: 300))
+		state.records[6]!.floatingFrame = pending
+		state.records[6]!.pendingFloatRestore = true
+		let moved = CGRect(x: 400, y: 300, width: 520, height: 310)
+		state.noteVisibleFrames(snapshot: showing([1: leftSlot, 2: rightSlot, 3: parkedThree, 5: moved, 6: moved],
+			pids: [3: 200], at: 1))
+		expectEqual(state.records[5]?.floatingFrame, RelativeFrame(monitor: main, offset: CGPoint(x: 400, y: 275), size: moved.size))
+		expectEqual(state.records[5]?.lastVisibleFrame, moved)
+		expectEqual(state.records[1]?.lastVisibleFrame, leftSlot)
+		// A parked window and one about to move to its floating frame keep what they have.
+		expectEqual(state.records[3]?.lastVisibleFrame, nil)
+		expectEqual(state.records[6]?.floatingFrame, pending)
+		expectEqual(state.records[6]?.lastVisibleFrame, nil)
 		expectInvariants(state)
 	},
 ]

@@ -261,12 +261,22 @@ class WorkspaceManager {
 			ElementCache.shared.store(window: window.id, pid: window.app.processIdentifier, element: window.axElement)
 		}
 		coordinator.perform("wake") { state in
-			Self.retireVanishedWindows(in: &state, keepingActive: false, now: now)
+			// Workspaces are dropped only after the windows back under new IDs took the old ones' places
+			let hosts = Self.retireVanishedWindows(in: &state, now: now)
 			for window in windows {
 				state.admit(WindowFacts(info: window, takenAt: now), app: Self.appFacts(window.app), source: .discovered, now: now)
 			}
+			for host in hosts.sorted() {
+				state.compact(host, keepingActive: false)
+			}
 		}
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+	}
+
+	/// Where the tracked windows are on screen now, so a floating window's place is current when a
+	/// command takes it out of sight, and windows that left the screen (another Space) leave the layout
+	func observeWindowPositions() {
+		coordinator.ingestWindowFacts()
 	}
 
 	/// Facts of tracked windows from a full window-list reading: minimized, fullscreen, restored
@@ -321,14 +331,14 @@ class WorkspaceManager {
 
 	/// Retires tracked windows the window server no longer has. A close the window list missed
 	/// (a floating window, an app too busy to answer when it went) would otherwise keep its
-	/// workspace from ever counting as empty. The monitors that lost windows drop their empty
-	/// workspaces afterwards (keeping the shown one with `keepingActive`).
-	private static func retireVanishedWindows(in state: inout TrackingState, keepingActive: Bool, now: Time) {
+	/// workspace from ever counting as empty. Returns the monitors that lost windows: the caller
+	/// drops their empty workspaces once it is done.
+	private static func retireVanishedWindows(in state: inout TrackingState, now: Time) -> Set<MonitorKey> {
 		let ids = Set(state.records.keys)
-		guard !ids.isEmpty else { return }
+		guard !ids.isEmpty else { return [] }
 		let existing = ServerProbe.exists(ids, now: now).windows
 		// An empty answer says more about the window server than about the windows.
-		guard !existing.isEmpty else { return }
+		guard !existing.isEmpty else { return [] }
 		var hosts = Set<MonitorKey>()
 		for id in ids.sorted() where existing[id] == nil {
 			if let host = state.location(id)?.monitor {
@@ -336,8 +346,14 @@ class WorkspaceManager {
 			}
 			state.retire(id, reason: .destroyed, now: now, compacting: false)
 		}
-		for host in hosts.sorted() {
-			state.compact(host, keepingActive: keepingActive)
+		return hosts
+	}
+
+	/// Retires the windows the window server no longer has and drops the workspaces that left
+	/// empty, keeping the ones shown
+	private static func retireVanishedWindowsKeepingShown(in state: inout TrackingState, now: Time) {
+		for host in retireVanishedWindows(in: &state, now: now).sorted() {
+			state.compact(host, keepingActive: true)
 		}
 	}
 
@@ -396,7 +412,7 @@ class WorkspaceManager {
 		var destination: WorkspaceID?
 		coordinator.perform("switch", delaysHidePhase: true) { state in
 			destination = state.switchWorkspace(on: key, to: target)
-			Self.retireVanishedWindows(in: &state, keepingActive: true, now: now)
+			Self.retireVanishedWindowsKeepingShown(in: &state, now: now)
 		}
 		finishSwitch(to: destination, focusWindowID: focusWindowID)
 	}
@@ -431,7 +447,7 @@ class WorkspaceManager {
 		var destination: WorkspaceID?
 		coordinator.perform("move to workspace", delaysHidePhase: true) { state in
 			destination = state.moveWindowToWorkspace(focusedWindow.id, on: key, to: target)
-			Self.retireVanishedWindows(in: &state, keepingActive: true, now: now)
+			Self.retireVanishedWindowsKeepingShown(in: &state, now: now)
 		}
 		finishSwitch(to: destination, focusWindowID: focusedWindow.id)
 	}

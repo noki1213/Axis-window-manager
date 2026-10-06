@@ -944,6 +944,12 @@ final class TrackingCoordinator {
 		PerfLog.measure("tracking.\(name)") {
 			let now = Self.uptime()
 			let snapshot = ServerProbe.onScreen(now: now)
+			if mode == .stateOnly {
+				// The command works on where the windows are now (a floating window's place is kept
+				// for when it is shown again, a window joining the columns goes by its centre).
+				state.ingestServer(snapshot)
+				state.noteVisibleFrames(snapshot: snapshot)
+			}
 			mutate(&state)
 			if mode == .stateOnly {
 				// Each command is an ingest of its own: a window it admitted pairs only with a
@@ -966,14 +972,18 @@ final class TrackingCoordinator {
 		finishStep(now: Self.uptime())
 	}
 
-	/// Facts of tracked windows read by the caller (minimized, fullscreen, title, frame). A window
+	/// Where the windows are now, plus facts of tracked windows read by the caller (minimized,
+	/// fullscreen, title, frame); called with no facts it only observes the window server. A window
 	/// that changed state (minimized, fullscreen, restored from the Dock) or left or rejoined the
-	/// layout changes where the others go, so only then a plan follows.
-	func ingestWindowFacts(_ facts: [WindowFacts]) {
+	/// layout (missing from the window server for a while, on another Space) changes where the
+	/// others go, so only then a plan follows.
+	func ingestWindowFacts(_ facts: [WindowFacts] = []) {
 		guard isRunning else { return }
 		let now = Self.uptime()
 		let snapshot = ServerProbe.onScreen(now: now)
 		let before = placementSignature()
+		state.ingestServer(snapshot)
+		state.noteVisibleFrames(snapshot: snapshot)
 		state.ingestWindowFacts(facts, now: now)
 		state.ingestServer(snapshot)
 		state.normalize(now: now)

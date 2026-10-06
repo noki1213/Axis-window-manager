@@ -33,10 +33,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var consecutiveGhostSkips: Int = 0
     /// The cap on consecutive skips (about 1.5 seconds; beyond this it's treated as genuinely closed)
     private static let maxConsecutiveGhostSkips = 5
-    /// The monitor of the window that had focus on the previous timer cycle
-    /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
     /// Windows last reported as unreadable, so the same situation is logged once instead of every 0.3s
     private var lastUnreadableWindowIDs: Set<CGWindowID> = []
+    /// Windows the watchdog last found on screen but not tracked (log dedupe)
+    private var lastUntrackedWindowIDs: Set<CGWindowID> = []
     /// The window ID that had focus on the previous cycle (for detecting focus moving to
     /// Used to detect focus movement and automatically switch workspaces.
     /// (fills the gap, since onActiveAppChanged only fires on app switches)
@@ -684,6 +684,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Target only on-screen windows (i.e. windows in the current Space)
         let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 
+        // Keep where the windows are current: a floating window moved by hand returns to that place,
+        // and windows that left the screen (another Space) leave the layout
+        workspaceManager.observeWindowPositions()
+
         // Record "the focus monitor at this moment" for registering the new window
         // By the time a new window is detected, macOS has already moved focus to it, so
         // Using the value recorded one cycle ago lets us correctly determine which monitor had focus
@@ -766,11 +770,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Watchdog: a window counted on screen since an earlier cycle that is not tracked (it showed up
         // while its app could not be read, or its registration was missed) is admitted where it is
         let untracked = currentWindows.filter { lastWindowIDs.contains($0.id) && !workspaceManager.isTracked($0.id) }
-        if !untracked.isEmpty {
+        let untrackedIDs = Set(untracked.map { $0.id })
+        if !untracked.isEmpty && untrackedIDs != lastUntrackedWindowIDs {
             PerfLog.event("watchdog: \(PerfLog.describe(untracked)) on screen but not tracked; admitting")
-            for window in untracked {
-                registerOnNearestScreen(window.id, window: window)
-            }
+        }
+        lastUntrackedWindowIDs = untrackedIDs
+        for window in untracked {
+            registerOnNearestScreen(window.id, window: window)
         }
         let currentWindowIDs = Set(currentWindows.map { $0.id })
 
@@ -827,15 +833,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let fullscreenWindowIDs = closedWindowIDs.filter { allWindowsByID[$0]?.isFullscreen == true }
 
-                // A minimized window (Cmd+M, or Ctrl+Opt+X) still shows up in the AX list, but
+                // A window hidden (minimized) with Ctrl+Opt+X still shows up in the AX list, but
                 // it drops out of CGWindowList's onScreen list (minimized windows aren't considered on-screen).
-                // Excluded because misreading this as "closed" would lose its slot and workspace; it goes
-                // back next to its neighbors when it comes back.
+                // Excluded because misreading this as "closed" would lose the neighbor memory and workspace registration.
                 // But if it's also gone from allWindowsByID (the whole app really quit), then
                 // Treat it as closed normally
                 let stillHiddenWindowIDs = closedWindowIDs.filter {
-                    allWindowsByID[$0] != nil
-                        && (HiddenWindowManager.shared.isHidden($0) || allWindowsByID[$0]?.isMinimized == true)
+                    HiddenWindowManager.shared.isHidden($0) && allWindowsByID[$0] != nil
                 }
 
                 // A window that was never registered to a workspace was never tiled, so its disappearance
@@ -1236,7 +1240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // looking occupied while showing nothing
             let onScreenWindowIDs = Set(onScreenWindows.map { $0.id })
             let closedDuringSwitch = self.lastWindowIDs.subtracting(onScreenWindowIDs)
-                .filter { self.workspaceManager.isWindowInAnyWorkspace($0) }
+                .filter { self.workspaceManager.isTracked($0) }
             self.lastWindowIDs = onScreenWindowIDs.union(closedDuringSwitch)
             self.lastWindowCount = self.lastWindowIDs.count
 
