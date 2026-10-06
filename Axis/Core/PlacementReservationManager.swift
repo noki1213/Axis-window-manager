@@ -141,10 +141,10 @@ class PlacementReservationManager {
 
 	// MARK: - Consumption
 
-	/// Called after a window was registered. The tracking state places a new window that fits the
+	/// Called after a window was admitted. The tracking state places a new window that fits the
 	/// reservation (dialogs and other floating windows leave it alone) and clears it; the preview
 	/// and the timeout go with it (one-shot reservation).
-	func noteWindowRegistered() {
+	func noteWindowAdmitted() {
 		guard isConfirmed, coordinator.state.reservation == nil else { return }
 		cancel()
 	}

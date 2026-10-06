@@ -130,9 +130,6 @@ struct WindowInfo: Identifiable, Equatable {
 
         PerfLog.event("frame: \(PerfLog.describe(self)) \(BorderManager.describe(frame)) -> \(BorderManager.describe(newFrame))")
 
-        // Moving a window makes the cached frame stale, so discard it
-        AccessibilityManager.shared.invalidateWindowCache()
-
         // Decides the write order.
         // When enlarging, writing the size first makes the window — still at its old position — overflow off-screen, and
         // The app itself can shrink it, so it may not end up at the requested size.
@@ -256,9 +253,6 @@ struct WindowInfo: Identifiable, Equatable {
     /// So it reads back the focus state after setting it and retries if it doesn't match the target.
     func focus() {
         PerfLog.event("focus: -> \(PerfLog.describe(self))")
-
-        // Discard the cache since focus and frontmost state are changing
-        AccessibilityManager.shared.invalidateWindowCache()
 
         let perfOverallStart = CFAbsoluteTimeGetCurrent()
 
@@ -584,16 +578,6 @@ enum FrontProcessAPI {
     static let postEventRecord = lookup("SLPSPostEventRecordTo", as: PostEventRecord.self)
     static let processForPID = lookup("GetProcessForPID", as: ProcessForPID.self)
 
-}
-
-extension WindowFacts {
-    /// What a window read through Accessibility says about itself, as read at `takenAt`.
-    init(info: WindowInfo, takenAt: Time) {
-        self.init(id: info.id, pid: info.app.processIdentifier, role: info.role, subrole: info.subrole,
-                  title: info.title, frame: info.frame, isMinimized: info.isMinimized,
-                  isFullscreen: info.isFullscreen, hasCloseButton: info.hasCloseButton,
-                  minSize: info.minSize, takenAt: takenAt)
-    }
 }
 
 extension WindowInfo {

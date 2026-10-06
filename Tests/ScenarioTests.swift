@@ -329,6 +329,40 @@ let scenarioTests: [TestCase] = [
 		world.expectColumns(ws, [[1], [2]])
 	},
 
+	TestCase("hiddenWindowRestoredAfterIDChange") {
+		var world = ScenarioWorld()
+		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")
+		world.addWindow(id: 1, pid: 100, title: "Document", frame: CGRect(x: 100, y: 100, width: 600, height: 600))
+		world.addWindow(id: 2, pid: 100, title: "Terminal", frame: CGRect(x: 800, y: 100, width: 600, height: 600))
+		world.runPass()
+		let ws = world.state.testActive()
+
+		world.hide(1)
+		let hidePlan = world.plan()
+		expect(hidePlan.actions.contains { $0.window == 1 && $0.kind == .minimize })
+		world.executePlan(hidePlan)
+		world.updateWindow(id: 1, isMinimized: true)
+		world.removeWindowFromServer(id: 1)
+		world.runPass()
+		world.expectVisibility(1, .axisMinimized)
+
+		// After a sleep the window comes back under a new id, still minimized.
+		world.lock()
+		world.unlock()
+		world.windowDestroyed(id: 1, pid: 100, serverHas: false)
+		world.addWindow(id: 101, pid: 100, title: "Document", frame: CGRect(x: 100, y: 100, width: 600, height: 600),
+			isMinimized: true, onServer: false)
+		world.liftBarrier()
+		world.runPass(scans: [100: .complete([world.windows[2]!, world.windows[101]!])])
+		world.expectTracked(1, false)
+		world.expectVisibility(101, .axisMinimized)
+
+		expectEqual(world.unhideLast(), 101)
+		let restorePlan = world.plan(options: PlanOptions(isCommand: true))
+		expect(restorePlan.actions.contains { $0.window == 101 && $0.kind == .unminimize })
+		world.expectColumns(ws, [[101], [2]])
+	},
+
 	TestCase("missionControlBarrier") {
 		var world = ScenarioWorld()
 		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")

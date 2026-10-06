@@ -371,6 +371,9 @@ nonisolated extension TrackingState {
 		if let entry = retired.hiddenEntry, record.workspace != nil, !hiddenStack.contains(where: { $0.window == record.id }) {
 			let index = min(retired.hiddenIndex ?? hiddenStack.count, hiddenStack.count)
 			hiddenStack.insert(HiddenEntry(window: record.id, minimizeConfirmed: entry.minimizeConfirmed), at: index)
+			// The planner unminimizes a window leaving the hide stack only when it minimized it; the
+			// new id inherits that, so restoring it brings it back.
+			plannerState.minimized.insert(record.id)
 		}
 		let midX = old.lastVisibleFrame?.midX ?? draft.observed.frame?.midX ?? .greatestFiniteMagnitude
 		let insertion: AdmissionInsertion = old.slotMemory.map { .slot($0, fallbackMidX: midX) } ?? .byMidX(midX)
