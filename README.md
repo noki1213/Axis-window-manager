@@ -66,8 +66,8 @@ If the key combination is already used by another action, a conflict warning wil
 - A rescue shortcut brings all floating windows to the front at once
 
 ### Zen Mode
-- Centers the focused window and hides all other windows on the primary monitor
-- If the window is on a secondary monitor, it will be moved to the primary monitor
+- Centers the focused window on its own monitor and hides the other windows shown on that monitor
+- Other monitors are left as they are
 - When exiting Zen Mode, the window is restored to its original position
 
 ### Gap Adjustment
@@ -244,9 +244,9 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - 救出キーで、すべての浮遊ウィンドウをまとめて最前面に出せる
 
 ### Zen モード
-- フォーカス中のウィンドウをメインモニターの中央に表示
-- 他のすべてのウィンドウを非表示にして、集中できる環境を作成
-- サブモニターのウィンドウも Zen モードにするとメインモニターに移動
+- フォーカス中のウィンドウを、そのウィンドウがあるモニターの中央に表示
+- そのモニターに表示されている他のウィンドウを非表示にして、集中できる環境を作成
+- 他のモニターはそのまま
 - Zen モード解除時は、ウィンドウは元の位置に復元される
 
 ### ギャップ操作
@@ -287,7 +287,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - 空のワークスペースは自動的に削除され、ID が再割り当てされます
 
 ### アプリを脇に起動する
-アプリを、使っているワークスペースの右隣の空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
+アプリを、使用中のいちばん右のワークスペースのさらに右にある空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
 
 | 入口 | 動作 |
 |---|---|
