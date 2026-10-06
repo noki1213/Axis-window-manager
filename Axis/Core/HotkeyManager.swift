@@ -445,23 +445,17 @@ class HotkeyManager: ObservableObject {
 
 		case .windowPaletteMode:
 			DispatchQueue.main.async { [weak self] in
-				var zenFrames: [CGWindowID: CGRect] = [:]
-				if ZenModeManager.shared.isActive {
-					zenFrames = ZenModeManager.shared.exitAndHandOffHiddenFrames()
-				}
+				// The palette takes every window out of sight, so Zen mode ends first
+				ZenModeManager.shared.exit(reason: .paletteOpened)
 				self?.currentMode = .windowPalette
-				self?.windowPaletteManager.startPalette(inheritedHiddenFrames: zenFrames)
+				self?.windowPaletteManager.startPalette()
 				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
 			}
 
 		// MARK: Layout
 		case .resetLayout:
 			DispatchQueue.main.async { [weak self] in
-				// Zen mode keeps the other windows hidden in a corner; laying them out underneath it
-				// would leave Zen half-applied, so bring them back first
-				if ZenModeManager.shared.isActive {
-					ZenModeManager.shared.exit(reason: .layoutReset)
-				}
+				// Zen mode ends with the reset: its windows come back into their new slots
 				self?.tilingEngine.resetToSingleWindowColumns()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
 					BorderManager.shared.updateBorder()

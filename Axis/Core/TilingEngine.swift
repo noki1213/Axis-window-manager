@@ -57,6 +57,14 @@ class TilingEngine: ObservableObject {
             .filter { !$0.isEmpty }
     }
 
+    /// The tiles shown on `screen`, without the windows Zen mode keeps out of sight
+    private func columnsOutsideZen(on screen: NSScreen) -> [[WindowInfo]] {
+        let state = coordinator.state
+        return tiledColumns(on: screen)
+            .map { column in column.filter { state.visibility($0.id) != .zenHidden } }
+            .filter { !$0.isEmpty }
+    }
+
     /// The new gap and padding apply from the next layout on (Settings has a re-tile button)
     private func applyLayoutConfig() {
         let config = layoutConfig
@@ -354,10 +362,7 @@ class TilingEngine: ObservableObject {
     /// Get the windows on the given screen, or on the neighboring screen in the given direction
     /// Used for focus movement in cursorMonitor mode
     private func getWindowOnScreen(_ screen: NSScreen, direction: Direction) -> WindowInfo? {
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let localColumns = tiledColumns(on: screen).map { col in
-            col.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let localColumns = columnsOutsideZen(on: screen)
 
         // If the screen itself has windows, pick from among them
         if !localColumns.isEmpty {
@@ -375,10 +380,7 @@ class TilingEngine: ObservableObject {
     /// Get the windows on the screen neighboring the given screen (NSScreen version)
     private func getWindowOnAdjacentScreen(from screen: NSScreen, direction: Direction) -> WindowInfo? {
         guard let targetScreen = getAdjacentScreen(from: screen, direction: direction) else { return nil }
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let columns = tiledColumns(on: targetScreen).map { col in
-            col.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let columns = columnsOutsideZen(on: targetScreen)
         guard !columns.isEmpty else { return nil }
         switch direction {
         case .left:  return columns.last?.first
@@ -533,11 +535,12 @@ class TilingEngine: ObservableObject {
         return reservedFrame
     }
 
-    /// Put every window back into its own column (reset the vertical split)
+    /// Put every window back into its own column (reset the vertical split). Zen mode ends with it.
     func resetToSingleWindowColumns() {
         guard let focusedWindow = accessibilityManager.getFocusedWindow(),
               let screen = getScreen(for: focusedWindow),
               let workspace = activeWorkspace(on: screen) else {
+            ZenModeManager.shared.exit(reason: .layoutReset)
             return
         }
         coordinator.perform("reset layout") { state in
@@ -572,11 +575,7 @@ class TilingEngine: ObservableObject {
 
         let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
         guard let targetScreen = adjacentScreen else { return nil }
-        // The current workspace's tiles, without the windows Zen mode moved off-screen
-        let zenHiddenIDs = ZenModeManager.shared.hiddenWindowIDs
-        let columns = tiledColumns(on: targetScreen).map { column in
-            column.filter { !zenHiddenIDs.contains($0.id) }
-        }.filter { !$0.isEmpty }
+        let columns = columnsOutsideZen(on: targetScreen)
         guard !columns.isEmpty else { return nil }
 
         switch direction {

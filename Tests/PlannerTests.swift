@@ -562,6 +562,41 @@ private let sessionTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("a floating Zen window keeps its floating frame while centred and returns to it when Zen ends") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1]])
+		state.testAddWindow(5, placement: .floating, workspace: home)
+		state.records[5]!.floatingFrame = RelativeFrame(monitor: main, offset: CGPoint(x: 100, y: 50), size: CGSize(width: 500, height: 300))
+		let floated = CGRect(x: 100, y: 75, width: 500, height: 300)
+		let zenFrame = CGRect(x: 180, y: 37, width: 1080, height: 851)
+		let parkedOne = CGRect(origin: parkPoint, size: fullSlot.size)
+
+		expect(state.zenEnter(5, now: 1))
+		state.normalize(now: 1)
+		expectEqual(state.records[1]?.visibility, .zenHidden)
+		var plan = state.plan(snapshot: showing([1: fullSlot, 5: floated], at: 1), options: PlanOptions(isCommand: true), now: 1)
+		expectEqual(plan.actions, [
+			setFrame(5, zenFrame, .zenCentre, observed: floated),
+			park(1, .park(.zenHidden), observed: fullSlot),
+		])
+		state.recordWrites(landed(plan), now: 1.01)
+
+		// Commands note where shown windows are; the centred window keeps the frame it floated at.
+		state.noteVisibleFrames(snapshot: showing([1: parkedOne, 5: zenFrame], at: 2))
+		expectEqual(state.records[5]?.floatingFrame?.frame(in: CGRect(x: 0, y: 25, width: 1440, height: 875)), floated)
+
+		state.zenExit(reason: .user)
+		state.normalize(now: 3)
+		plan = state.plan(snapshot: showing([1: parkedOne, 5: zenFrame], at: 3), options: PlanOptions(isCommand: true), now: 3)
+		expectEqual(plan.actions, [
+			setFrame(1, fullSlot, .unpark(from: .zenHidden), observed: parkedOne),
+			setFrame(5, floated, .floatRestore, observed: zenFrame),
+		])
+		expectEqual(state.records[5]?.pendingFloatRestore, false)
+		expectInvariants(state)
+	},
+
 	TestCase("a floating window moves to its floating frame once and then follows the user") {
 		var state = testState()
 		let home = state.testActive()

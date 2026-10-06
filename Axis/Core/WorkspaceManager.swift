@@ -44,10 +44,7 @@ class WorkspaceManager {
 
 	/// Puts every window moved out of sight back on screen and stops tracking
 	func prepareForQuit() {
-		// Zen mode and the palette moved their windows out of sight themselves
-		for (id, frame) in ZenModeManager.shared.exitAndHandOffHiddenFrames() {
-			coordinator.windowInfo(id)?.setFrame(frame)
-		}
+		// The palette moved its windows out of sight itself
 		if HotkeyManager.shared.currentMode == .windowPalette {
 			WindowPaletteManager.shared.endPalette()
 		}
@@ -58,21 +55,20 @@ class WorkspaceManager {
 	/// What the other components do when windows come and go or a workspace changes on its own
 	private func handle(_ event: TrackingEvent) {
 		switch event {
-		case .admitted(let id):
+		case .admitted:
 			PlacementReservationManager.shared.noteWindowAdmitted()
-			ZenModeManager.shared.noteAdmitted(id)
-		case .retired(let id, _):
-			ZenModeManager.shared.noteRetired(id)
+		case .retired:
 			// Dropping an emptied workspace can renumber the others
 			postWorkspaceChangedOnce()
 		case .rekeyed(let old, let new):
 			FocusHistoryManager.shared.replace(old, with: new)
-			ZenModeManager.shared.noteRekeyed(to: new)
 		case .activeChanged(_, _, let workspace, let cause):
 			activeWorkspaceChanged(to: workspace, cause: cause)
 		case .returnFocus(let bundleID):
 			LaunchAsideManager.shared.returnFocus(ifTakenBy: bundleID)
-		case .zenEnded, .focusChanged:
+		case .zenEnded:
+			ZenModeManager.shared.noteEnded()
+		case .focusChanged:
 			break
 		}
 	}
@@ -177,9 +173,6 @@ class WorkspaceManager {
 		if let visibility = state.visibility(windowID), visibility.isParkedKind || visibility == .axisMinimized {
 			return visibility.logName
 		}
-		if ZenModeManager.shared.hiddenWindowIDs.contains(windowID) {
-			return "zenHidden"
-		}
 		if WindowPaletteManager.shared.isWindowHidden(windowID) {
 			return "paletteHidden"
 		}
@@ -224,7 +217,6 @@ class WorkspaceManager {
 		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(current + 1) -> ws\(number + 1)"
 			+ (focusWindowID.map { " (focus #\($0))" } ?? ""))
-		endZenForSwitch(on: screen)
 
 		// The new workspace's windows come on screen first; the old ones leave a moment later,
 		// so an empty screen never shows
@@ -256,20 +248,12 @@ class WorkspaceManager {
 		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(currentWorkspace(on: screen) + 1) -> ws\(number + 1)"
 			+ " (focus #\(focusedID))")
-		endZenForSwitch(on: screen)
 
 		var destination: WorkspaceID?
 		coordinator.perform("move to workspace", delaysHidePhase: true) { state in
 			destination = state.moveWindowToWorkspace(focusedID, on: key, to: target)
 		}
 		finishSwitch(to: destination, focusWindowID: focusedID)
-	}
-
-	/// Zen mode is per monitor: a switch on its monitor ends it, one on another monitor does not
-	private func endZenForSwitch(on screen: NSScreen) {
-		if ZenModeManager.shared.isActive, let monitor = ZenModeManager.shared.activeMonitor, monitor == monitorKey(for: screen) {
-			ZenModeManager.shared.exit(reason: .workspaceSwitched)
-		}
 	}
 
 	/// Focus, border, cursor and menu bar after a switch
@@ -349,20 +333,13 @@ class WorkspaceManager {
 
 	// MARK: - Windows other components move
 
-	/// Windows Zen mode and the palette park and restore by themselves
+	/// Windows the palette parks and restores by itself
 	private func externallyPositionedWindows() -> Set<WindowID> {
-		var ids = ZenModeManager.shared.hiddenWindowIDs.union(WindowPaletteManager.shared.hiddenWindowIDs)
-		if ZenModeManager.shared.isActive, let focused = ZenModeManager.shared.focusedWindowID {
-			ids.insert(focused)
-		}
-		return ids
+		WindowPaletteManager.shared.hiddenWindowIDs
 	}
 
-	/// Zen mode and the palette are laid out for the old screens, so leave them before the screens change
+	/// The palette is laid out for the old screens, so leave it before the screens change
 	private func exitSpecialModesForScreenChange() {
-		if ZenModeManager.shared.isActive {
-			ZenModeManager.shared.exit(reason: .monitorGone)
-		}
 		if HotkeyManager.shared.currentMode == .windowPalette {
 			WindowPaletteManager.shared.endPalette()
 			HotkeyManager.shared.currentMode = .normal
