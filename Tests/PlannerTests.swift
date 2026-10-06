@@ -769,11 +769,38 @@ private let layoutStateTests: [TestCase] = [
 			setFrame(1, CGRect(x: 12, y: 37, width: 464, height: 851), .layout, observed: leftSlot),
 			setFrame(2, CGRect(x: 964, y: 37, width: 464, height: 851), .layout, observed: rightSlot),
 		])
-		expectEqual(state.plannerState.reservedSlot, CGRect(x: 488, y: 37, width: 464, height: 851))
+		expectEqual(state.reservedSlot, CGRect(x: 488, y: 37, width: 464, height: 851))
 
 		state.reservation = nil
 		_ = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 2), options: PlanOptions(), now: 2)
-		expectEqual(state.plannerState.reservedSlot, nil)
+		expectEqual(state.reservedSlot, nil)
+	},
+
+	TestCase("a window opened into the reservation takes the slot its preview showed") {
+		var state = testState()
+		state.testSetColumns(state.testActive(), [[1], [2]])
+		state.reservation = PlacementReservation(kind: .aboveInColumn, monitor: main, columnIndex: 1)
+		var plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 1), options: PlanOptions(isCommand: true), now: 1)
+		let lowerRight = CGRect(x: 726, y: 468.5, width: 702, height: 419.5)
+		expectEqual(plan.actions, [setFrame(2, lowerRight, .layout, observed: rightSlot)])
+		state.recordWrites(landed(plan), now: 1.01)
+		let preview = CGRect(x: 726, y: 37, width: 702, height: 419.5)
+		expectEqual(state.reservedSlot, preview)
+
+		// Later passes keep the slot free until a window takes it.
+		plan = state.plan(snapshot: showing([1: leftSlot, 2: lowerRight], at: 1.5), options: PlanOptions(), now: 1.5)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.reservedSlot, preview)
+
+		let opened = CGRect(x: 300, y: 200, width: 800, height: 600)
+		state.admit(WindowFacts(id: 3, pid: 100, title: "W3", frame: opened, takenAt: 2),
+			app: AppFacts(pid: 100, bundleID: "com.test.app", name: "App"), source: .created, now: 2)
+		expectEqual(state.reservation, nil)
+		state.normalize(now: 2)
+		plan = state.plan(snapshot: showing([1: leftSlot, 2: lowerRight, 3: opened], at: 2), options: PlanOptions(), now: 2)
+		expectEqual(plan.actions, [setFrame(3, preview, .layout, observed: opened)])
+		expectEqual(state.reservedSlot, nil)
+		expectInvariants(state)
 	},
 ]
 

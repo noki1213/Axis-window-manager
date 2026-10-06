@@ -13,9 +13,9 @@ typealias PlacementReservationKind = ReservationKind
 
 /// The class that manages the "placement reservation" feature
 /// Ctrl+Option+N enters the waiting state, and then pressing I/K/J/L/F without any modifier
-/// Reserves a spot for the next new window that opens. Once the reservation is confirmed, it shows a translucent preview, and
-/// the tracking state places the next new window there and clears it. Pressing Ctrl+Option+N again, or
-/// a timeout, cancels it.
+/// Reserves a spot for the next new window that opens. Once the reservation is confirmed, the layout keeps
+/// that slot free and a translucent preview shows it; the tracking state places the next new window there
+/// and clears it. Pressing Ctrl+Option+N again, or a timeout, cancels it.
 class PlacementReservationManager {
 	static let shared = PlacementReservationManager()
 
@@ -39,9 +39,6 @@ class PlacementReservationManager {
 
 	/// The preview overlay window (reused)
 	private var previewWindow: PlacementPreviewOverlayWindow?
-
-	/// A flag for whether the pre-placement layout has been applied
-	private var isLayoutApplied: Bool = false
 
 	/// A callback to tell the caller (HotkeyManager) that the wait was cleared automatically
 	var onAwaitingCanceled: (() -> Void)?
@@ -72,7 +69,6 @@ class PlacementReservationManager {
 	/// Cancel the reservation (Ctrl+Opt+N was pressed again, it timed out, etc.)
 	/// Clearing it from the tracking state lays the windows out without the reserved slot again
 	func cancel() {
-		isLayoutApplied = false
 		isConfirmed = false
 		pendingFocusSnapshot = nil
 		timeoutWorkItem?.cancel()
@@ -101,30 +97,26 @@ class PlacementReservationManager {
 			// Float can be resolved even without focused-column info
 			guard let monitor = pendingFocusSnapshot?.monitor
 					?? WorkspaceManager.shared.focusedScreen().flatMap({ WorkspaceManager.shared.monitorKey(for: $0) }),
-				  let screen = WorkspaceManager.shared.screen(for: monitor) else {
+				  let visibleFrame = coordinator.state.monitors[monitor]?.visibleFrame else {
 				hidePreview()
 				return
 			}
 			reserve(PlacementReservation(kind: .float, monitor: monitor, columnIndex: 0))
-			isLayoutApplied = false
-			let axFrame = Self.previewFrame(kind: .float, screen: screen, columnIndex: 0)
-			showPreview(axFrame: axFrame)
+			showPreview(axFrame: Self.floatPreviewFrame(in: visibleFrame))
 
 		case .aboveInColumn, .belowInColumn, .newColumnLeft, .newColumnRight:
 			// A within-column or column-relative reservation can't be resolved without a known focus position
-			guard let snapshot = pendingFocusSnapshot, let screen = WorkspaceManager.shared.screen(for: snapshot.monitor) else {
+			guard let snapshot = pendingFocusSnapshot else {
 				hidePreview()
 				return
 			}
-			if let axFrame = TilingEngine.shared.applyReservedSlotLayout(columnIndex: snapshot.columnIndex, kind: kind, on: screen) {
-				isLayoutApplied = true
-				showPreview(axFrame: axFrame)
-			} else {
-				isLayoutApplied = false
-				let axFrame = Self.previewFrame(kind: kind, screen: screen, columnIndex: snapshot.columnIndex)
-				showPreview(axFrame: axFrame)
-			}
+			// The windows make room for the reserved slot right away, and the preview shows that slot
 			reserve(PlacementReservation(kind: kind, monitor: snapshot.monitor, columnIndex: snapshot.columnIndex))
+			if let slot = coordinator.state.reservedSlot {
+				showPreview(axFrame: slot)
+			} else {
+				hidePreview()
+			}
 		}
 
 		scheduleTimeout()
@@ -195,69 +187,12 @@ class PlacementReservationManager {
 		previewWindow?.hide()
 	}
 
-	/// Compute the approximate region to show the preview in, from the reservation content (Accessibility coordinates, top-left origin)
-	/// A simplified calculation independent of the actual tiling computation (TilingEngine.applyColumnTiling), which
-	/// Purely a preview to show "roughly where it will be placed"
-	private static func previewFrame(kind: PlacementReservationKind, screen: NSScreen, columnIndex: Int) -> CGRect {
-		let engine = TilingEngine.shared
-		let visibleFrame = screen.visibleFrame
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
-		let gap = engine.windowGap
-		let padding = engine.screenPadding
-
-		if kind == .float {
-			let width: CGFloat = 640
-			let height: CGFloat = 480
-			let x = visibleFrame.midX - width / 2
-			let yBottom = visibleFrame.midY - height / 2 // NSScreen coordinates (bottom-left origin)
-			let yAX = mainScreenHeight - yBottom - height
-			return CGRect(x: x, y: yAX, width: width, height: height)
-		}
-
-		let columns = engine.tiledColumns(on: screen)
-
-		switch kind {
-		case .aboveInColumn, .belowInColumn:
-			guard !columns.isEmpty else {
-				// If there are no columns, target the whole screen
-				return CGRect(
-					x: visibleFrame.minX + padding,
-					y: screenTopInAX + padding,
-					width: visibleFrame.width - padding * 2,
-					height: visibleFrame.height - padding * 2
-				)
-			}
-			let idx = min(max(columnIndex, 0), columns.count - 1)
-			let column = columns[idx]
-			guard let sample = column.first else { return .zero }
-
-			let colX = sample.frame.minX
-			let colWidth = sample.frame.width
-
-			let rowCount = CGFloat(column.count + 1)
-			let totalGaps = gap * (rowCount - 1)
-			let availableHeight = visibleFrame.height - padding * 2 - totalGaps
-			let rowHeight = availableHeight / rowCount
-
-			let y = (kind == .aboveInColumn)
-				? screenTopInAX + padding
-				: screenTopInAX + padding + (rowHeight + gap) * (rowCount - 1)
-			return CGRect(x: colX, y: y, width: colWidth, height: rowHeight)
-
-		case .newColumnLeft, .newColumnRight:
-			let insertIdx = (kind == .newColumnLeft) ? columnIndex : columnIndex + 1
-			let clampedInsertIdx = min(max(insertIdx, 0), columns.count)
-			let newColumnCount = CGFloat(columns.count + 1)
-			let totalGaps = gap * (newColumnCount - 1)
-			let availableWidth = visibleFrame.width - padding * 2 - totalGaps
-			let colWidth = availableWidth / newColumnCount
-			let x = visibleFrame.minX + padding + CGFloat(clampedInsertIdx) * (colWidth + gap)
-			return CGRect(x: x, y: screenTopInAX + padding, width: colWidth, height: visibleFrame.height - padding * 2)
-
-		case .float:
-			return .zero // Unreachable
-		}
+	/// A float reservation has no slot (the window opens centred at its own size), so the preview
+	/// marks the middle of the screen with a window-sized area (Accessibility coordinates)
+	private static func floatPreviewFrame(in visibleFrame: CGRect) -> CGRect {
+		let size = CGSize(width: 640, height: 480)
+		return CGRect(x: visibleFrame.midX - size.width / 2, y: visibleFrame.midY - size.height / 2,
+			width: size.width, height: size.height)
 	}
 
 	/// Convert a rect in Accessibility coordinates (top-left origin) to NSWindow coordinates (bottom-left origin)
