@@ -329,55 +329,33 @@ class WindowPaletteManager {
 		corner.position(forWindowWidth: window.frame.width, on: screen)
 	}
 
-	/// Determine which screen a window is on
-	private func screenForWindow(_ window: WindowInfo) -> NSScreen? {
-		window.screen
-	}
-
 	/// Stash an on-screen window off screen (the corner approach)
-	/// By shrinking the window down to a tiny size before stashing it in the corner,
-	/// Prevents the shadow or corner areas from being visible
 	private func hideOnScreenWindows() {
 		hiddenWindowFrames.removeAll()
 
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let allWindows = accessibilityManager.getAllWindows()
+		// Every window in view: the tiles of the workspaces shown, floating windows, dialogs
+		let coordinator = TrackingCoordinator.shared
+		let state = coordinator.state
+		let shown = state.records.keys.filter { state.visibility($0) == .visible }.sorted()
 
-		for window in allWindows {
-			// Only targets managed windows currently shown on screen
-			guard onScreenIDs.contains(window.id) else { continue }
-			guard window.shouldBeManaged() else { continue }
-
+		for window in coordinator.windowInfos(shown, onScreenOnly: true) {
 			// Save the original position and size
 			hiddenWindowFrames[window.id] = window.frame
 
 			// Get the screen the window belongs to and stash it in the corner
-			if let screen = screenForWindow(window) {
+			if let screen = window.screen ?? NSScreen.main {
 				let corner = optimalHideCorner(for: screen)
-				let hidePos = hidePosition(for: window, corner: corner, on: screen)
-				window.setPosition(hidePos)
-			} else {
-				// Fall back to the main screen's corner if the screen can't be determined
-				if let mainScreen = NSScreen.main {
-					let corner = optimalHideCorner(for: mainScreen)
-					let hidePos = hidePosition(for: window, corner: corner, on: mainScreen)
-					window.setPosition(hidePos)
-				}
+				window.setPosition(hidePosition(for: window, corner: corner, on: screen))
 			}
 		}
-
 	}
 
 	/// Return the stashed window to its original position
 	private func restoreHiddenWindows() {
-		let allWindows = accessibilityManager.getAllWindows()
-
-		for window in allWindows {
-			if let savedFrame = hiddenWindowFrames[window.id] {
-				window.setFrame(savedFrame)
-			}
+		let coordinator = TrackingCoordinator.shared
+		for (windowID, savedFrame) in hiddenWindowFrames {
+			coordinator.windowInfo(windowID)?.setFrame(savedFrame)
 		}
-
 		hiddenWindowFrames.removeAll()
 	}
 
@@ -439,38 +417,16 @@ class WindowPaletteManager {
 		// --- Add the System section (floating windows not registered to any workspace) to the end of each Display ---
 		// Since system-originated floating windows like the Settings app or dialogs aren't registered to a workspace,
 		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section.
-		let allWindows = accessibilityManager.getAllWindows()
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let myPID = ProcessInfo.processInfo.processIdentifier
 		var systemFloatItemsByMonitor: [MonitorKey: [WindowPaletteItem]] = [:]
 
-		for window in allWindows {
-			// Excludes Axis's own windows (palette, border, etc.)
-			guard window.app.processIdentifier != myPID else { continue }
-			// Only windows currently shown on screen
-			guard onScreenIDs.contains(window.id) else { continue }
-			// Excluded if it's already registered to some workspace, since it already shows up in the normal section
-			guard !workspaceManager.isWindowInAnyWorkspace(window.id) else { continue }
-			// Minimized and fullscreen windows are excluded
-			guard !window.isMinimized && !window.isFullscreen else { continue }
-			// Only targets real windows (standard windows or dialogs)
-			// (So invisible helper windows, like the ones Arc has, don't show up in the list)
-			guard window.shouldBeManaged()
-				|| window.subrole == kAXDialogSubrole as String
-				|| window.subrole == kAXSystemDialogSubrole as String else { continue }
+		for windowID in state.records.keys.sorted() {
+			guard let record = state.record(windowID), record.workspace == nil else { continue }
+			// Only windows currently shown on screen (minimized and fullscreen ones are in other states)
+			guard record.visibility == .visible, record.observed.onScreen else { continue }
 
-			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
-			let screen = screenForWindow(window) ?? NSScreen.screens.first
-			guard let targetScreen = screen, let monitor = workspaceManager.monitorKey(for: targetScreen) else { continue }
-
-			let item = WindowPaletteItem(
-				windowID: window.id,
-				appName: window.app.localizedName ?? "Unknown App",
-				windowTitle: window.title,
-				appIcon: window.app.icon,
-				workspace: nil,
-				monitor: monitor
-			)
+			// The monitor the window is on (falls back to the main one if it can't be determined)
+			guard let monitor = record.observed.frame.flatMap({ state.monitorKey(for: $0) }) ?? state.primaryMonitor,
+				  let item = item(windowID, workspace: nil, monitor: monitor) else { continue }
 			systemFloatItemsByMonitor[monitor, default: []].append(item)
 		}
 
@@ -505,8 +461,7 @@ class WindowPaletteManager {
 		}
 
 		// Focus the target window
-		guard let window = TrackingCoordinator.shared.windowInfo(item.windowID)
-				?? accessibilityManager.getAllWindows().first(where: { $0.id == item.windowID }) else { return }
+		guard let window = TrackingCoordinator.shared.windowInfo(item.windowID) else { return }
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
 			window.focus()
 

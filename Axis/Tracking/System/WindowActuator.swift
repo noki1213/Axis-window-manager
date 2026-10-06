@@ -169,7 +169,6 @@ enum WindowActuator {
 	/// Sets a window's position and size with read-back verification and retries.
 	static func setFrame(_ newFrame: CGRect, on element: AXUIElement, action: PlanAction) -> WriteResult {
 		logAction(action, target: newFrame, currentFrame: action.observed)
-		AccessibilityManager.shared.invalidateWindowCache()
 
 		let currentFrame = action.observed ?? .zero
 		let isGrowing = newFrame.width > currentFrame.width + frameTolerance
@@ -246,7 +245,6 @@ enum WindowActuator {
 		let target = CGRect(origin: origin, size: size)
 
 		logAction(action, target: target, currentFrame: action.observed)
-		AccessibilityManager.shared.invalidateWindowCache()
 
 		let err = applyPosition(origin, to: element)
 		if err == .cannotComplete {
@@ -264,7 +262,6 @@ enum WindowActuator {
 
 	/// Minimizes a window.
 	static func minimize(on element: AXUIElement, action: PlanAction) -> WriteResult {
-		AccessibilityManager.shared.invalidateWindowCache()
 		let target = action.observed ?? .zero
 
 		let err = AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
@@ -283,7 +280,6 @@ enum WindowActuator {
 
 	/// Unminimizes a window.
 	static func unminimize(on element: AXUIElement, action: PlanAction) -> WriteResult {
-		AccessibilityManager.shared.invalidateWindowCache()
 		let target = action.observed ?? .zero
 
 		let err = AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
@@ -300,22 +296,13 @@ enum WindowActuator {
 		return WriteResult(window: action.window, pid: action.pid, kind: .unminimize, target: target, result: actualFrame, error: finalError)
 	}
 
-	// MARK: - Quit and Rescue
+	// MARK: - Rescue
 
-	/// Restores windows and rescues any windows left off-screen before application termination.
-	@discardableResult
-	static func prepareForQuit(plan: Plan = Plan(), windows: [WindowInfo]? = nil) -> [WriteResult] {
-		let results = execute(plan)
-		rescueOffScreenWindows(windows: windows)
-		return results
-	}
-
-	/// Rescues windows that ended up off-screen by moving them back into visible screen bounds.
-	static func rescueOffScreenWindows(windows: [WindowInfo]? = nil) {
-		let allWindows = windows ?? AccessibilityManager.shared.getAllWindows()
+	/// Moves windows whose centre is off every screen back inside the nearest screen's visible area.
+	static func rescueOffScreenWindows(windows: [WindowInfo]) {
 		guard let mainScreenHeight = NSScreen.screens.first?.frame.height else { return }
 
-		for window in allWindows {
+		for window in windows {
 			guard !window.isMinimized && !window.isFullscreen else { continue }
 			guard window.frame.width > 0 && window.frame.height > 0 else { continue }
 
