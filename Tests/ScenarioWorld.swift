@@ -43,10 +43,6 @@ struct ScenarioWorld {
 		currentTime += seconds
 	}
 
-	mutating func setTime(_ time: Time) {
-		currentTime = time
-	}
-
 	// MARK: - Desktop entities
 
 	mutating func addApp(pid: PID, bundleID: String, name: String, isHidden: Bool = false) {
@@ -450,15 +446,6 @@ struct ScenarioWorld {
 
 	func expectActiveWorkspace(on monitor: String = "Main", _ expected: WorkspaceID, file: StaticString = #filePath, line: UInt = #line) {
 		expectEqual(state.activeWorkspace(testKey(monitor)), expected, "\(monitor) active workspace", file: file, line: line)
-	}
-
-	func expectActiveWorkspaceNumber(on monitor: String = "Main", _ expected: Int, file: StaticString = #filePath, line: UInt = #line) {
-		guard let active = state.activeWorkspace(testKey(monitor)),
-			let num = state.number(of: active) else {
-			fail("active workspace missing on \(monitor)", file: file, line: line)
-			return
-		}
-		expectEqual(num, expected, "\(monitor) active workspace number", file: file, line: line)
 	}
 
 	func expectZen(active: Bool, focus: WindowID? = nil, file: StaticString = #filePath, line: UInt = #line) {

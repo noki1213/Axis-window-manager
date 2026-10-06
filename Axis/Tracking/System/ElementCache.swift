@@ -59,17 +59,6 @@ nonisolated final class ElementCache: @unchecked Sendable {
 		lock.withLock { windows[id]?.pid }
 	}
 
-	/// Every cached window element of one app.
-	func windowElements(of pid: PID) -> [WindowID: AXUIElement] {
-		lock.withLock {
-			var result: [WindowID: AXUIElement] = [:]
-			for id in windowIDsByPID[pid] ?? [] {
-				result[id] = windows[id]?.element
-			}
-			return result
-		}
-	}
-
 	/// The application element of a process, created on first use.
 	func appElement(_ pid: PID) -> AXUIElement {
 		lock.withLock {

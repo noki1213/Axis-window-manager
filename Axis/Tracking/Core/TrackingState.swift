@@ -73,9 +73,7 @@ nonisolated struct TrackingState: Equatable, Sendable {
 
 	var livenessState = LivenessState()
 	var admissionState = AdmissionState()
-	var visibilityState = VisibilityState()
 	var plannerState = PlannerState()
-	var topologyState = TopologyState()
 	var persistenceState = PersistenceState()
 
 	/// The coordinator starts with `barrier: [.starting]` until the first full scan.

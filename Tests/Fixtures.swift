@@ -45,6 +45,16 @@ func expectInvariants(_ state: TrackingState, _ context: String = "", file: Stat
 }
 
 extension TrackingState {
+	/// The snapshot of the state as the JSON data the app writes to disk.
+	func encodePersistence() throws -> Data {
+		try snapshot().encode()
+	}
+
+	/// A snapshot read back from JSON data.
+	static func decodePersistence(from data: Data) throws -> PersistenceSnapshot {
+		try PersistenceSnapshot.decode(from: data)
+	}
+
 	/// The active workspace of a test display.
 	func testActive(_ name: String = "Main") -> WorkspaceID {
 		monitors[testKey(name)]!.active
