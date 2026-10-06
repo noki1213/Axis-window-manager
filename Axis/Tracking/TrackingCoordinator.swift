@@ -930,13 +930,15 @@ final class TrackingCoordinator {
 		return WindowInfo(facts: facts, element: element, app: app)
 	}
 
-	/// Handles for tracked windows with the frames the window server shows now; a window it does
-	/// not show (minimized, on another Space) keeps its last known frame.
-	func windowInfos(_ ids: [WindowID]) -> [WindowInfo] {
+	/// Handles for tracked windows with the frames the window server shows now. A window it does
+	/// not show (minimized, on another Space) keeps its last known frame, or is left out with
+	/// `onScreenOnly`.
+	func windowInfos(_ ids: [WindowID], onScreenOnly: Bool = false) -> [WindowInfo] {
 		let snapshot = ServerProbe.onScreen(now: Self.uptime())
 		return ids.compactMap { id in
-			guard var info = windowInfo(id) else { return nil }
-			if let bounds = snapshot.windows[id]?.bounds {
+			let bounds = snapshot.windows[id]?.bounds
+			guard bounds != nil || !onScreenOnly, var info = windowInfo(id) else { return nil }
+			if let bounds {
 				info.frame = bounds
 			}
 			return info

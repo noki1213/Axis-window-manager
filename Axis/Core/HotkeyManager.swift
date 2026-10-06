@@ -393,8 +393,7 @@ class HotkeyManager: ObservableObject {
 			DispatchQueue.main.async {
 				let floatIDs = WorkspaceManager.shared.floatWindowIDs
 				guard !floatIDs.isEmpty else { return }
-				let allWindows = AccessibilityManager.shared.getAllWindows()
-				let floatWindows = allWindows.filter { floatIDs.contains($0.id) }
+				let floatWindows = TrackingCoordinator.shared.windowInfos(floatIDs.sorted())
 					.sorted { $0.frame.midX < $1.frame.midX }
 				guard !floatWindows.isEmpty else { return }
 

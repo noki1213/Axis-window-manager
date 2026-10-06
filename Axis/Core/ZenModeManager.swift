@@ -35,7 +35,7 @@ class ZenModeManager: ObservableObject {
         return ids
     }
 
-    /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on getAllWindows)
+    /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on looking it up again)
     private var hiddenWindowList: [WindowInfo] = []
 
     /// Windows admitted while Zen mode is on, checked once all the changes of that moment are in
@@ -202,33 +202,17 @@ class ZenModeManager: ObservableObject {
         hiddenWindowFrames.removeAll()
         hiddenWindowList.removeAll()
 
-        // Collect only the window IDs belonging to the workspace of the monitor that started Zen mode
-        let workspaceIDs = Set(WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen))
+        // Only the windows shown in the workspace of the monitor that started Zen mode (windows on
+        // other monitors, minimized ones and the like are left alone), with where they are now
+        let coordinator = TrackingCoordinator.shared
+        let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
+            .filter { $0 != exceptWindowID && coordinator.state.visibility($0) == .visible }
 
         // Determine the hidden corner
         let corner = optimalHideCorner(for: screen)
 
-        // Get all windows
-        let allWindows = AccessibilityManager.shared.getAllWindows()
-
-        for window in allWindows {
-            // Skip the focused window
-            if window.id == exceptWindowID {
-                continue
-            }
-
-            // Skip minimized windows
-            if window.isMinimized {
-                continue
-            }
-
-            // Skip windows outside the workspace of the monitor that started Zen mode
-            // (don't touch windows on other monitors)
-            if !workspaceIDs.contains(window.id) {
-                continue
-            }
-
-            // Save the original position and WindowInfo (so restoring doesn't depend on getAllWindows)
+        for window in coordinator.windowInfos(workspaceIDs.sorted(), onScreenOnly: true) {
+            // Save the original position and WindowInfo (so restoring doesn't depend on looking them up again)
             hiddenWindowFrames[window.id] = window.frame
             hiddenWindowList.append(window)
 
@@ -239,8 +223,7 @@ class ZenModeManager: ObservableObject {
     }
     
     private func restoreHiddenWindows() {
-        // Restore using the saved WindowInfo directly
-        // (because getAllWindows can fail to pick up off-screen windows like Excel's)
+        // Restore using the saved WindowInfo directly (a window that closed meanwhile just fails the write)
         for window in hiddenWindowList {
             if let originalFrame = hiddenWindowFrames[window.id] {
                 window.setFrame(originalFrame)
