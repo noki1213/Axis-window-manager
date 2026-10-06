@@ -77,11 +77,6 @@ class WorkspaceManager {
 		}
 	}
 
-	/// Returns whether the window is currently Float
-	func isFloating(_ windowID: CGWindowID) -> Bool {
-		state.isFloating(windowID)
-	}
-
 	/// The windows that are Float
 	var floatWindowIDs: Set<CGWindowID> {
 		Set(state.records.values.filter { $0.placement == .floating }.map(\.id))
@@ -97,10 +92,6 @@ class WorkspaceManager {
 	private static func tiledAtLastQuit() -> Set<WindowID> {
 		let ids = UserDefaults.standard.array(forKey: tiledAtQuitKey) as? [UInt32] ?? []
 		return Set(ids)
-	}
-
-	func wasTiledBeforeRelaunch(_ windowID: CGWindowID) -> Bool {
-		state.relaunchTiled.contains(windowID)
 	}
 
 	/// Record the tiled windows so the next launch can tell them from genuinely small windows

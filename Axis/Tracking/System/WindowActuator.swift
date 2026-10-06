@@ -298,10 +298,12 @@ enum WindowActuator {
 
 	// MARK: - Rescue
 
-	/// Moves windows whose centre is off every screen back inside the nearest screen's visible area.
+	/// Moves windows whose centre is off every screen back inside the nearest screen's visible area,
+	/// with the same writes (animations off per app, read-back) and log lines as a plan.
 	static func rescueOffScreenWindows(windows: [WindowInfo]) {
 		guard let mainScreenHeight = NSScreen.screens.first?.frame.height else { return }
 
+		var groups: [PlanGroup] = []
 		for window in windows {
 			guard !window.isMinimized && !window.isFullscreen else { continue }
 			guard window.frame.width > 0 && window.frame.height > 0 else { continue }
@@ -333,8 +335,18 @@ enum WindowActuator {
 					newY = screenBottomInAX - window.frame.height
 				}
 
-				window.setPosition(CGPoint(x: newX, y: newY))
+				let target = CGRect(origin: CGPoint(x: newX, y: newY), size: window.frame.size)
+				let action = PlanAction(window: window.id, pid: window.app.processIdentifier, kind: .setFrame(target),
+					reason: .rescue, observed: window.frame, label: PerfLog.describe(window))
+				if let index = groups.firstIndex(where: { $0.pid == action.pid }) {
+					groups[index].actions.append(action)
+				} else {
+					groups.append(PlanGroup(pid: action.pid, actions: [action]))
+				}
 			}
+		}
+		if !groups.isEmpty {
+			execute(Plan(show: groups))
 		}
 	}
 

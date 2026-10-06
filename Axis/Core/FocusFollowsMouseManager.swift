@@ -179,8 +179,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		// Re-raise that screen's floating windows to the front (without stealing focus).
 		// Without this, a floating window gets buried just from the mouse passing over a tile, and
 		// After this, hovering can no longer reach the floating window
-		let isFloatingTarget = WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat()
-		if !isFloatingTarget,
+		if TrackingCoordinator.shared.state.placement(window.id) == .tiled,
 		   let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
 			PerfLog.measure("FFM.raiseFloatingWindows", threshold: 0.005) {
 				TilingEngine.shared.raiseFloatingWindows(on: screen)

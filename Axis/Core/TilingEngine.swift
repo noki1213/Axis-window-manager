@@ -76,14 +76,6 @@ class TilingEngine: ObservableObject {
     
     // MARK: - Public Methods
     
-    /// Lay the windows out again where they are off their slots or out of sight where they should be
-    /// parked, and bring floating windows on the given screen back over the tiles
-    /// - Parameter reason: what triggered this pass (defaults to the caller's function name)
-    func tile(on screen: NSScreen, reason: String = #function) {
-        coordinator.perform("retile") { _ in }
-        raiseFloatingWindows(on: screen)
-    }
-
     /// Raise the floating windows (marked Float, or floating on their own like dialogs) on the given
     /// screen to the front
     /// Calling this on every tiling pass prevents dialogs and the like from staying stuck behind the tiles.

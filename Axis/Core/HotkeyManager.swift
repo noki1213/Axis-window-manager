@@ -380,10 +380,13 @@ class HotkeyManager: ObservableObject {
 			DispatchQueue.main.async { [weak self] in
 				guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
 				// Turning Float on centers the window on its monitor; turning it off tiles it
-				// where it is
+				// where it is (the command lays the windows out)
 				WorkspaceManager.shared.toggleFloat(windowID: focusedWindow.id)
 
-				self?.tilingEngine.tileAllScreens()
+				// Floating windows stay over the tiles that moved
+				for screen in NSScreen.screens {
+					self?.tilingEngine.raiseFloatingWindows(on: screen)
+				}
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
 					BorderManager.shared.updateBorder()
 				}
