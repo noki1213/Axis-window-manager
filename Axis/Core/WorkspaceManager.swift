@@ -16,9 +16,6 @@ import AppKit
 class WorkspaceManager {
 	static let shared = WorkspaceManager()
 
-	/// Whether a workspace switch is in progress (used to prevent checkForWindowChanges from misfiring)
-	var isSwitching: Bool = false
-
 	private let accessibilityManager = AccessibilityManager.shared
 	private var coordinator: TrackingCoordinator { TrackingCoordinator.shared }
 	private var state: TrackingState { coordinator.state }
@@ -27,24 +24,55 @@ class WorkspaceManager {
 
 	// MARK: - Start and quit
 
-	/// Starts the tracking state with the connected displays, each showing an empty workspace 0
-	func start() {
-		coordinator.onActiveChanged = { [weak self] _, _, workspace, cause in
-			self?.activeWorkspaceChanged(to: workspace, cause: cause)
-		}
-		coordinator.onRekeyed = { old, new in
-			FocusHistoryManager.shared.replace(old, with: new)
+	/// Starts tracking: each connected display shows an empty workspace 0 and every window joins
+	/// the one of the display it is on. `ready` runs once those windows are laid out.
+	func start(ready: @escaping () -> Void) {
+		coordinator.addEventHandler { [weak self] event in
+			self?.handle(event)
 		}
 		coordinator.externallyPositioned = { [weak self] in
 			self?.externallyPositionedWindows() ?? []
 		}
-		coordinator.start(mode: .stateOnly, config: TilingEngine.shared.layoutConfig, relaunchTiled: Self.tiledAtLastQuit())
+		coordinator.onDisplaySetChanging = { [weak self] in
+			self?.exitSpecialModesForScreenChange()
+		}
+		coordinator.onStarted = ready
+		coordinator.start(config: TilingEngine.shared.layoutConfig, relaunchTiled: Self.tiledAtLastQuit())
 	}
 
 	/// Puts every window moved out of sight back on screen and stops tracking
 	func prepareForQuit() {
+		// Zen mode and the palette moved their windows out of sight themselves
+		for (id, frame) in ZenModeManager.shared.exitAndHandOffHiddenFrames() {
+			coordinator.windowInfo(id)?.setFrame(frame)
+		}
+		if HotkeyManager.shared.currentMode == .windowPalette {
+			WindowPaletteManager.shared.endPalette()
+		}
 		coordinator.prepareForQuit()
 		coordinator.stop()
+	}
+
+	/// What the other components do when windows come and go or a workspace changes on its own
+	private func handle(_ event: TrackingEvent) {
+		switch event {
+		case .admitted(let id):
+			PlacementReservationManager.shared.noteWindowAdmitted()
+			ZenModeManager.shared.noteAdmitted(id)
+		case .retired(let id, _):
+			ZenModeManager.shared.noteRetired(id)
+			// Dropping an emptied workspace can renumber the others
+			NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+		case .rekeyed(let old, let new):
+			FocusHistoryManager.shared.replace(old, with: new)
+			ZenModeManager.shared.noteRekeyed(to: new)
+		case .activeChanged(_, _, let workspace, let cause):
+			activeWorkspaceChanged(to: workspace, cause: cause)
+		case .returnFocus(let bundleID):
+			LaunchAsideManager.shared.returnFocus(ifTakenBy: bundleID)
+		case .zenEnded, .focusChanged:
+			break
+		}
 	}
 
 	// MARK: - Float (floating)
@@ -173,198 +201,6 @@ class WorkspaceManager {
 		}
 	}
 
-	// MARK: - Windows found by the window list
-
-	/// Starts tracking the windows on screen when window management starts: each joins the
-	/// active workspace (number 0) of the monitor holding it
-	func registerCurrentWindows() {
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let windows = accessibilityManager.getAllWindows().filter {
-			onScreenIDs.contains($0.id) && $0.shouldBeManaged() && !state.isTracked($0.id)
-		}
-		guard !windows.isEmpty else { return }
-		let now = Self.uptime()
-		for window in windows {
-			ElementCache.shared.store(window: window.id, pid: window.app.processIdentifier, element: window.axElement)
-		}
-		coordinator.perform("startup") { state in
-			for window in windows {
-				state.admit(WindowFacts(info: window, takenAt: now), app: Self.appFacts(window.app), source: .startup, now: now)
-			}
-		}
-	}
-
-	/// Starts tracking a window the window list found. Where it goes follows the tracking state's
-	/// rules: a just-opened window (`.created`) joins the monitor that had focus or a placement
-	/// reservation, any other the monitor holding it; dialogs and small windows float on their own.
-	/// Returns whether it is tracked now.
-	@discardableResult
-	func register(_ window: WindowInfo, source: AdmissionSource) -> Bool {
-		guard !state.isTracked(window.id) else { return true }
-		let now = Self.uptime()
-		ElementCache.shared.store(window: window.id, pid: window.app.processIdentifier, element: window.axElement)
-		coordinator.perform("register") { state in
-			Self.forgetRetirement(of: window.id, in: &state)
-			state.admit(WindowFacts(info: window, takenAt: now), app: Self.appFacts(window.app), source: source, now: now)
-		}
-		PlacementReservationManager.shared.noteWindowRegistered()
-		return state.isTracked(window.id)
-	}
-
-	/// Starts tracking a window of an app launched aside: it joins `workspace` (a new one at the
-	/// end of `monitor` when nil or gone) out of sight, floating when it would not tile.
-	/// Returns the workspace it joined.
-	func registerOutOfSight(_ window: WindowInfo, on monitor: MonitorKey, workspace: WorkspaceID?) -> WorkspaceID? {
-		guard let bundleID = window.app.bundleIdentifier, !state.isTracked(window.id) else { return nil }
-		let now = Self.uptime()
-		ElementCache.shared.store(window: window.id, pid: window.app.processIdentifier, element: window.axElement)
-		var joined: WorkspaceID?
-		coordinator.perform("launch-aside") { state in
-			Self.forgetRetirement(of: window.id, in: &state)
-			let existing = workspace.flatMap { state.workspaces[$0] != nil ? $0 : nil }
-			// The launch-aside manager keeps the app's entry and its timing; the state's entry
-			// lives only while this window is placed by it.
-			state.launchAside[bundleID] = LaunchAsideEntry(bundleID: bundleID, monitor: monitor, deadline: now + 1,
-				workspace: existing)
-			if let id = state.admit(WindowFacts(info: window, takenAt: now), app: Self.appFacts(window.app),
-				source: .created, now: now) {
-				joined = state.record(id)?.workspace
-			}
-			state.launchAside[bundleID] = nil
-		}
-		return joined
-	}
-
-	/// Stops tracking windows the window list no longer shows (closed, or their app quit)
-	func retire(_ windowIDs: [CGWindowID]) {
-		let tracked = windowIDs.filter { state.isTracked($0) }
-		guard !tracked.isEmpty else { return }
-		let now = Self.uptime()
-		coordinator.perform("retire") { state in
-			for id in tracked {
-				state.retire(id, reason: .destroyed, now: now)
-			}
-		}
-		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-	}
-
-	/// After waking from sleep: windows the window server no longer has are retired, and windows
-	/// on screen that are not tracked are admitted. A window that came back under a new ID with the
-	/// same app and title takes the old one's place.
-	func rematchAfterWake() {
-		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
-		let windows = accessibilityManager.getAllWindows().filter {
-			onScreenIDs.contains($0.id) && $0.shouldBeManaged() && !state.isTracked($0.id)
-		}
-		let now = Self.uptime()
-		for window in windows {
-			ElementCache.shared.store(window: window.id, pid: window.app.processIdentifier, element: window.axElement)
-		}
-		coordinator.perform("wake") { state in
-			// Workspaces are dropped only after the windows back under new IDs took the old ones' places
-			let hosts = Self.retireVanishedWindows(in: &state, now: now)
-			for window in windows {
-				state.admit(WindowFacts(info: window, takenAt: now), app: Self.appFacts(window.app), source: .discovered, now: now)
-			}
-			for host in hosts.sorted() {
-				state.compact(host, keepingActive: false)
-			}
-		}
-		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-	}
-
-	/// Where the tracked windows are on screen now, so a floating window's place is current when a
-	/// command takes it out of sight, and windows that left the screen (another Space) leave the layout
-	func observeWindowPositions() {
-		coordinator.ingestWindowFacts()
-	}
-
-	/// Facts of tracked windows from a full window-list reading: minimized, fullscreen, restored
-	/// from the Dock, titles
-	func ingestWindowList(_ windows: [WindowInfo]) {
-		let now = Self.uptime()
-		let facts = windows.filter { state.isTracked($0.id) }.map { WindowFacts(info: $0, takenAt: now) }
-		guard !facts.isEmpty else { return }
-		coordinator.ingestWindowFacts(facts)
-	}
-
-	/// The focused window as the window list saw it. A tracked one decides the monitor windows
-	/// opened from now on join.
-	func noteFocusedWindow(_ window: WindowInfo) {
-		let state = self.state
-		let current: WindowID? = state.isTracked(window.id) ? window.id : nil
-		let monitor = state.location(window.id)?.monitor
-			?? state.record(window.id)?.observed.frame.flatMap { state.monitorKey(for: $0) }
-		guard state.focus.current != current || state.focus.currentMonitor != monitor else { return }
-		let now = Self.uptime()
-		let facts = FocusFacts(frontmostPID: window.app.processIdentifier, frontmostBundleID: window.app.bundleIdentifier,
-			focused: window.id)
-		coordinator.note { state in
-			state.ingestFocus(facts, now: now)
-		}
-	}
-
-	/// Re-reads the connected displays. Workspaces of a display that went away move to another
-	/// one and come back when it returns; a new display starts with an empty workspace
-	func reconcileDisplays() {
-		let displays = DisplayReader.read()
-		if Set(displays.map(\.key)) != Set(state.monitorOrder) {
-			exitSpecialModesForScreenChange()
-		}
-		let now = Self.uptime()
-		coordinator.perform("topology") { state in
-			state.reconcileTopology(displays, now: now)
-		}
-		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-	}
-
-	/// A window seen on screen again after the window list took it for closed (an app that
-	/// answered late, a window missing from one reading) is alive after all.
-	private static func forgetRetirement(of id: WindowID, in state: inout TrackingState) {
-		guard state.tombstones.contains(id) else { return }
-		var kept = TombstoneSet(capacity: state.tombstones.capacity)
-		for other in state.tombstones.ids.sorted() where other != id {
-			kept.insert(other)
-		}
-		state.tombstones = kept
-	}
-
-	/// Retires tracked windows the window server no longer has. A close the window list missed
-	/// (a floating window, an app too busy to answer when it went) would otherwise keep its
-	/// workspace from ever counting as empty. Returns the monitors that lost windows: the caller
-	/// drops their empty workspaces once it is done.
-	private static func retireVanishedWindows(in state: inout TrackingState, now: Time) -> Set<MonitorKey> {
-		let ids = Set(state.records.keys)
-		guard !ids.isEmpty else { return [] }
-		let existing = ServerProbe.exists(ids, now: now).windows
-		// An empty answer says more about the window server than about the windows.
-		guard !existing.isEmpty else { return [] }
-		var hosts = Set<MonitorKey>()
-		for id in ids.sorted() where existing[id] == nil {
-			if let host = state.location(id)?.monitor {
-				hosts.insert(host)
-			}
-			state.retire(id, reason: .destroyed, now: now, compacting: false)
-		}
-		return hosts
-	}
-
-	/// Retires the windows the window server no longer has and drops the workspaces that left
-	/// empty, keeping the ones shown
-	private static func retireVanishedWindowsKeepingShown(in state: inout TrackingState, now: Time) {
-		for host in retireVanishedWindows(in: &state, now: now).sorted() {
-			state.compact(host, keepingActive: true)
-		}
-	}
-
-	private static func appFacts(_ app: NSRunningApplication) -> AppFacts {
-		AppFacts(pid: app.processIdentifier, bundleID: app.bundleIdentifier, name: app.localizedName ?? "", isHidden: app.isHidden)
-	}
-
-	private static func uptime() -> Time {
-		ProcessInfo.processInfo.systemUptime
-	}
-
 	// MARK: - Workspace Switching
 
 	/// Switch workspaces
@@ -400,19 +236,16 @@ class WorkspaceManager {
 		let current = currentWorkspace(on: screen)
 		guard number != current else { return }
 
-		// Set the switching-in-progress flag (prevents checkForWindowChanges from misfiring)
-		isSwitching = true
+		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(current + 1) -> ws\(number + 1)"
 			+ (focusWindowID.map { " (focus #\($0))" } ?? ""))
 		endZenForSwitch(on: screen)
 
 		// The new workspace's windows come on screen first; the old ones leave a moment later,
 		// so an empty screen never shows
-		let now = Self.uptime()
 		var destination: WorkspaceID?
 		coordinator.perform("switch", delaysHidePhase: true) { state in
 			destination = state.switchWorkspace(on: key, to: target)
-			Self.retireVanishedWindowsKeepingShown(in: &state, now: now)
 		}
 		finishSwitch(to: destination, focusWindowID: focusWindowID)
 	}
@@ -432,30 +265,25 @@ class WorkspaceManager {
 	/// The window joins the destination and the screen switches there with it, so it stays in view.
 	/// The workspace it left is dropped when it became empty.
 	private func moveFocusedWindow(to target: WorkspaceTarget, number: Int, on screen: NSScreen) {
-		guard let focusedWindow = accessibilityManager.getFocusedWindow(), let key = monitorKey(for: screen) else { return }
-		if !state.isTracked(focusedWindow.id) {
-			register(focusedWindow, source: .discovered)
-		}
-		guard state.isTracked(focusedWindow.id) else { return }
+		guard let focusedID = accessibilityManager.getFocusedWindowID(), state.isTracked(focusedID),
+			  let key = monitorKey(for: screen) else { return }
 
-		isSwitching = true
+		coordinator.beginTransition()
 		PerfLog.event("workspace: switch \(PerfLog.describe(screen)) ws\(currentWorkspace(on: screen) + 1) -> ws\(number + 1)"
-			+ " (focus #\(focusedWindow.id))")
+			+ " (focus #\(focusedID))")
 		endZenForSwitch(on: screen)
 
-		let now = Self.uptime()
 		var destination: WorkspaceID?
 		coordinator.perform("move to workspace", delaysHidePhase: true) { state in
-			destination = state.moveWindowToWorkspace(focusedWindow.id, on: key, to: target)
-			Self.retireVanishedWindowsKeepingShown(in: &state, now: now)
+			destination = state.moveWindowToWorkspace(focusedID, on: key, to: target)
 		}
-		finishSwitch(to: destination, focusWindowID: focusedWindow.id)
+		finishSwitch(to: destination, focusWindowID: focusedID)
 	}
 
 	/// Zen mode is per monitor: a switch on its monitor ends it, one on another monitor does not
 	private func endZenForSwitch(on screen: NSScreen) {
 		if ZenModeManager.shared.isActive, let monitor = ZenModeManager.shared.activeMonitor, monitor == monitorKey(for: screen) {
-			ZenModeManager.shared.toggle()
+			ZenModeManager.shared.exit(reason: .workspaceSwitched)
 		}
 	}
 
@@ -470,11 +298,6 @@ class WorkspaceManager {
 		}
 		syncBorderAndCursor(to: focusedID)
 		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
-
-		// Clear the switching-in-progress flag after a short delay
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-			self?.isSwitching = false
-		}
 	}
 
 	/// The state switched a monitor to another workspace on its own: the active one emptied and
@@ -544,7 +367,7 @@ class WorkspaceManager {
 	/// Zen mode and the palette are laid out for the old screens, so leave them before the screens change
 	private func exitSpecialModesForScreenChange() {
 		if ZenModeManager.shared.isActive {
-			ZenModeManager.shared.toggle()
+			ZenModeManager.shared.exit(reason: .monitorGone)
 		}
 		if HotkeyManager.shared.currentMode == .windowPalette {
 			WindowPaletteManager.shared.endPalette()

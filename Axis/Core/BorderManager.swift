@@ -377,13 +377,10 @@ class BorderManager: ObservableObject {
         )
     }
     
-    /// AppDelegate's 0.3-second poll (checkForWindowChanges), when focus moves within the same app,
-    /// The notification hook called when a change in the focused window is detected.
-    /// AppDelegate already calls getFocusedWindow() every tick, so here
-    /// Don't issue a new AX query — just piggyback on the existing scheduleUpdateBorder()
-    /// (the policy is not to add more AX queries — don't regress the sluggishness fix).
+    /// Called when the focused window changed without the frontmost app changing (another window
+    /// of the same app), which the activation notification and the frontmost check miss.
     /// For a focus move that involves a workspace switch, switchWorkspace itself is the last to
-    /// calls updateBorder(), so the caller (AppDelegate) shouldn't call this in that case.
+    /// call updateBorder(), so the caller shouldn't call this in that case.
     func notifyFocusedWindowChanged() {
         scheduleUpdateBorder()
     }

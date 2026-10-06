@@ -461,7 +461,7 @@ class HotkeyManager: ObservableObject {
 				// Zen mode keeps the other windows hidden in a corner; laying them out underneath it
 				// would leave Zen half-applied, so bring them back first
 				if ZenModeManager.shared.isActive {
-					ZenModeManager.shared.exit()
+					ZenModeManager.shared.exit(reason: .layoutReset)
 				}
 				self?.tilingEngine.resetToSingleWindowColumns()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
