@@ -20,7 +20,7 @@ class BorderManager: ObservableObject {
 
     private var isUpdating = false // Guards against concurrent updates
     private var pendingUpdate = false // Whether a new request arrived during an update
-    private(set) var isInMissionControl = false // True while Mission Control is showing (read-only externally)
+    private var isInMissionControl = false // True while Mission Control is showing
     private var isAnimating = false // True while the focus border slide animation is running
 
     // Settings
@@ -56,18 +56,11 @@ class BorderManager: ObservableObject {
     private init() {
         lastFrontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         setupNotifications()
-        setupMissionControlObserver()
-        setupBorderWindow()
     }
     
     private func setupNotifications() {
         // Receive all notifications on the main thread to serialize them
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.scheduleUpdateBorder() }
-            .store(in: &cancellables)
-            
-        NotificationCenter.default.publisher(for: Notification.Name("WindowMoved"))
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.scheduleUpdateBorder() }
             .store(in: &cancellables)
@@ -121,7 +114,6 @@ class BorderManager: ObservableObject {
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.wantsLayer = true
-        view.mainColor = .white // White in normal mode
         view.showsFill = false // No fill in normal mode!
         view.isDashed = isDashed // Keep the dashed style even if the border is rebuilt while waiting
         view.autoresizingMask = [.width, .height]
@@ -130,50 +122,15 @@ class BorderManager: ObservableObject {
         return (overlay, view)
     }
     
-    // Don't call setupBorderWindow during initialization (updateBorder creates it)
-    private func setupBorderWindow() {
-        // Do nothing
-    }
-
-    /// Watch for Mission Control (Exposé) starting and ending
-    private func setupMissionControlObserver() {
-        // Because notification-based detection doesn't work on newer macOS versions,
-        // Detect Mission Control inside checkWindowFrame()
-    }
-
-    /// Check whether Mission Control is currently showing
-    private func checkMissionControlActive() -> Bool {
-        // Check the Dock process's windows
-        let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-
-        for window in windowList {
-            guard let ownerName = window[kCGWindowOwnerName as String] as? String,
-                  ownerName == "Dock" else { continue }
-
-            // Check Mission Control's window name
-            if let windowName = window[kCGWindowName as String] as? String {
-                if windowName.contains("Mission Control") ||
-                   windowName.contains("Exposé") ||
-                   windowName.contains("Expose") {
-                    return true
-                }
-            }
-
-            // A Dock layer of 18 or higher means Mission Control is showing
-            // Normally the Dock's only window is at layer=-2147483624 (the wallpaper layer)
-            if let layer = window[kCGWindowLayer as String] as? Int, layer >= 18 {
-                return true
-            }
-        }
-        return false
-    }
-
     /// After a focus move, retry until focus actually reaches the target window, then update the border
     /// Works around macOS sometimes taking a while to update focus state
     func updateBorderExpecting(windowID: CGWindowID, retryCount: Int = 0) {
         let focused = AccessibilityManager.shared.getFocusedWindow()
 
-        if focused?.id != windowID, retryCount < 6 {
+        // An app that does not answer is not retried: each read of it makes the main thread wait out the
+        // timeout, and the update below keeps the border where it is for such an app
+        let appAnswers = AccessibilityManager.shared.lastFocusedWindowError != .cannotComplete
+        if focused?.id != windowID, retryCount < 6, appAnswers {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 self.updateBorderExpecting(windowID: windowID, retryCount: retryCount + 1)
             }
@@ -220,10 +177,9 @@ class BorderManager: ObservableObject {
             return
         }
 
-        // Don't show the border on windows evacuated to another workspace or while the palette is showing
-        if WorkspaceManager.shared.isWindowHidden(focusedWindow.id) ||
-           WindowPaletteManager.shared.isWindowHidden(focusedWindow.id) {
-            hideBorder(reason: "focused window is evacuated #\(focusedWindow.id)")
+        // Don't show the border on windows Axis keeps out of sight (another workspace, Zen mode, the palette, hidden)
+        if let visibility = TrackingCoordinator.shared.state.visibility(focusedWindow.id), visibility.isHiddenByAxis {
+            hideBorder(reason: "focused window is \(visibility.logName) #\(focusedWindow.id)")
             return
         }
         
@@ -239,7 +195,7 @@ class BorderManager: ObservableObject {
 
         // The focused window changed = it left the empty monitor
         if windowChanged {
-            TilingEngine.shared.cursorScreen = nil
+            TilingEngine.shared.cursorMonitor = nil
         }
 
         if let existingWindow = borderWindow, existingWindow.isVisible {
@@ -283,8 +239,8 @@ class BorderManager: ObservableObject {
     }
     
     private func checkWindowFrame() {
-        // Check Mission Control's state
-        let missionControlActive = checkMissionControlActive()
+        // Mission Control's state, as the window tracking's watcher last saw it
+        let missionControlActive = TrackingCoordinator.shared.isMissionControlActive
 
         if missionControlActive != isInMissionControl {
             isInMissionControl = missionControlActive
@@ -329,13 +285,15 @@ class BorderManager: ObservableObject {
         let posResult = AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
         let sizeResult = AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
 
-        // Extract the value from an AXValue (it can't be cast directly).
+        // Extract the value from an AXValue (it can't be cast directly; a value of another type counts
+        // as unreadable).
         // If a tracked window is torn down by the app quitting or a close, an AX error comes back here
         // (the pid check above can't catch it, since the foreground app itself doesn't change).
         // Left alone, the border would keep sitting at a position with no window there, so clear it first, then
         // Re-fetch the current focus
         guard posResult == .success, sizeResult == .success,
-              let posValue = positionRef, let szValue = sizeRef else {
+              let posValue = positionRef, let szValue = sizeRef,
+              CFGetTypeID(posValue) == AXValueGetTypeID(), CFGetTypeID(szValue) == AXValueGetTypeID() else {
             hideBorder()
             scheduleUpdateBorder()
             return
@@ -344,8 +302,8 @@ class BorderManager: ObservableObject {
         var position = CGPoint.zero
         var size = CGSize.zero
 
-        AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
-        AXValueGetValue(szValue as! AXValue, .cgSize, &size)
+        AXValueGetValue(unsafeDowncast(posValue, to: AXValue.self), .cgPoint, &position)
+        AXValueGetValue(unsafeDowncast(szValue, to: AXValue.self), .cgSize, &size)
 
         let newFrame = CGRect(origin: position, size: size)
         let expectedBorderRect = calculateBorderRect(for: newFrame)
@@ -378,13 +336,10 @@ class BorderManager: ObservableObject {
         )
     }
     
-    /// AppDelegate's 0.3-second poll (checkForWindowChanges), when focus moves within the same app,
-    /// The notification hook called when a change in the focused window is detected.
-    /// AppDelegate already calls getFocusedWindow() every tick, so here
-    /// Don't issue a new AX query — just piggyback on the existing scheduleUpdateBorder()
-    /// (the policy is not to add more AX queries — don't regress the sluggishness fix).
+    /// Called when the focused window changed without the frontmost app changing (another window
+    /// of the same app), which the activation notification and the frontmost check miss.
     /// For a focus move that involves a workspace switch, switchWorkspace itself is the last to
-    /// calls updateBorder(), so the caller (AppDelegate) shouldn't call this in that case.
+    /// call updateBorder(), so the caller shouldn't call this in that case.
     func notifyFocusedWindowChanged() {
         scheduleUpdateBorder()
     }
@@ -426,15 +381,6 @@ class SelectionBorderView: NSView {
     /// Whether to draw the border dashed (set true only while waiting for a placement reservation, as the signal that the mode was entered)
     var isDashed: Bool = false {
         didSet { self.setNeedsDisplay(bounds) }
-    }
-
-    /// For compatibility with the older interface (setting it applies to both)
-    var mainColor: NSColor {
-        get { return borderColor }
-        set {
-            borderColor = newValue
-            fillColor = newValue.withAlphaComponent(0.15)
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

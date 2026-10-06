@@ -88,7 +88,7 @@ class WorkspacePeekManager {
 	/// Called when a normal key input (i.e. a shortcut operation) occurs
 	/// Cancel the scheduled peek preview, and dismiss it immediately if it's currently showing.
 	/// Furthermore, don't show it again until the modifier key is released.
-	/// With a usage pattern of holding down the modifier key (a layer key on cornix) while continuing to operate,
+	/// With a usage pattern of holding down the modifier key (for example a layer key on a programmable keyboard) while continuing to operate,
 	/// Because the peek preview popping up every time your hand pauses gets in the way
 	func cancelDueToKeyPress() {
 		cancelPendingShow()
@@ -113,27 +113,25 @@ class WorkspacePeekManager {
 		pendingShowWorkItem = nil
 	}
 
-	/// Gather and cache the display content (heavy work is consolidated here)
+	/// Gather and cache the display content: the neighboring workspaces' windows as the tracking
+	/// state lists them
 	private func prepareContent() {
-		guard let screen = targetScreen() else {
+		guard let screen = targetScreen(), let monitor = WorkspaceManager.shared.monitorKey(for: screen) else {
 			preparedContent = nil
 			return
 		}
 
+		let state = TrackingCoordinator.shared.state
 		let currentWS = WorkspaceManager.shared.currentWorkspace(on: screen)
 		let leftWS = currentWS - 1
 		let rightWS = currentWS + 1
 
-		// Only fetch the window list once
-		let allWindows = AccessibilityManager.shared.getAllWindows()
-		let windowsByID = Dictionary(allWindows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-
 		preparedContent = PeekContent(
 			screen: screen,
 			leftWorkspace: leftWS,
-			leftItems: peekItems(inWorkspace: leftWS, on: screen, windowsByID: windowsByID),
+			leftItems: peekItems(in: state.workspace(number: leftWS, on: monitor), state: state),
 			rightWorkspace: rightWS,
-			rightItems: peekItems(inWorkspace: rightWS, on: screen, windowsByID: windowsByID)
+			rightItems: peekItems(in: state.workspace(number: rightWS, on: monitor), state: state)
 		)
 	}
 
@@ -166,7 +164,7 @@ class WorkspacePeekManager {
 
 	/// Decide which monitor to show the peek preview on
 	/// Shown, as a rule, on the monitor the focused window is on.
-	/// cursorScreen (remembering that we're on an empty monitor) can keep lingering, and
+	/// The empty monitor the cursor was moved to (TilingEngine.cursorMonitor) can keep lingering, and
 	/// Since preferring it as-is would make it show up on a different monitor,
 	/// Only use it when the mouse is actually on that monitor right now
 	private func targetScreen() -> NSScreen? {
@@ -186,23 +184,20 @@ class WorkspacePeekManager {
 
 	// MARK: - Fetching display items
 
-	/// Return the windows belonging to the given monitor and workspace, one at a time, in tiling order
+	/// Return the windows of the given workspace, one at a time, in tiling order
 	/// Emit one entry per window, so it's clear how many windows are next to it
 	/// (If the same app has multiple windows open, the same icon appears that many times)
-	private func peekItems(inWorkspace workspace: Int, on screen: NSScreen, windowsByID: [CGWindowID: WindowInfo]) -> [PeekItem] {
-		let orderedIDs = WorkspaceManager.shared.windowIDsInTilingOrder(workspace: workspace, on: screen)
-		guard !orderedIDs.isEmpty else { return [] }
-
-		var items: [PeekItem] = []
-		for windowID in orderedIDs {
-			guard let window = windowsByID[windowID] else { continue }
-			items.append(PeekItem(
-				icon: window.app.icon,
-				appName: window.app.localizedName ?? "",
-				windowTitle: window.title
-			))
+	private func peekItems(in workspace: WorkspaceID?, state: TrackingState) -> [PeekItem] {
+		guard let workspace else { return [] }
+		return state.orderedWindows(workspace).compactMap { windowID in
+			guard let record = state.record(windowID) else { return nil }
+			let app = TrackingCoordinator.shared.runningApp(record.pid)
+			return PeekItem(
+				icon: app?.icon,
+				appName: app?.localizedName ?? record.appName,
+				windowTitle: record.title
+			)
 		}
-		return items
 	}
 }
 

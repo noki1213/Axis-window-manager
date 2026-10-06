@@ -118,9 +118,9 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		// --- Guard based on Axis's own state (prevents mis-focus specific to the built-in display) ---
 
-		// Do nothing while a space switch is in progress (the switch logic focuses the correct window)
-		guard !WorkspaceManager.shared.isSwitching else {
-			logSkipReason("isSwitching")
+		// Do nothing while a workspace switch settles (the switch logic focuses the correct window)
+		guard !TrackingCoordinator.shared.isInTransition else {
+			logSkipReason("workspace switch")
 			return
 		}
 
@@ -131,7 +131,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		}
 
 		// Do nothing while Mission Control is showing
-		guard !BorderManager.shared.isInMissionControl else {
+		guard !TrackingCoordinator.shared.isMissionControlActive else {
 			logSkipReason("missionControl")
 			return
 		}
@@ -150,14 +150,10 @@ class FocusFollowsMouseManager: ObservableObject {
 			return
 		}
 
-		// Windows currently stashed in a hidden corner by the workspace or palette are excluded
+		// Windows currently stashed in a hidden corner (another workspace, Zen mode, the palette) are excluded
 		// (Prevents focus from jumping when the mouse touches the 1px sliver of a hidden window)
-		guard !WorkspaceManager.shared.isWindowHidden(window.id) else {
-			logSkipReason("hidden window (workspace)")
-			return
-		}
-		guard !WindowPaletteManager.shared.isWindowHidden(window.id) else {
-			logSkipReason("hidden window (palette)")
+		if let visibility = TrackingCoordinator.shared.state.visibility(window.id), visibility.isHiddenByAxis {
+			logSkipReason("hidden window (\(visibility.logName))")
 			return
 		}
 
@@ -183,8 +179,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		// Re-raise that screen's floating windows to the front (without stealing focus).
 		// Without this, a floating window gets buried just from the mouse passing over a tile, and
 		// After this, hovering can no longer reach the floating window
-		let isFloatingTarget = WorkspaceManager.shared.isFloating(window.id) || window.shouldFloat()
-		if !isFloatingTarget,
+		if TrackingCoordinator.shared.state.placement(window.id) == .tiled,
 		   let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
 			PerfLog.measure("FFM.raiseFloatingWindows", threshold: 0.005) {
 				TilingEngine.shared.raiseFloatingWindows(on: screen)
@@ -217,8 +212,7 @@ class FocusFollowsMouseManager: ObservableObject {
 	}
 
 	/// Return the frontmost window at the given coordinates (screen coordinates, bottom-left origin)
-	/// Since AccessibilityManager.getWindowAt returns the first hit in app order,
-	/// The correct frontmost window can't be picked when a floating window overlaps a tile.
+	/// Hit-testing frames in app order can't pick the frontmost window when a floating window overlaps a tile.
 	/// Here, after identifying the window ID via CGWindowList (Z-order: front to back),
 	/// Mapping it to WindowInfo ensures it always picks the visible window directly under the mouse.
 	///
@@ -270,7 +264,7 @@ class FocusFollowsMouseManager: ObservableObject {
 				// Map it to the AX WindowInfo.
 				// Unmatched means it's a panel outside AX management (e.g. a CleanShot X preview), so
 				// Return nil without searching further back. Silencing focus-follows-mouse while the mouse is over it is correct, and
-				// Searching further back here reintroduces the old bug where focus jumps to the tile underneath
+				// Searching further back here would let focus jump to the tile underneath
 				let appWindows = PerfLog.measure("FFM.topmostWindowAt/getWindowsForPID", threshold: 0.005) {
 					AccessibilityManager.shared.getWindows(forPID: pid)
 				}

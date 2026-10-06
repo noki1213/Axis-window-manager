@@ -64,6 +64,14 @@ class FocusHistoryManager: ObservableObject {
 		}
 	}
 
+	/// A window that came back under a new ID (same app and title) keeps its place in the history
+	func replace(_ oldID: CGWindowID, with newID: CGWindowID) {
+		history = history.map { $0 == oldID ? newID : $0 }
+		if currentID == oldID {
+			currentID = newID
+		}
+	}
+
 	// MARK: - Jumping back
 
 	/// Focus the most recently remembered window other than the current one,
@@ -76,10 +84,12 @@ class FocusHistoryManager: ObservableObject {
 			remember(leavingID)
 		}
 
-		// Closed windows drop out of every workspace; hidden ones stay out of sight on purpose
-		history.removeAll { !workspaces.isWindowInAnyWorkspace($0) }
-		guard let targetID = history.last(where: { $0 != leavingID && !HiddenWindowManager.shared.isHidden($0) }),
-		      let target = AccessibilityManager.shared.getAllWindows().first(where: { $0.id == targetID })
+		// Closed windows are no longer tracked; hidden ones stay out of sight on purpose
+		history.removeAll { !workspaces.isTracked($0) }
+		// Windows of an app that is not answering are passed over: focusing one only makes the main thread wait
+		let state = TrackingCoordinator.shared.state
+		guard let targetID = history.last(where: { $0 != leavingID && !HiddenWindowManager.shared.isHidden($0) && state.isFocusable($0) }),
+		      let target = TrackingCoordinator.shared.windowInfo(targetID)
 		else { return }
 		PerfLog.event("focus history: jump back to \(PerfLog.describe(target))")
 
@@ -87,7 +97,7 @@ class FocusHistoryManager: ObservableObject {
 		pendingSettle?.cancel()
 		currentID = targetID
 
-		if ZenModeManager.shared.isActive && ZenModeManager.shared.hiddenWindowIDs.contains(targetID) {
+		if TrackingCoordinator.shared.state.visibility(targetID) == .zenHidden {
 			ZenModeManager.shared.exit()
 		}
 
