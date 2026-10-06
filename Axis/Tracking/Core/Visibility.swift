@@ -6,10 +6,6 @@
 //  sessions, flags and observations, plus the sessions that change it: Zen, the window palette
 //  and the hide stack. `normalize(now:)` is the only writer of `WindowRecord.visibility`.
 //
-//  Provisional bodies: resolution follows the precedence table and normalize applies the column
-//  transitions so the structure stays consistent. Dock restores, float restores and the session
-//  commands are not implemented yet.
-//
 
 import Foundation
 import CoreGraphics
@@ -39,14 +35,36 @@ nonisolated extension TrackingState {
 	/// leaves the columns (remembering its neighbours); one returning goes back next to them, else
 	/// by its centre.
 	mutating func normalize(now: Time) {
+		// A hidden-stack window restored from the Dock is seen unminimized after its minimize was confirmed.
+		var dockRestores: [WindowID] = []
+		for i in hiddenStack.indices {
+			let id = hiddenStack[i].window
+			if records[id]?.observed.isMinimized == true {
+				hiddenStack[i].minimizeConfirmed = true
+			} else if hiddenStack[i].minimizeConfirmed {
+				dockRestores.append(id)
+			}
+		}
+		for id in dockRestores {
+			restoreHidden(id, userInitiated: true)
+		}
+
 		for id in records.keys.sorted() {
 			guard let record = records[id] else { continue }
 			let resolved = resolveVisibility(record)
 			guard resolved != record.visibility else { continue }
 			records[id]?.visibility = resolved
 			log("visibility: \(describe(record)) \(record.visibility.logName) -> \(resolved.logName)")
+
+			// Floating or unmanaged windows returning to visible restore their floating frame.
+			if record.placement != .tiled && resolved == .visible {
+				records[id]?.pendingFloatRestore = true
+			}
+
+			// Column transitions apply only to tiled windows with a workspace.
 			guard record.placement == .tiled, let workspace = record.workspace,
 				record.visibility.keepsSlot != resolved.keepsSlot else { continue }
+
 			if record.visibility.keepsSlot {
 				let memory = removeFromColumns(id)
 				records[id]?.slotMemory = memory
@@ -83,7 +101,10 @@ nonisolated extension TrackingState {
 	@discardableResult
 	mutating func zenEnter(_ id: WindowID, now: Time) -> Bool {
 		guard zen == nil, let record = records[id], record.visibility == .visible else { return false }
-		let monitor = record.workspace.flatMap { workspaces[$0]?.host } ?? record.observed.frame.flatMap { monitorKey(for: $0) }
+		let monitor = record.workspace.flatMap { workspaces[$0]?.host }
+			?? record.observed.frame.flatMap { monitorKey(for: $0) }
+			?? record.floatingFrame?.monitor
+			?? primaryMonitor
 		guard let monitor, let active = monitors[monitor]?.active else { return false }
 		zen = ZenSession(monitor: monitor, workspace: active, focus: id)
 		log("zen: enter \(describe(record)) on \(describeMonitor(monitor))")
@@ -97,7 +118,12 @@ nonisolated extension TrackingState {
 		emit(.zenEnded(reason))
 	}
 
-	mutating func zenAdjustWidth(increase: Bool) {}
+	mutating func zenAdjustWidth(increase: Bool) {
+		guard var session = zen else { return }
+		let step: CGFloat = 0.05
+		session.widthRatio = max(0.1, min(1.0, session.widthRatio + (increase ? step : -step)))
+		zen = session
+	}
 
 	mutating func paletteBegin(now: Time) {
 		zenExit(reason: .paletteOpened)
@@ -126,5 +152,8 @@ nonisolated extension TrackingState {
 	/// `userInitiated` = the user already restored it (from the Dock).
 	mutating func restoreHidden(_ id: WindowID, userInitiated: Bool) {
 		hiddenStack.removeAll { $0.window == id }
+		if !userInitiated {
+			records[id]?.observed.isMinimized = false
+		}
 	}
 }
