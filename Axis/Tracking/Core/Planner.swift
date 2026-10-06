@@ -19,14 +19,11 @@ nonisolated struct PlanOptions: Equatable, Sendable {
 	var includeHidePhase: Bool
 	/// The left mouse button is down: enforcement writes wait for its release.
 	var mouseDown: Bool
-	/// Windows another component still positions itself while features move over to the core.
-	var externallyPositioned: Set<WindowID>
 
-	init(isCommand: Bool = false, includeHidePhase: Bool = true, mouseDown: Bool = false, externallyPositioned: Set<WindowID> = []) {
+	init(isCommand: Bool = false, includeHidePhase: Bool = true, mouseDown: Bool = false) {
 		self.isCommand = isCommand
 		self.includeHidePhase = includeHidePhase
 		self.mouseDown = mouseDown
-		self.externallyPositioned = externallyPositioned
 	}
 }
 
@@ -186,7 +183,7 @@ nonisolated extension TrackingState {
 			pass.slots = plannerLayOutActiveWorkspaces()
 		}
 		for id in records.keys.sorted() {
-			guard let record = records[id], !options.externallyPositioned.contains(id) else { continue }
+			guard let record = records[id] else { continue }
 			plannerPlan(record, &pass)
 		}
 		plannerState.hidePhaseDue = options.includeHidePhase ? nil : now + PlannerPolicy.hidePhaseDelay

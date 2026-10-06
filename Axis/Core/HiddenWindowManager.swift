@@ -77,9 +77,14 @@ class HiddenWindowManager {
 	}
 
 	/// Restore the given window (also used by the Hidden section of the window palette)
-	func restore(windowID: CGWindowID) {
+	/// - Parameter endingPalette: the palette's session ends with the same command, so the windows
+	///   it took out of sight come back already in the layout with the restored window
+	func restore(windowID: CGWindowID, endingPalette: Bool = false) {
 		guard isHidden(windowID) else { return }
 		coordinator.perform("unhide") { state in
+			if endingPalette {
+				state.paletteEnd()
+			}
 			state.restoreHidden(windowID, userInitiated: false)
 		}
 

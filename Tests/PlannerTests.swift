@@ -191,14 +191,6 @@ private let comparisonTests: [TestCase] = [
 		expect(state.plan(snapshot: before, options: PlanOptions(isCommand: true), now: 1.02).isEmpty)
 	},
 
-	TestCase("windows positioned by another component are left alone") {
-		var (state, _, _) = twoWorkspaces()
-		let away = CGRect(x: 300, y: 200, width: 500, height: 400)
-		let plan = state.plan(snapshot: showing([1: away, 2: away, 3: shownThree], pids: [3: 200], at: 1),
-			options: PlanOptions(externallyPositioned: [1, 3]), now: 1)
-		expectEqual(plan.actions.map(\.window), [2])
-		expectEqual(state.expectedFrame(1), nil)
-	},
 ]
 
 // MARK: - Fights
@@ -470,6 +462,38 @@ private let switchTests: [TestCase] = [
 			park(3, .park(inactive), observed: fullSlot, pid: 200, label: "Other/W3#3"),
 		])])
 		expectEqual(state.plannerFollowUps(now: 2.08), [])
+		expectInvariants(state)
+	},
+
+	TestCase("confirming the palette into another workspace brings only that workspace on screen") {
+		var (state, _, other) = twoWorkspaces()
+		state.paletteBegin(now: 1)
+		state.normalize(now: 1)
+		var plan = state.plan(snapshot: settled(at: 1), options: PlanOptions(isCommand: true), now: 1)
+		expectEqual(plan.actions, [
+			park(1, .park(.paletteHidden), observed: leftSlot),
+			park(2, .park(.paletteHidden), observed: rightSlot),
+		])
+		state.recordWrites(landed(plan), now: 1.01)
+		let parkedOne = CGRect(origin: parkPoint, size: leftSlot.size)
+		let parkedTwo = CGRect(origin: parkPoint, size: rightSlot.size)
+
+		// The session ends and the workspace switches in one command.
+		state.paletteEnd()
+		state.switchWorkspace(on: main, to: .id(other))
+		state.normalize(now: 2)
+		plan = state.plan(snapshot: showing([1: parkedOne, 2: parkedTwo, 3: parkedThree], pids: [3: 200], at: 2),
+			options: PlanOptions(isCommand: true, includeHidePhase: false), now: 2)
+		expectEqual(plan.actions, [
+			setFrame(3, fullSlot, .unpark(from: inactive), observed: parkedThree, pid: 200, label: "Other/W3#3"),
+		])
+		state.recordWrites(landed(plan), now: 2.01)
+
+		// The hide phase that follows has nothing to park: the palette parked those windows already.
+		plan = state.plan(snapshot: showing([1: parkedOne, 2: parkedTwo, 3: fullSlot], pids: [3: 200], at: 2.05),
+			options: PlanOptions(), now: 2.05)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.records[1]?.visibility, inactive)
 		expectInvariants(state)
 	},
 ]
