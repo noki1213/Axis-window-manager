@@ -617,11 +617,15 @@ private let launchAsideTests: [TestCase] = [
 // MARK: - Placement reservations
 
 private let reservationTests: [TestCase] = [
-	TestCase("discovered window does not consume placement reservation") {
+	// An app that posts no window-created notification has its new windows found by the
+	// window-server watcher, so a discovered window takes the reservation like a created one.
+	TestCase("discovered window takes the placement reservation into the reserved column") {
 		let display1 = testDisplay("Main", x: 0, y: 0, width: 1440, height: 900, primary: true, displayID: 1)
 		let display2 = testDisplay("External", x: 1440, y: 0, width: 1920, height: 1080, primary: false, displayID: 2)
 		var state = testState([display1, display2])
 		let app = AppFacts(pid: 100, bundleID: "com.test.app", name: "TestApp")
+		let wsExt = state.testActive("External")
+		state.testSetColumns(wsExt, [[99]])
 
 		state.setReservation(PlacementReservation(kind: .newColumnRight, monitor: externalKey, columnIndex: 0))
 
@@ -630,8 +634,55 @@ private let reservationTests: [TestCase] = [
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600))
 		state.admit(facts, app: app, source: .discovered, now: 10.0)
 
-		expectEqual(state.records[1]?.workspace, state.testActive("Main"))
-		expect(state.reservation != nil, "reservation must not be consumed by discovered window")
+		expectEqual(state.records[1]?.workspace, wsExt)
+		expectEqual(state.records[1]?.placement, .tiled)
+		expectEqual(state.testColumns(wsExt), [[99], [1]])
+		expectEqual(state.reservation, nil)
+		expectInvariants(state)
+	},
+
+	TestCase("discovered window takes a float reservation as a centred floating window") {
+		let display1 = testDisplay("Main", x: 0, y: 0, width: 1440, height: 900, primary: true, displayID: 1)
+		let display2 = testDisplay("External", x: 1440, y: 0, width: 1920, height: 1080, primary: false, displayID: 2)
+		var state = testState([display1, display2])
+		let app = AppFacts(pid: 100, bundleID: "com.test.app", name: "TestApp")
+		let wsExt = state.testActive("External")
+
+		state.setReservation(PlacementReservation(kind: .float, monitor: externalKey, columnIndex: 0))
+
+		let facts = WindowFacts(
+			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
+			frame: CGRect(x: 100, y: 100, width: 600, height: 500))
+		state.admit(facts, app: app, source: .discovered, now: 10.0)
+
+		expectEqual(state.records[1]?.workspace, wsExt)
+		expectEqual(state.records[1]?.placement, .floating)
+		expectEqual(state.records[1]?.pendingFloatRestore, true)
+		expectEqual(state.reservation, nil)
+		expectInvariants(state)
+	},
+
+	TestCase("discovered dialog leaves the placement reservation for the next tiled window") {
+		var state = testState()
+		let app = AppFacts(pid: 100, bundleID: "com.test.app", name: "TestApp")
+
+		state.setReservation(PlacementReservation(kind: .newColumnRight, monitor: mainKey, columnIndex: 0))
+
+		let dialog = WindowFacts(
+			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.dialogSubrole,
+			frame: CGRect(x: 100, y: 100, width: 400, height: 300))
+		state.admit(dialog, app: app, source: .discovered, now: 10.0)
+
+		expectEqual(state.records[1]?.placement, .unmanaged)
+		expect(state.reservation != nil, "reservation must remain for a tiled window")
+
+		let tiled = WindowFacts(
+			id: 2, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
+			frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+		state.admit(tiled, app: app, source: .discovered, now: 10.5)
+
+		expectEqual(state.records[2]?.placement, .tiled)
+		expectEqual(state.reservation, nil)
 		expectInvariants(state)
 	},
 
@@ -650,6 +701,24 @@ private let reservationTests: [TestCase] = [
 
 		expectEqual(state.records[1]?.workspace, state.testActive("Main"))
 		expect(state.reservation != nil, "reservation must not be consumed by startup window")
+		expectInvariants(state)
+	},
+
+	TestCase("restored window does not consume placement reservation") {
+		let display1 = testDisplay("Main", x: 0, y: 0, width: 1440, height: 900, primary: true, displayID: 1)
+		let display2 = testDisplay("External", x: 1440, y: 0, width: 1920, height: 1080, primary: false, displayID: 2)
+		var state = testState([display1, display2])
+		let app = AppFacts(pid: 100, bundleID: "com.test.app", name: "TestApp")
+
+		state.setReservation(PlacementReservation(kind: .newColumnRight, monitor: externalKey, columnIndex: 0))
+
+		let facts = WindowFacts(
+			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
+			frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+		state.admit(facts, app: app, source: .restored, now: 10.0)
+
+		expectEqual(state.records[1]?.workspace, state.testActive("Main"))
+		expect(state.reservation != nil, "reservation must not be consumed by restored window")
 		expectInvariants(state)
 	},
 

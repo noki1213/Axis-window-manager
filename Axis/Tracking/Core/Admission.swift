@@ -66,10 +66,12 @@ nonisolated extension TrackingState {
 	/// The first rule that applies places it: the place of a window of the same app and title
 	/// retired shortly before; a launch-aside claim for its app (tiled, or floating for the
 	/// unmanaged class); no workspace for the unmanaged class; a placement reservation (created
-	/// windows only); the active workspace of the monitor of the last focused tracked window
-	/// (created windows); the active workspace of the monitor holding the window. A floating or
-	/// unmanaged window admitted out of sight is brought back to the centre of its monitor. A tiled
-	/// window joining the Zen workspace ends Zen, unless it replaces a window or is launched aside.
+	/// windows, and discovered ones: a new window of an app that posts no creation notification is
+	/// first seen that way; the startup scan's windows existed before the reservation was made); the
+	/// active workspace of the monitor of the last focused tracked window (created windows); the
+	/// active workspace of the monitor holding the window. A floating or unmanaged window admitted
+	/// out of sight is brought back to the centre of its monitor. A tiled window joining the Zen
+	/// workspace ends Zen, unless it replaces a window or is launched aside.
 	@discardableResult
 	mutating func admit(_ facts: WindowFacts, app: AppFacts, source: AdmissionSource, now: Time) -> WindowID? {
 		guard records[facts.id] == nil, !tombstones.contains(facts.id), let fallbackMonitor = primaryMonitor else { return nil }
@@ -111,7 +113,8 @@ nonisolated extension TrackingState {
 		} else if windowClass == .unmanaged {
 			draft.floatingFrame = admissionFloatingFrame(frame, for: monitorKey(for: frame) ?? fallbackMonitor)
 			via = "unmanaged class"
-		} else if source == .created, let reservation, let target = monitors[reservation.monitor]?.active {
+		} else if source == .created || source == .discovered, let reservation,
+			let target = monitors[reservation.monitor]?.active {
 			self.reservation = nil
 			draft.workspace = target
 			if reservation.kind == .float {
@@ -236,7 +239,8 @@ nonisolated extension TrackingState {
 			bundleID: bundleID, monitor: monitor, deadline: now + AdmissionTiming.launchAsideFirstWindowWait)
 	}
 
-	/// The next created tiled window goes where `reservation` points; nil cancels it.
+	/// The next tiled window that opens (created or discovered) goes where `reservation` points; nil
+	/// cancels it.
 	mutating func setReservation(_ reservation: PlacementReservation?) {
 		self.reservation = reservation
 	}
