@@ -14,6 +14,10 @@
 //	with the window management that runs alongside it, and each line it logs starts with
 //	"shadow:" so the two can be compared in the event log.
 //
+//	State-only mode makes the state the source of truth for workspaces, columns and the hide
+//	stack: commands change it and their plans are executed. Windows come and go through the
+//	caller (registrations, retirements and window facts), so no observer, watcher or scan runs.
+//
 
 import AppKit
 import ApplicationServices
@@ -27,12 +31,19 @@ final class TrackingCoordinator {
 	enum Mode {
 		/// Tracks and logs; never plans, writes, focuses or changes what other components see.
 		case shadow
+		/// Commands and registrations from the caller change the state and their plans are
+		/// executed; nothing is discovered by the coordinator itself.
+		case stateOnly
 	}
 
 	private(set) var mode: Mode = .shadow
 	private(set) var isRunning = false
 	/// Read through the core's queries; only the coordinator changes it.
 	private(set) var state: TrackingState
+
+	/// Windows that another component still moves by itself (Zen and the palette park and
+	/// restore their windows); plans leave them alone.
+	var externallyPositioned: () -> Set<WindowID> = { [] }
 
 	// MARK: Feature events
 
@@ -93,6 +104,8 @@ final class TrackingCoordinator {
 	private var lastInvariantProblems: [String] = []
 	/// Windows the loop running alongside closed a second ago that the shadow still tracks.
 	private var awaitingRetire: [WindowID: AwaitedRetire] = [:]
+	/// Apps of tracked windows, so window handles are built without looking the process up.
+	private var runningApps: [PID: NSRunningApplication] = [:]
 
 	/// The barriers the watcher sits out. Mission Control is not one of them: the watcher is
 	/// what notices it close.
@@ -112,12 +125,17 @@ final class TrackingCoordinator {
 
 	/// Starts tracking. The "starting" barrier holds every pass until the displays are stable;
 	/// then the monitors are read and a full scan admits the windows of every app.
-	func start(mode: Mode = .shadow) {
+	///
+	/// In state-only mode the monitors are read at once and the state waits for the caller's
+	/// registrations. `relaunchTiled`: windows that were tiled when Axis last quit, so they tile
+	/// again even where a stacked column left them looking like small dialogs.
+	func start(mode: Mode = .shadow, config: LayoutConfig = LayoutConfig(), relaunchTiled: Set<WindowID> = []) {
 		guard !isRunning else { return }
 		self.mode = mode
 		isRunning = true
 		let now = Self.uptime()
-		state = TrackingState(config: LayoutConfig(), ownPID: ownPID)
+		state = TrackingState(config: config, ownPID: ownPID)
+		state.relaunchTiled = relaunchTiled
 		pending = PendingWork()
 		inFlight = nil
 		endingReasons = []
@@ -130,8 +148,7 @@ final class TrackingCoordinator {
 		lastTopologyLine = nil
 		lastInvariantProblems = []
 		awaitingRetire = [:]
-		state.setBarrier(.starting, active: true, now: now)
-		drainLog()
+		runningApps = [:]
 
 		let timer = DispatchSource.makeTimerSource(queue: .main)
 		timer.setEventHandler { [weak self] in
@@ -140,6 +157,14 @@ final class TrackingCoordinator {
 		timer.schedule(deadline: .distantFuture)
 		timer.resume()
 		passTimer = timer
+
+		guard mode != .stateOnly else {
+			state.reconcileTopology(DisplayReader.read(), now: now)
+			finishStep(now: now)
+			return
+		}
+		state.setBarrier(.starting, active: true, now: now)
+		drainLog()
 
 		axEventSource.start { [weak self] signal in
 			self?.receive(signal)
@@ -563,13 +588,18 @@ final class TrackingCoordinator {
 			return
 		}
 		PerfLog.measure("tracking.pass", threshold: CoordinatorTiming.slowPass) {
-			ingest(pass, gather: gather, now: now)
+			let snapshot = ingest(pass, gather: gather, now: now)
+			if mode == .stateOnly {
+				planAndExecute(snapshot, isCommand: false, includeHidePhase: true, now: now)
+			}
 		}
 		finishStep(now: now)
 	}
 
-	/// Steps 2 to 4: observe the window server, ingest, end the ingest, normalize.
-	private func ingest(_ pass: CoordinatorPass, gather: PassGather, now: Time) {
+	/// Steps 2 to 4: observe the window server, ingest, end the ingest, normalize. Returns the
+	/// window-server snapshot the plan is made against.
+	@discardableResult
+	private func ingest(_ pass: CoordinatorPass, gather: PassGather, now: Time) -> ServerSnapshot {
 		var scans = gather.scans ?? [:]
 		for pid in pass.pids where scans[pid] == nil {
 			// Not answered by the deadline: the app counts as not answering.
@@ -618,20 +648,35 @@ final class TrackingCoordinator {
 			state.pairReplacements(now: now)
 		}
 		state.normalize(now: now)
+		return snapshot
 	}
 
 	/// Everything after the state changed: log lines, feature events, self-checks, the window
-	/// notifications, the watcher's expectations and the follow-ups the core asks for.
+	/// notifications, the watcher's expectations and the follow-ups the core asks for. In
+	/// state-only mode nothing is scanned or read, so only the frame passes (delayed hide phases,
+	/// fight checks) are kept.
 	private func finishStep(now: Time) {
 		drainLog()
 		fanOutEvents()
 		checkInvariants()
-		syncWindowWatches()
-		watcherContext = nil
+		if mode != .stateOnly {
+			syncWindowWatches()
+			watcherContext = nil
+		}
 		for followUp in state.followUps(now: now) {
+			if mode == .stateOnly, !Self.isFramePass(followUp) {
+				continue
+			}
 			pending.add(followUp)
 		}
 		schedulePassTimer()
+	}
+
+	private static func isFramePass(_ followUp: FollowUp) -> Bool {
+		if case .frames = followUp.kind {
+			return true
+		}
+		return false
 	}
 
 	private func scanTargets(for work: PassWork) -> [PID] {
@@ -892,8 +937,9 @@ final class TrackingCoordinator {
 
 	/// Runs a command on the state: `mutate` changes it, then the windows are observed and
 	/// normalized as at the end of a pass and the outputs go out. Shadow mode plans and writes
-	/// nothing.
-	func perform(_ name: String, _ mutate: (inout TrackingState) -> Void) {
+	/// nothing; state-only mode executes the plan. `delaysHidePhase`: windows leaving the screen
+	/// go a moment later, so a workspace switch shows the new windows before the old ones leave.
+	func perform(_ name: String, delaysHidePhase: Bool = false, _ mutate: (inout TrackingState) -> Void) {
 		guard isRunning else { return }
 		PerfLog.measure("tracking.\(name)") {
 			let now = Self.uptime()
@@ -901,8 +947,109 @@ final class TrackingCoordinator {
 			mutate(&state)
 			state.ingestServer(snapshot)
 			state.normalize(now: now)
+			if mode == .stateOnly {
+				planAndExecute(snapshot, isCommand: true, includeHidePhase: !delaysHidePhase, now: now)
+			}
 			finishStep(now: now)
 		}
+	}
+
+	/// Changes bookkeeping that moves no window (which window has focus, ...): no plan follows.
+	func note(_ mutate: (inout TrackingState) -> Void) {
+		guard isRunning else { return }
+		mutate(&state)
+		finishStep(now: Self.uptime())
+	}
+
+	/// Facts of tracked windows read by the caller (minimized, fullscreen, title, frame). A window
+	/// that changed state (minimized, fullscreen, restored from the Dock) or left or rejoined the
+	/// layout changes where the others go, so only then a plan follows.
+	func ingestWindowFacts(_ facts: [WindowFacts]) {
+		guard isRunning else { return }
+		let now = Self.uptime()
+		let snapshot = ServerProbe.onScreen(now: now)
+		let before = placementSignature()
+		state.ingestWindowFacts(facts, now: now)
+		state.ingestServer(snapshot)
+		state.normalize(now: now)
+		if mode == .stateOnly && placementSignature() != before {
+			planAndExecute(snapshot, isCommand: false, includeHidePhase: true, now: now)
+		}
+		finishStep(now: now)
+	}
+
+	/// Puts every window Axis moved out of sight back where the state says it belongs (its slot,
+	/// its last visible frame), before Axis quits.
+	func prepareForQuit() {
+		guard isRunning, mode == .stateOnly else { return }
+		let plan = state.quitPlan()
+		guard !plan.isEmpty else { return }
+		WindowActuator.execute(plan)
+	}
+
+	/// A handle for a tracked window, built from the cached element and the record without asking
+	/// the app anything; nil when the window or its app is gone.
+	func windowInfo(_ id: WindowID) -> WindowInfo? {
+		guard let record = state.records[id], let element = ElementCache.shared.windowElement(id) else { return nil }
+		let app: NSRunningApplication
+		if let known = runningApps[record.pid], !known.isTerminated {
+			app = known
+		} else {
+			guard let found = NSRunningApplication(processIdentifier: record.pid), !found.isTerminated else { return nil }
+			runningApps[record.pid] = found
+			app = found
+		}
+		let observed = record.observed
+		let facts = WindowFacts(id: id, pid: record.pid, role: record.role, subrole: record.subrole, title: record.title,
+			frame: observed.frame ?? .zero, isMinimized: observed.isMinimized, isFullscreen: observed.isFullscreen,
+			hasCloseButton: record.hasCloseButton, minSize: observed.minSize, takenAt: observed.frameAt ?? 0)
+		return WindowInfo(facts: facts, element: element, app: app)
+	}
+
+	/// Plans against `snapshot` and executes the plan. In state-only mode a window the window
+	/// server does not show gets no frame (unless it is unminimized in the same plan): without
+	/// scans the state cannot tell a window on another Space or of a hidden app from one in view,
+	/// and a slot written to it would pull it into the layout.
+	private func planAndExecute(_ snapshot: ServerSnapshot, isCommand: Bool, includeHidePhase: Bool, now: Time) {
+		let options = PlanOptions(isCommand: isCommand, includeHidePhase: includeHidePhase,
+			mouseDown: SystemSignals.isLeftMouseDown, externallyPositioned: externallyPositioned())
+		var plan = state.plan(snapshot: snapshot, options: options, now: now)
+		if mode == .stateOnly {
+			plan = Self.withoutUnseenFrames(plan, snapshot: snapshot)
+		}
+		// The planner's enforcement lines come before the actuator's frame lines.
+		drainLog()
+		guard !plan.isEmpty else { return }
+		let results = WindowActuator.execute(plan)
+		state.recordWrites(results, now: Self.uptime())
+	}
+
+	private static func withoutUnseenFrames(_ plan: Plan, snapshot: ServerSnapshot) -> Plan {
+		var unminimized = Set<WindowID>()
+		for action in plan.actions {
+			if case .unminimize = action.kind {
+				unminimized.insert(action.window)
+			}
+		}
+		func keeps(_ action: PlanAction) -> Bool {
+			guard case .setFrame = action.kind else { return true }
+			return snapshot.windows[action.window] != nil || unminimized.contains(action.window)
+		}
+		func filtered(_ groups: [PlanGroup]) -> [PlanGroup] {
+			groups.compactMap { group in
+				let actions = group.actions.filter(keeps)
+				return actions.isEmpty ? nil : PlanGroup(pid: group.pid, actions: actions)
+			}
+		}
+		var result = plan
+		result.show = filtered(plan.show)
+		result.hide = filtered(plan.hide)
+		return result
+	}
+
+	/// What decides where windows go: each window's state and whether the layout counts it.
+	private func placementSignature() -> [WindowID: PlacementKey] {
+		state.records.mapValues { PlacementKey(visibility: $0.visibility, isGhost: $0.observed.isServerGhost) }
 	}
 
 	// MARK: - Helpers
@@ -1141,4 +1288,10 @@ private nonisolated enum CrossCheck: Sendable {
 private nonisolated struct AwaitedRetire {
 	var description: String
 	var closedAt: Time
+}
+
+/// A window's state and whether the layout counts it, compared before and after window facts.
+private nonisolated struct PlacementKey: Equatable {
+	var visibility: Visibility
+	var isGhost: Bool
 }
