@@ -701,6 +701,34 @@ private let sessionTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("the palette takes managed windows out of sight and leaves unmanaged ones where they are") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testSetColumns(ws, [[1]])
+		state.testAddWindow(2, placement: .floating, workspace: ws)
+		state.testAddWindow(3, placement: .unmanaged, workspace: nil)
+		state.normalize(now: 0)
+		state.records[2]?.pendingFloatRestore = false
+		_ = state.drainLog()
+
+		state.paletteBegin(now: 1)
+		state.normalize(now: 2)
+		expectEqual(state.records[1]?.visibility, .paletteHidden)
+		expectEqual(state.records[2]?.visibility, .paletteHidden)
+		expectEqual(state.records[3]?.visibility, .visible)
+		expect(!state.log.contains { $0.message.contains("#3") }, "\(state.log)")
+
+		state.paletteEnd()
+		state.normalize(now: 3)
+		expectEqual(state.records[1]?.visibility, .visible)
+		expectEqual(state.records[2]?.visibility, .visible)
+		expectEqual(state.records[2]?.pendingFloatRestore, true)
+		// It never left, so there is nothing to put back.
+		expectEqual(state.records[3]?.visibility, .visible)
+		expectEqual(state.records[3]?.pendingFloatRestore, false)
+		expectInvariants(state)
+	},
+
 	TestCase("layoutReset ends Zen") {
 		var state = testState()
 		let ws = state.testActive()
@@ -979,6 +1007,56 @@ private let focusRuleTests: [TestCase] = [
 			windowUnderMouse: nil, previousMonitor: main)
 		let decision = FocusRules.followDecision(context, in: state, now: 10.3)
 		expectEqual(decision, .focus(2))
+	},
+
+	TestCase("a window is focusable while its app answers") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testAddWindow(1, workspace: ws, pid: 100)
+		state.testAddWindow(2, placement: .unmanaged, workspace: nil, pid: 200)
+		expect(state.isFocusable(1))
+		expect(state.isFocusable(2))
+		expect(!state.isFocusable(99), "an untracked window is not a focus target")
+
+		state.apps[100] = AppState(pid: 100, name: "Busy", unresponsiveSince: 5)
+		expect(!state.isFocusable(1))
+		expect(state.isFocusable(2))
+
+		// The app answers a scan again.
+		state.ingestScan(pid: 100, result: .complete([WindowFacts(id: 1, pid: 100, title: "W1")]), serverHas: [1], now: 6)
+		expect(state.isFocusable(1))
+	},
+
+	TestCase("closeHandoff passes over tiles of apps that do not answer and focuses nothing when none answers") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testAddWindow(1, workspace: ws, pid: 100)
+		state.testAddWindow(2, workspace: ws, pid: 200, app: "Busy")
+		state.testAddWindow(3, workspace: ws, pid: 300)
+		state.workspaces[ws]?.columns = [[1], [2], [3]]
+		state.normalize(now: 0)
+		state.apps[200] = AppState(pid: 200, name: "Busy", unresponsiveSince: 5)
+		state.retire(1, reason: .destroyed, now: 10.0)
+
+		let context = FollowContext(focused: nil, previous: 1, changedAt: 10.0, previousMonitor: main)
+		expectEqual(FocusRules.followDecision(context, in: state, now: 10.3), .focus(3))
+
+		state.apps[300] = AppState(pid: 300, name: "Also busy", unresponsiveSince: 6)
+		expectEqual(FocusRules.followDecision(context, in: state, now: 10.3), .stay)
+	},
+
+	TestCase("closeHandoff does not hand focus to the window under the mouse when its app does not answer") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testAddWindow(1, workspace: ws, pid: 100)
+		state.testAddWindow(2, placement: .floating, workspace: ws, pid: 200, app: "Busy")
+		state.workspaces[ws]?.columns = [[1]]
+		state.normalize(now: 0)
+		state.apps[200] = AppState(pid: 200, name: "Busy", unresponsiveSince: 5)
+		state.retire(1, reason: .destroyed, now: 10.0)
+
+		let context = FollowContext(focused: nil, previous: 1, changedAt: 10.0, windowUnderMouse: 2)
+		expectEqual(FocusRules.followDecision(context, in: state, now: 10.3), .stay)
 	},
 
 	TestCase("zenFocusCloses suppresses follow decision") {

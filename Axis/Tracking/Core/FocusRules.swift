@@ -132,7 +132,7 @@ nonisolated enum FocusRules {
 
 	private static func adjacentTarget(in state: TrackingState, context: FollowContext) -> WindowID? {
 		if let monitor = context.previousMonitor, let active = state.activeWorkspace(monitor) {
-			if let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+			if let firstTile = firstFocusableTile(in: active, state: state) {
 				return firstTile
 			}
 		}
@@ -140,24 +140,35 @@ nonisolated enum FocusRules {
 		if let mouseID = context.windowUnderMouse,
 			let record = state.records[mouseID],
 			record.workspace != nil,
-			record.visibility == .visible {
+			record.visibility == .visible,
+			state.isFocusable(mouseID) {
 			return mouseID
 		}
 
 		let fallbackMonitor = state.focus.lastTrackedMonitor ?? state.primaryMonitor
 		if let monitor = fallbackMonitor, let active = state.activeWorkspace(monitor) {
-			if let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+			if let firstTile = firstFocusableTile(in: active, state: state) {
 				return firstTile
 			}
 		}
 
 		for monitorKey in state.monitorOrder {
 			if let active = state.activeWorkspace(monitorKey),
-				let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+				let firstTile = firstFocusableTile(in: active, state: state) {
 				return firstTile
 			}
 		}
 
 		return nil
+	}
+
+	/// The first tile of a workspace that focus may go to: the drawable tiles left to right, else
+	/// the stored columns. Windows of apps that do not answer are passed over, since focusing one
+	/// only makes the main thread wait for the app.
+	private static func firstFocusableTile(in workspace: WorkspaceID, state: TrackingState) -> WindowID? {
+		if let tile = state.layoutColumns(workspace).joined().first(where: { state.isFocusable($0) }) {
+			return tile
+		}
+		return state.workspaces[workspace]?.columns.joined().first(where: { state.isFocusable($0) })
 	}
 }
