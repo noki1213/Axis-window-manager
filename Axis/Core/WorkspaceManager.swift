@@ -26,8 +26,10 @@ class WorkspaceManager {
 
 	// MARK: - Start and quit
 
-	/// Starts tracking: each connected display shows an empty workspace 0 and every window joins
-	/// the one of the display it is on. `ready` runs once those windows are laid out.
+	/// Starts tracking: the workspaces and columns saved when Axis last quit come back for the
+	/// windows that still exist; the other windows join the shown workspace of the display they
+	/// are on (an empty workspace 0 when nothing was saved). `ready` runs once the windows are
+	/// laid out.
 	func start(ready: @escaping () -> Void) {
 		coordinator.addEventHandler { [weak self] event in
 			self?.handle(event)
@@ -36,11 +38,11 @@ class WorkspaceManager {
 			self?.closePaletteForScreenChange()
 		}
 		coordinator.onStarted = ready
-		coordinator.start(config: TilingEngine.shared.layoutConfig, relaunchTiled: Self.tiledAtLastQuit())
+		coordinator.start(config: TilingEngine.shared.layoutConfig)
 	}
 
-	/// Puts every window moved out of sight back on screen (those of Zen mode and the palette too)
-	/// and stops tracking
+	/// Saves the layout, puts every window moved out of sight back on screen (those of Zen mode
+	/// and the palette too) and stops tracking
 	func prepareForQuit() {
 		coordinator.prepareForQuit()
 		coordinator.stop()
@@ -80,24 +82,6 @@ class WorkspaceManager {
 	/// The windows that are Float
 	var floatWindowIDs: Set<CGWindowID> {
 		Set(state.records.values.filter { $0.placement == .floating }.map(\.id))
-	}
-
-	// MARK: - Tiled windows across a relaunch
-
-	private static let tiledAtQuitKey = "tiledWindowIDsAtQuit"
-
-	/// Windows that were tiled when Axis last quit. Their windows outlive Axis, so on the next
-	/// launch these are tiled again even when a stacked column left them small enough to look
-	/// like dialogs.
-	private static func tiledAtLastQuit() -> Set<WindowID> {
-		let ids = UserDefaults.standard.array(forKey: tiledAtQuitKey) as? [UInt32] ?? []
-		return Set(ids)
-	}
-
-	/// Record the tiled windows so the next launch can tell them from genuinely small windows
-	func rememberTiledWindowsForRelaunch() {
-		let ids = state.records.values.filter { $0.workspace != nil && $0.placement == .tiled }.map(\.id)
-		UserDefaults.standard.set(ids.map { UInt32($0) }, forKey: Self.tiledAtQuitKey)
 	}
 
 	// MARK: - Screens and monitor keys

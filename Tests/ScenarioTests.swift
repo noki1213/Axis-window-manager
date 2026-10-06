@@ -952,6 +952,130 @@ let scenarioTests: [TestCase] = [
 		world.expectActiveColumns(on: "Main", [[1]])
 	},
 
+	TestCase("relaunchRestore") {
+		// A run with three apps: windows 1 and 3 side by side, 2 floating, 4 on the next workspace.
+		var before = ScenarioWorld()
+		before.addApp(pid: 100, bundleID: "com.test.one", name: "One")
+		before.addApp(pid: 200, bundleID: "com.test.two", name: "Two")
+		before.addApp(pid: 300, bundleID: "com.test.three", name: "Three")
+		before.addWindow(id: 1, pid: 100, frame: CGRect(x: 12, y: 40, width: 700, height: 850))
+		before.addWindow(id: 2, pid: 100, frame: CGRect(x: 300, y: 200, width: 600, height: 500))
+		before.addWindow(id: 3, pid: 200, frame: CGRect(x: 730, y: 40, width: 700, height: 850))
+		before.addWindow(id: 4, pid: 300, frame: CGRect(x: 400, y: 100, width: 800, height: 700))
+		before.runPass()
+		let home = before.state.testActive()
+		before.state.testSetColumns(home, [[1], [2], [3], [4]])
+		before.state.toggleFloat(2)
+		before.state.moveWindowToWorkspace(4, on: mainKey, to: .next)
+		before.state.switchWorkspace(on: mainKey, to: .number(0))
+		before.state.normalize(now: before.currentTime)
+		let savedFloat = before.state.records[2]?.floatingFrame
+		let nextWorkspace = before.state.workspace(number: 1, on: mainKey)!
+		before.expectActiveColumns([[1], [3]])
+		before.expectColumns(nextWorkspace, [[4]])
+
+		// Axis quits; the file is what the next run reads.
+		let loaded = try TrackingState.decodePersistence(from: before.state.encodePersistence())
+		expectEqual(loaded.validationProblem(), nil)
+
+		// The same windows are still open when Axis starts again, plus one opened meanwhile.
+		var after = ScenarioWorld(now: 5000)
+		after.addApp(pid: 100, bundleID: "com.test.one", name: "One")
+		after.addApp(pid: 200, bundleID: "com.test.two", name: "Two")
+		after.addApp(pid: 300, bundleID: "com.test.three", name: "Three")
+		after.addWindow(id: 1, pid: 100, frame: CGRect(x: 12, y: 40, width: 700, height: 850))
+		after.addWindow(id: 2, pid: 100, frame: CGRect(x: 300, y: 200, width: 600, height: 500))
+		after.addWindow(id: 3, pid: 200, frame: CGRect(x: 730, y: 40, width: 700, height: 850))
+		after.addWindow(id: 4, pid: 300, frame: CGRect(x: 12, y: 40, width: 700, height: 850))
+		after.addWindow(id: 5, pid: 300, frame: CGRect(x: 100, y: 100, width: 800, height: 700))
+		after.restoreSavedLayout(loaded)
+		let plan = after.runPass(planOptions: PlanOptions())
+
+		// The first plan puts the windows where the saved layout says: the next workspace's window
+		// out of sight, the others in their slots or at their floating frame.
+		var parkedWindows: [WindowID] = []
+		var framedWindows: [WindowID] = []
+		for action in plan?.actions ?? [] {
+			switch action.kind {
+			case .park: parkedWindows.append(action.window)
+			case .setFrame: framedWindows.append(action.window)
+			default: break
+			}
+		}
+		expectEqual(parkedWindows, [4])
+		expectEqual(framedWindows.sorted(), [1, 2, 3, 5])
+
+		after.expectActiveWorkspace(home)
+		// The window opened meanwhile is admitted like any other, between the columns by its centre.
+		after.expectActiveColumns([[1], [5], [3]])
+		after.expectColumns(nextWorkspace, [[4]])
+		after.expectPlacement(2, .floating)
+		after.expectWorkspace(2, home)
+		expectEqual(after.state.records[2]?.floatingFrame, savedFloat)
+		after.expectVisibility(1, .visible)
+		after.expectVisibility(2, .visible)
+		after.expectVisibility(4, .parked(.workspaceInactive))
+		for id: WindowID in 1...4 {
+			expectEqual(after.state.records[id]?.source, .restored)
+		}
+		expectEqual(after.state.records[5]?.source, .discovered)
+		after.expectWorkspace(5, home)
+		after.expectLogContains("persist: restored 4 windows, 2 workspaces")
+	},
+
+	TestCase("relaunchStackedRestore") {
+		// A narrow column of three stacked windows, each far smaller than a dialog.
+		var before = ScenarioWorld()
+		before.addApp(pid: 100, bundleID: "com.test.app", name: "App")
+		for id: WindowID in 1...3 {
+			before.addWindow(id: id, pid: 100, frame: CGRect(x: 100, y: 100 + CGFloat(id) * 100, width: 800, height: 600))
+		}
+		before.runPass()
+		let home = before.state.testActive()
+		before.state.testSetColumns(home, [[1, 2, 3]])
+		let loaded = try TrackingState.decodePersistence(from: before.state.encodePersistence())
+
+		var after = ScenarioWorld(now: 5000)
+		after.addApp(pid: 100, bundleID: "com.test.app", name: "App")
+		for id: WindowID in 1...3 {
+			after.addWindow(id: id, pid: 100, frame: CGRect(x: 12, y: 40 + CGFloat(id - 1) * 280, width: 330, height: 270))
+		}
+		after.restoreSavedLayout(loaded)
+		after.runPass()
+
+		for id: WindowID in 1...3 {
+			after.expectPlacement(id, .tiled)
+		}
+		after.expectActiveColumns([[1, 2, 3]])
+	},
+
+	TestCase("relaunchBusyAppReturns") {
+		var before = ScenarioWorld()
+		before.addApp(pid: 100, bundleID: "com.test.one", name: "One")
+		before.addApp(pid: 200, bundleID: "com.test.busy", name: "Busy")
+		before.addWindow(id: 1, pid: 100, frame: CGRect(x: 12, y: 40, width: 700, height: 850))
+		before.addWindow(id: 2, pid: 200, frame: CGRect(x: 730, y: 40, width: 700, height: 850))
+		before.runPass()
+		let loaded = try TrackingState.decodePersistence(from: before.state.encodePersistence())
+
+		// The busy app does not answer the first scan; its window is small now.
+		var after = ScenarioWorld(now: 5000)
+		after.addApp(pid: 100, bundleID: "com.test.one", name: "One")
+		after.addApp(pid: 200, bundleID: "com.test.busy", name: "Busy")
+		after.addWindow(id: 1, pid: 100, frame: CGRect(x: 12, y: 40, width: 700, height: 850))
+		after.addWindow(id: 2, pid: 200, frame: CGRect(x: 730, y: 40, width: 300, height: 400))
+		after.restoreSavedLayout(loaded, answering: [100])
+		after.runPass(scans: [100: .complete([after.windows[1]!]), 200: .timedOut])
+		after.expectTracked(2, false)
+		after.expectActiveColumns([[1]])
+
+		// Later it answers: the window is tiled again, as a window of the active workspace.
+		after.advanceTime(by: 3)
+		after.runPass()
+		after.expectPlacement(2, .tiled)
+		after.expectActiveColumns([[1], [2]])
+	},
+
 	TestCase("officeSubrole") {
 		var world = ScenarioWorld()
 		world.addApp(pid: 100, bundleID: "com.microsoft.Powerpoint", name: "PowerPoint")
