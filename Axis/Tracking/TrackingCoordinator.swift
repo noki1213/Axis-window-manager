@@ -91,9 +91,12 @@ final class TrackingCoordinator {
 	private var sampledSince: Time = 0
 	private var lockTimer: DispatchSourceTimer?
 	private var asleepTimer: DispatchSourceTimer?
+	private var missionControlTimer: DispatchSourceTimer?
 
 	// MARK: Bookkeeping
 
+	/// Generation counter incremented on start and stop so queued async checks from older runs are dropped.
+	private var runID: UInt64 = 0
 	/// Tracked windows whose window notifications were handed to the observer thread.
 	private var watchedWindows: Set<WindowID> = []
 	/// What the window-server watcher reads 20 times a second; rebuilt only after a change.
@@ -133,6 +136,7 @@ final class TrackingCoordinator {
 		guard !isRunning else { return }
 		self.mode = mode
 		isRunning = true
+		runID += 1
 		let now = Self.uptime()
 		state = TrackingState(config: config, ownPID: ownPID)
 		state.relaunchTiled = relaunchTiled
@@ -142,6 +146,7 @@ final class TrackingCoordinator {
 		isSettling = false
 		liftOnNextPass = false
 		barrierEpoch += 1
+		stopTimer(&missionControlTimer)
 		watchedWindows = []
 		watcherContext = nil
 		observerGaveUpLogged = []
@@ -175,6 +180,9 @@ final class TrackingCoordinator {
 		watcher.sink = { [weak self] signal in
 			self?.receive(signal)
 		}
+		watcher.onLog = { [weak self] line in
+			self?.event(line)
+		}
 		watcher.contextProvider = { [weak self] in
 			self?.currentWatcherContext() ?? WindowServerWatcher.Context(isPaused: true)
 		}
@@ -192,20 +200,24 @@ final class TrackingCoordinator {
 	func stop() {
 		guard isRunning else { return }
 		isRunning = false
-		for timer in [passTimer, sampler, lockTimer, asleepTimer] {
+		runID += 1
+		for timer in [passTimer, sampler, lockTimer, asleepTimer, missionControlTimer] {
 			timer?.cancel()
 		}
 		passTimer = nil
 		sampler = nil
 		lockTimer = nil
 		asleepTimer = nil
+		missionControlTimer = nil
 		inFlight = nil
 		pending = PendingWork()
 		watcher.stop()
 		watcher.sink = nil
+		watcher.onLog = nil
 		watcher.contextProvider = nil
 		systemSignals.stop()
 		axEventSource.stop()
+		ElementCache.shared.clear()
 	}
 
 	// MARK: - Signals
@@ -272,6 +284,7 @@ final class TrackingCoordinator {
 			raiseBarrier(.displayChanging)
 			// The configuration changed again: it has to stay unchanged from here on.
 			sampledSignature = nil
+			samplerStartedAt = now
 
 		case .willSleep:
 			raiseBarrier(.asleep)
@@ -294,9 +307,26 @@ final class TrackingCoordinator {
 
 		case .missionControl(let active):
 			if active {
-				raiseBarrier(.missionControl)
+				if state.barrier.isEmpty {
+					stopTimer(&missionControlTimer)
+					let timer = DispatchSource.makeTimerSource(queue: .main)
+					timer.schedule(deadline: .now() + CoordinatorTiming.missionControlDebounce)
+					timer.setEventHandler { [weak self] in
+						guard let self, self.isRunning else { return }
+						self.stopTimer(&self.missionControlTimer)
+						self.raiseBarrier(.missionControl)
+					}
+					timer.resume()
+					missionControlTimer = timer
+				} else {
+					stopTimer(&missionControlTimer)
+					raiseBarrier(.missionControl)
+				}
 			} else {
-				endBarrier(.missionControl)
+				stopTimer(&missionControlTimer)
+				if state.barrier.contains(.missionControl) {
+					endBarrier(.missionControl)
+				}
 			}
 
 		case .untrackedWindows(let pid, _), .missingWindows(let pid, _):
@@ -353,6 +383,10 @@ final class TrackingCoordinator {
 		if reason == .asleep {
 			startAsleepTimer()
 		}
+		if reason == .displayChanging {
+			samplerStartedAt = now
+			sampledSignature = nil
+		}
 		updateBarrierTimers()
 		watcherContext = nil
 		schedulePassTimer()
@@ -365,7 +399,7 @@ final class TrackingCoordinator {
 		endingReasons.insert(reason)
 		watcherContext = nil
 		if endingReasons.isSuperset(of: state.barrier) {
-			if settled {
+			if settled || state.barrier == [.missionControl] {
 				exitBarrier()
 				return
 			}
@@ -387,6 +421,7 @@ final class TrackingCoordinator {
 		guard !DisplaySignature(displays).isDegenerate else {
 			// The configuration fell apart again since the last sample: settle once more.
 			isSettling = true
+			samplerStartedAt = Self.uptime()
 			updateBarrierTimers()
 			return
 		}
@@ -441,6 +476,7 @@ final class TrackingCoordinator {
 		let signature = DisplayReader.signature()
 		guard !signature.isDegenerate else {
 			sampledSignature = nil
+			samplerStartedAt = now
 			return
 		}
 		if signature != sampledSignature {
@@ -793,8 +829,9 @@ final class TrackingCoordinator {
 	/// unless the notification said destroyed and the window sits off screen: an app that keeps
 	/// a closed window around (retired on purpose) is logged apart.
 	private func scheduleRetireCheck(_ id: WindowID, reason: RetireReason) {
+		let run = runID
 		DispatchQueue.main.asyncAfter(deadline: .now() + CoordinatorTiming.retireCheckDelay) { [weak self] in
-			guard let self, self.isRunning, self.mode == .shadow,
+			guard let self, self.isRunning, self.runID == run, self.mode == .shadow,
 				let window = ServerProbe.exists([id], now: Self.uptime()).windows[id] else { return }
 			if window.isOnScreen || reason != .destroyed {
 				self.event("WRONG retire #\(id) (window server still has it 2s later\(window.isOnScreen ? ", on screen" : ""))")
@@ -808,30 +845,30 @@ final class TrackingCoordinator {
 	/// later although the window server no longer has it is a retire the shadow missed.
 	func reportLegacyWindowClosed(_ id: WindowID) {
 		guard isRunning, mode == .shadow else { return }
-		scheduleCrossCheck(.legacyClosed(id, at: Self.uptime()), after: CoordinatorTiming.closeCheckDelay)
+		scheduleCrossCheck(.legacyClosed(id, at: Self.uptime()), after: CoordinatorTiming.closeCheckDelay, run: runID)
 	}
 
 	/// The window loop that runs alongside found a new window. One the shadow does not track a
 	/// moment later is an admission it missed.
 	func reportLegacyWindowAppeared(_ id: WindowID) {
 		guard isRunning, mode == .shadow else { return }
-		scheduleCrossCheck(.legacyAppeared(id), after: CoordinatorTiming.appearCheckDelay)
+		scheduleCrossCheck(.legacyAppeared(id), after: CoordinatorTiming.appearCheckDelay, run: runID)
 	}
 
 	/// Checks run once nothing holds the shadow back (barrier, exit, a pass in flight), retried
 	/// a few times; one that never finds it steady is dropped.
-	private func scheduleCrossCheck(_ check: CrossCheck, after delay: TimeInterval, attempt: Int = 0) {
+	private func scheduleCrossCheck(_ check: CrossCheck, after delay: TimeInterval, attempt: Int = 0, run: UInt64) {
 		DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-			self?.runCrossCheck(check, attempt: attempt)
+			self?.runCrossCheck(check, attempt: attempt, run: run)
 		}
 	}
 
-	private func runCrossCheck(_ check: CrossCheck, attempt: Int) {
-		guard isRunning, mode == .shadow else { return }
+	private func runCrossCheck(_ check: CrossCheck, attempt: Int, run: UInt64) {
+		guard isRunning, runID == run, mode == .shadow else { return }
 		let isSteady = state.barrier.isEmpty && !state.livenessState.liftPending && !liftOnNextPass && inFlight == nil
 		guard isSteady else {
 			if attempt < CoordinatorTiming.crossCheckAttempts {
-				scheduleCrossCheck(check, after: CoordinatorTiming.crossCheckRetryDelay, attempt: attempt + 1)
+				scheduleCrossCheck(check, after: CoordinatorTiming.crossCheckRetryDelay, attempt: attempt + 1, run: run)
 			} else if case .retireOverdue(let id) = check {
 				awaitingRetire[id] = nil
 			}
@@ -847,7 +884,7 @@ final class TrackingCoordinator {
 			}
 			// Reported once: when the retire comes after all, or when it still has not come.
 			awaitingRetire[id] = AwaitedRetire(description: PerfLog.describe(record), closedAt: closedAt)
-			scheduleCrossCheck(.retireOverdue(id), after: CoordinatorTiming.retireOverdueDelay)
+			scheduleCrossCheck(.retireOverdue(id), after: CoordinatorTiming.retireOverdueDelay, run: run)
 		case .retireOverdue(let id):
 			guard let awaited = awaitingRetire.removeValue(forKey: id), state.isTracked(id) else { return }
 			let delay = Int((now - awaited.closedAt).rounded())
@@ -950,7 +987,9 @@ final class TrackingCoordinator {
 				state.ingestServer(snapshot)
 				state.noteVisibleFrames(snapshot: snapshot)
 			}
-			mutate(&state)
+			var s = state
+			mutate(&s)
+			state = s
 			if mode == .stateOnly {
 				// Each command is an ingest of its own: a window it admitted pairs only with a
 				// window retired shortly before, not with one a later command retires.
@@ -968,7 +1007,9 @@ final class TrackingCoordinator {
 	/// Changes bookkeeping that moves no window (which window has focus, ...): no plan follows.
 	func note(_ mutate: (inout TrackingState) -> Void) {
 		guard isRunning else { return }
-		mutate(&state)
+		var s = state
+		mutate(&s)
+		state = s
 		finishStep(now: Self.uptime())
 	}
 
@@ -1133,6 +1174,8 @@ private nonisolated enum CoordinatorTiming {
 	static let gatherDeadline: TimeInterval = WindowEnumerator.awaiterDeadline + 0.2
 	/// Ingests slower than this on the main thread are logged.
 	static let slowPass: TimeInterval = 0.005
+	/// Debounce delay before raising a Mission-Control-only barrier (2 watcher ticks).
+	static let missionControlDebounce: TimeInterval = 0.1
 	static let sampleInterval: TimeInterval = 0.1
 	/// The display configuration has settled once it stayed the same this long, or once it was
 	/// sampled for `settleCap` with something to show.

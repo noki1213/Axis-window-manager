@@ -425,8 +425,9 @@ enum WindowActuator {
 		guard CFGetTypeID(value) == AXValueGetTypeID() else {
 			return (nil, .failure)
 		}
+		let axValue = unsafeDowncast(value, to: AXValue.self)
 		var pt = CGPoint.zero
-		if AXValueGetValue(value as! AXValue, .cgPoint, &pt) {
+		if AXValueGetType(axValue) == .cgPoint, AXValueGetValue(axValue, .cgPoint, &pt) {
 			return (pt, .success)
 		}
 		return (nil, .failure)
@@ -441,8 +442,9 @@ enum WindowActuator {
 		guard CFGetTypeID(value) == AXValueGetTypeID() else {
 			return (nil, .failure)
 		}
+		let axValue = unsafeDowncast(value, to: AXValue.self)
 		var sz = CGSize.zero
-		if AXValueGetValue(value as! AXValue, .cgSize, &sz) {
+		if AXValueGetType(axValue) == .cgSize, AXValueGetValue(axValue, .cgSize, &sz) {
 			return (sz, .success)
 		}
 		return (nil, .failure)
@@ -457,8 +459,9 @@ enum WindowActuator {
 		guard CFGetTypeID(value) == AXValueGetTypeID() else {
 			return nil
 		}
+		let axValue = unsafeDowncast(value, to: AXValue.self)
 		var sz = CGSize.zero
-		if AXValueGetValue(value as! AXValue, .cgSize, &sz) {
+		if AXValueGetType(axValue) == .cgSize, AXValueGetValue(axValue, .cgSize, &sz) {
 			return sz
 		}
 		return nil

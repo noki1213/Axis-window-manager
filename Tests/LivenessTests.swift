@@ -84,6 +84,28 @@ private let scanLivenessTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("complete scan missing window with window server presence logs keep only when misses were recorded") {
+		var state = testState()
+		let ws = state.testActive()
+		state.testSetColumns(ws, [[1]])
+
+		// Window 1 is unlisted in complete scan, window server still has it, but no previous misses.
+		_ = state.drainLog()
+		state.ingestScan(pid: 100, result: .complete([]), serverHas: [1], now: 10.0)
+		let logsWithoutMisses = state.drainLog().map(\.message)
+		expect(!logsWithoutMisses.contains { $0.contains("window server has it") },
+			"keep must not be logged when window had no prior misses")
+
+		// When misses were previously recorded, keep line must be logged.
+		state.records[1]?.liveness.misses = 1
+		state.records[1]?.liveness.lastMissAt = 10.0
+		state.ingestScan(pid: 100, result: .complete([]), serverHas: [1], now: 10.15)
+		let logsWithMisses = state.drainLog().map(\.message)
+		expect(logsWithMisses.contains { $0.contains("window server has it") },
+			"keep must be logged when window had misses")
+		expectInvariants(state)
+	},
+
 	TestCase("complete scan missing window without window server presence records first miss") {
 		var state = testState()
 		let ws = state.testActive()
