@@ -18,6 +18,7 @@ enum WindowActuator {
 	private static let frameMaxAttempts = 3
 	private static let relayoutWaitMicroseconds: useconds_t = 15_000
 	private static let messagingTimeout: Float = 0.3
+	private static var cachedMinSizes: [WindowID: CGSize] = [:]
 
 	// MARK: - Plan Execution
 
@@ -167,41 +168,39 @@ enum WindowActuator {
 
 	/// Sets a window's position and size with read-back verification and retries.
 	static func setFrame(_ newFrame: CGRect, on element: AXUIElement, action: PlanAction) -> WriteResult {
-		let (initialFrame, readInitialErr) = getFrame(from: element)
-		if readInitialErr == .cannotComplete {
-			return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: nil, error: AXErrorCode.cannotComplete)
-		}
-
-		logAction(action, target: newFrame, currentFrame: initialFrame)
+		logAction(action, target: newFrame, currentFrame: action.observed)
 		AccessibilityManager.shared.invalidateWindowCache()
 
-		let currentFrame = initialFrame ?? action.observed ?? .zero
+		let currentFrame = action.observed ?? .zero
 		let isGrowing = newFrame.width > currentFrame.width + frameTolerance
 			|| newFrame.height > currentFrame.height + frameTolerance
 
-		let minSize = getMinSize(from: element) ?? CGSize(width: 200, height: 200)
 		var previousFrame: CGRect?
 		var lastReadBack: CGRect?
 
 		for attempt in 0..<frameMaxAttempts {
-			let writeErr: AXError
-			if isGrowing {
-				let e1 = applyPosition(newFrame.origin, to: element)
-				let e2 = setSize(newFrame.size, to: element)
-				let e3 = applyPosition(newFrame.origin, to: element)
-				writeErr = prioritizeError([e1, e2, e3])
-			} else {
-				let e1 = setSize(newFrame.size, to: element)
-				let e2 = applyPosition(newFrame.origin, to: element)
-				let e3 = setSize(newFrame.size, to: element)
-				writeErr = prioritizeError([e1, e2, e3])
-			}
+			var writeErr: AXError = .success
+			let writes: [() -> AXError] = isGrowing ? [
+				{ applyPosition(newFrame.origin, to: element) },
+				{ setSize(newFrame.size, to: element) },
+				{ applyPosition(newFrame.origin, to: element) }
+			] : [
+				{ setSize(newFrame.size, to: element) },
+				{ applyPosition(newFrame.origin, to: element) },
+				{ setSize(newFrame.size, to: element) }
+			]
 
-			if writeErr == .cannotComplete {
-				return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: lastReadBack, error: AXErrorCode.cannotComplete)
-			}
-			if writeErr == .invalidUIElement {
-				return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: lastReadBack, error: AXErrorCode.invalidUIElement)
+			for write in writes {
+				let err = write()
+				if err == .cannotComplete {
+					return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: lastReadBack, error: AXErrorCode.cannotComplete)
+				}
+				if err == .invalidUIElement {
+					return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: lastReadBack, error: AXErrorCode.invalidUIElement)
+				}
+				if err != .success && writeErr == .success {
+					writeErr = err
+				}
 			}
 
 			let (actual, readErr) = getFrame(from: element)
@@ -217,6 +216,12 @@ enum WindowActuator {
 			if isCloseEnough(actual, newFrame) {
 				return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: actual, error: nil)
 			}
+
+			let minSize: CGSize = cachedMinSizes[action.window] ?? {
+				let queried = getMinSize(from: element)
+				if let queried { cachedMinSizes[action.window] = queried }
+				return queried ?? CGSize(width: 200, height: 200)
+			}()
 
 			if newFrame.width < minSize.width - frameTolerance || newFrame.height < minSize.height - frameTolerance {
 				return WriteResult(window: action.window, pid: action.pid, kind: .frame, target: newFrame, result: actual, error: nil)
@@ -237,8 +242,7 @@ enum WindowActuator {
 
 	/// Parks a window at a given screen coordinate by updating its position.
 	static func park(_ origin: CGPoint, on element: AXUIElement, action: PlanAction) -> WriteResult {
-		let (currentSize, _) = getSize(from: element)
-		let size = currentSize ?? action.observed?.size ?? .zero
+		let size = action.observed?.size ?? .zero
 		let target = CGRect(origin: origin, size: size)
 
 		logAction(action, target: target, currentFrame: action.observed)

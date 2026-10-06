@@ -206,10 +206,13 @@ nonisolated extension TrackingState {
 		// Order connected monitors by display order.
 		monitorOrder = uniqueDisplays.map(\.key)
 
-		// Emit active workspace changes for kept monitors whose active workspace changed.
+		// Emit active workspace changes for kept monitors whose active workspace changed (at most once per monitor).
+		var emittedMonitors: Set<MonitorKey> = []
 		for key in change.kept {
 			if let oldState = oldMonitors[key], let newState = monitors[key], oldState.active != newState.active {
-				emit(.activeChanged(monitor: key, from: oldState.active, to: newState.active, cause: .topology))
+				if emittedMonitors.insert(key).inserted {
+					emit(.activeChanged(monitor: key, from: oldState.active, to: newState.active, cause: .topology))
+				}
 			}
 		}
 
@@ -263,17 +266,13 @@ nonisolated extension TrackingState {
 						if let before = hostState.activeBeforeHosting,
 							hostState.order.contains(before),
 							!stillExisting.contains(before) {
-							let oldActive = hostState.active
 							hostState.active = before
 							hostState.activeBeforeHosting = nil
-							emit(.activeChanged(monitor: currentHost, from: oldActive, to: before, cause: .topology))
 						} else {
 							let fallback = hostState.order.first { !stillExisting.contains($0) && workspaces[$0]?.origin == currentHost }
 								?? hostState.order.first { !stillExisting.contains($0) }
 							if let fallback {
-								let oldActive = hostState.active
 								hostState.active = fallback
-								emit(.activeChanged(monitor: currentHost, from: oldActive, to: fallback, cause: .topology))
 							}
 						}
 					}

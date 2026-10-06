@@ -994,6 +994,37 @@ private let focusRuleTests: [TestCase] = [
 		expectEqual(decision, .stay)
 	},
 
+	TestCase("focus moved to another window while on empty workspace follows") {
+		var state = testState()
+		let row = state.testSetRow("Main", negatives: 0, nonNegatives: 3, active: 0)
+		state.testSetColumns(row[0], [[1]])
+		state.testSetColumns(row[2], [[2]])
+		// Switch to empty workspace 1.
+		state.switchWorkspace(on: main, to: .id(row[1]))
+		state.normalize(now: 0)
+
+		// Focus moved to window 2 on workspace 2 via Dock/Cmd+Tab.
+		let context = FollowContext(focused: 2, previous: 1, changedAt: 10.0)
+		let decision = FocusRules.followDecision(context, in: state, now: 10.5)
+		expectEqual(decision, .follow(window: 2, workspace: row[2]))
+	},
+
+	TestCase("closeHandoff prefers window under mouse when previous monitor is nil") {
+		var state = testState([testDisplay("Main", primary: true), testDisplay("Secondary", x: 1440, displayID: 2)])
+		let mainWs = state.testActive("Main")
+		let secWs = state.testActive("Secondary")
+		state.testSetColumns(mainWs, [[1], [4]])
+		state.testSetColumns(secWs, [[2], [3]])
+		state.normalize(now: 0)
+		state.retire(1, reason: .destroyed, now: 10.0)
+
+		// When previous monitor is nil, window under mouse is preferred over other monitor tiles.
+		let context = FollowContext(focused: nil, previous: 1, changedAt: 10.0,
+			windowUnderMouse: 3, previousMonitor: nil)
+		let decision = FocusRules.followDecision(context, in: state, now: 10.3)
+		expectEqual(decision, .focus(3))
+	},
+
 	TestCase("launchAside holds focus until deadline") {
 		var state = testState()
 		let row = state.testSetRow("Main", negatives: 0, nonNegatives: 2, active: 0)

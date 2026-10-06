@@ -100,8 +100,9 @@ nonisolated enum FocusRules {
 		}
 
 		// When switching to an empty workspace, the previous window stays system-focused
-		// while parked; ignore the focus handoff so it does not switch back.
-		if let host = state.workspaces[targetWorkspace]?.host,
+		// while parked; ignore the focus handoff only when focus stayed on that parked window.
+		if context.focused == context.previous,
+			let host = state.workspaces[targetWorkspace]?.host,
 			let active = state.activeWorkspace(host),
 			!state.hasMembers(active) {
 			return .stay
@@ -130,8 +131,7 @@ nonisolated enum FocusRules {
 	}
 
 	private static func adjacentTarget(in state: TrackingState, context: FollowContext) -> WindowID? {
-		let preferredMonitor = context.previousMonitor ?? state.focus.lastTrackedMonitor ?? state.primaryMonitor
-		if let monitor = preferredMonitor, let active = state.activeWorkspace(monitor) {
+		if let monitor = context.previousMonitor, let active = state.activeWorkspace(monitor) {
 			if let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
 				return firstTile
 			}
@@ -142,6 +142,13 @@ nonisolated enum FocusRules {
 			record.workspace != nil,
 			record.visibility == .visible {
 			return mouseID
+		}
+
+		let fallbackMonitor = state.focus.lastTrackedMonitor ?? state.primaryMonitor
+		if let monitor = fallbackMonitor, let active = state.activeWorkspace(monitor) {
+			if let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+				return firstTile
+			}
 		}
 
 		for monitorKey in state.monitorOrder {
