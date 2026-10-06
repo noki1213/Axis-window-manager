@@ -143,8 +143,8 @@ class TilingEngine: ObservableObject {
             guard let record = state.record(entry.id), record.placement != .tiled,
                   var window = coordinator.windowInfo(entry.id) else { continue }
             window.frame = entry.bounds
-            // Windows currently evacuated (another workspace, the palette, Zen) are excluded
-            if let reason = WorkspaceManager.shared.hiddenReason(entry.id) { skip(window, reason); continue }
+            // Only windows shown where they are: not out of sight for another workspace, the palette or Zen
+            guard record.visibility == .visible else { skip(window, record.visibility.logName); continue }
             // Only raise genuine windows (standard windows or dialogs), not other kinds of panels
             let isGenuine = record.subrole == kAXStandardWindowSubrole as String || record.hasCloseButton
                 || record.subrole == kAXDialogSubrole as String || record.subrole == kAXSystemDialogSubrole as String

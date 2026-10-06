@@ -445,8 +445,7 @@ class HotkeyManager: ObservableObject {
 
 		case .windowPaletteMode:
 			DispatchQueue.main.async { [weak self] in
-				// The palette takes every window out of sight, so Zen mode ends first
-				ZenModeManager.shared.exit(reason: .paletteOpened)
+				// The palette takes every window out of sight, so Zen mode ends with it
 				self?.currentMode = .windowPalette
 				self?.windowPaletteManager.startPalette()
 				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)

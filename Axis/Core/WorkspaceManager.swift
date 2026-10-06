@@ -32,22 +32,16 @@ class WorkspaceManager {
 		coordinator.addEventHandler { [weak self] event in
 			self?.handle(event)
 		}
-		coordinator.externallyPositioned = { [weak self] in
-			self?.externallyPositionedWindows() ?? []
-		}
 		coordinator.onDisplaySetChanging = { [weak self] in
-			self?.exitSpecialModesForScreenChange()
+			self?.closePaletteForScreenChange()
 		}
 		coordinator.onStarted = ready
 		coordinator.start(config: TilingEngine.shared.layoutConfig, relaunchTiled: Self.tiledAtLastQuit())
 	}
 
-	/// Puts every window moved out of sight back on screen and stops tracking
+	/// Puts every window moved out of sight back on screen (those of Zen mode and the palette too)
+	/// and stops tracking
 	func prepareForQuit() {
-		// The palette moved its windows out of sight itself
-		if HotkeyManager.shared.currentMode == .windowPalette {
-			WindowPaletteManager.shared.endPalette()
-		}
 		coordinator.prepareForQuit()
 		coordinator.stop()
 	}
@@ -161,24 +155,6 @@ class WorkspaceManager {
 		state.isTracked(windowID)
 	}
 
-	/// Whether Axis put the window out of sight: parked for another workspace, Zen mode or the palette,
-	/// or minimized by the hide command
-	func isWindowHidden(_ windowID: CGWindowID) -> Bool {
-		hiddenReason(windowID) != nil
-	}
-
-	/// Why Axis put the window out of sight (for logs), nil when it did not. Windows macOS keeps out of
-	/// sight on its own (minimized from the Dock, fullscreen, another Space) are not hidden by Axis.
-	func hiddenReason(_ windowID: CGWindowID) -> String? {
-		if let visibility = state.visibility(windowID), visibility.isParkedKind || visibility == .axisMinimized {
-			return visibility.logName
-		}
-		if WindowPaletteManager.shared.isWindowHidden(windowID) {
-			return "paletteHidden"
-		}
-		return nil
-	}
-
 	// MARK: - Workspace Switching
 
 	/// Switch workspaces
@@ -192,10 +168,12 @@ class WorkspaceManager {
 
 	/// Switch to a workspace by its id, on the monitor that shows it (the palette lists workspaces
 	/// by id, so a renumbering while it was open does not send it elsewhere)
-	func switchWorkspace(to workspace: WorkspaceID, focusWindowID: CGWindowID? = nil) {
+	/// - Parameter endingPalette: the palette's session ends with the same command, so the windows
+	///   it took out of sight come back already in the new layout
+	func switchWorkspace(to workspace: WorkspaceID, focusWindowID: CGWindowID? = nil, endingPalette: Bool = false) {
 		guard let host = state.workspaces[workspace]?.host, let screen = screen(for: host),
 			  let number = state.number(of: workspace) else { return }
-		switchWorkspace(.id(workspace), number: number, on: screen, focusWindowID: focusWindowID)
+		switchWorkspace(.id(workspace), number: number, on: screen, focusWindowID: focusWindowID, endingPalette: endingPalette)
 	}
 
 	/// Move to the next workspace (+1), created past the last one
@@ -209,7 +187,8 @@ class WorkspaceManager {
 	}
 
 	/// `number`: the workspace number the target has before the switch, for the log
-	private func switchWorkspace(_ target: WorkspaceTarget, number: Int, on screen: NSScreen, focusWindowID: CGWindowID? = nil) {
+	private func switchWorkspace(_ target: WorkspaceTarget, number: Int, on screen: NSScreen, focusWindowID: CGWindowID? = nil,
+		endingPalette: Bool = false) {
 		guard let key = monitorKey(for: screen) else { return }
 		let current = currentWorkspace(on: screen)
 		guard number != current else { return }
@@ -222,6 +201,9 @@ class WorkspaceManager {
 		// so an empty screen never shows
 		var destination: WorkspaceID?
 		coordinator.perform("switch", delaysHidePhase: true) { state in
+			if endingPalette {
+				state.paletteEnd()
+			}
 			destination = state.switchWorkspace(on: key, to: target)
 		}
 		finishSwitch(to: destination, focusWindowID: focusWindowID)
@@ -331,20 +313,15 @@ class WorkspaceManager {
 		}
 	}
 
-	// MARK: - Windows other components move
+	// MARK: - Display changes
 
-	/// Windows the palette parks and restores by itself
-	private func externallyPositionedWindows() -> Set<WindowID> {
-		WindowPaletteManager.shared.hiddenWindowIDs
-	}
-
-	/// The palette is laid out for the old screens, so leave it before the screens change
-	private func exitSpecialModesForScreenChange() {
-		if HotkeyManager.shared.currentMode == .windowPalette {
-			WindowPaletteManager.shared.endPalette()
-			HotkeyManager.shared.currentMode = .normal
-			NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
-		}
+	/// The palette is laid out for the old screens, so it closes before the screens change (the
+	/// tracking state ended its session, and the windows come back with the next layout)
+	private func closePaletteForScreenChange() {
+		guard HotkeyManager.shared.currentMode == .windowPalette else { return }
+		WindowPaletteManager.shared.dismiss()
+		HotkeyManager.shared.currentMode = .normal
+		NotificationCenter.default.post(name: .modeChanged, object: HotkeyManager.Mode.normal)
 	}
 
 	// MARK: - Focused monitor

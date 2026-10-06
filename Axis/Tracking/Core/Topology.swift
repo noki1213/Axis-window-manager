@@ -223,8 +223,9 @@ nonisolated extension TrackingState {
 			}
 		}
 
-		// End window palette session on topology changes.
-		if palette != nil {
+		// The palette shows one row per display: a display coming or going ends its session. A
+		// reconcile with the same displays (after a lock, sleep or Mission Control) keeps it.
+		if palette != nil && (!change.added.isEmpty || !change.removed.isEmpty) {
 			paletteEnd()
 		}
 

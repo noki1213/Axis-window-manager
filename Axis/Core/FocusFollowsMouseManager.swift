@@ -152,8 +152,8 @@ class FocusFollowsMouseManager: ObservableObject {
 
 		// Windows currently stashed in a hidden corner (another workspace, Zen mode, the palette) are excluded
 		// (Prevents focus from jumping when the mouse touches the 1px sliver of a hidden window)
-		if let reason = WorkspaceManager.shared.hiddenReason(window.id) {
-			logSkipReason("hidden window (\(reason))")
+		if let visibility = TrackingCoordinator.shared.state.visibility(window.id), visibility.isHiddenByAxis {
+			logSkipReason("hidden window (\(visibility.logName))")
 			return
 		}
 
