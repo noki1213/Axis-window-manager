@@ -393,8 +393,7 @@ class HotkeyManager: ObservableObject {
 			DispatchQueue.main.async {
 				let floatIDs = WorkspaceManager.shared.floatWindowIDs
 				guard !floatIDs.isEmpty else { return }
-				let allWindows = AccessibilityManager.shared.getAllWindows()
-				let floatWindows = allWindows.filter { floatIDs.contains($0.id) }
+				let floatWindows = TrackingCoordinator.shared.windowInfos(floatIDs.sorted())
 					.sorted { $0.frame.midX < $1.frame.midX }
 				guard !floatWindows.isEmpty else { return }
 
@@ -461,7 +460,7 @@ class HotkeyManager: ObservableObject {
 				// Zen mode keeps the other windows hidden in a corner; laying them out underneath it
 				// would leave Zen half-applied, so bring them back first
 				if ZenModeManager.shared.isActive {
-					ZenModeManager.shared.exit()
+					ZenModeManager.shared.exit(reason: .layoutReset)
 				}
 				self?.tilingEngine.resetToSingleWindowColumns()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {

@@ -35,28 +35,13 @@ class ZenModeManager: ObservableObject {
         return ids
     }
 
-    /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on getAllWindows)
+    /// Save the WindowInfo of a window moved off-screen (so restoring doesn't depend on looking it up again)
     private var hiddenWindowList: [WindowInfo] = []
 
+    /// Windows admitted while Zen mode is on, checked once all the changes of that moment are in
+    private var admittedSinceCheck: Set<CGWindowID> = []
+
     private init() {}
-
-    // MARK: - Diagnostics (pinning down what unintentionally cancels Zen mode)
-
-    /// Return the hidden window's "app name / title" (for logging)
-    func hiddenWindowDescription(for id: CGWindowID) -> String? {
-        guard let window = hiddenWindowList.first(where: { $0.id == id }) else { return nil }
-        return "\(window.app.localizedName ?? "?") / \(window.title)"
-    }
-
-    /// Read the hidden window's current position back from AX and return it (for logging)
-    /// Used to check whether the 1px-left-in-the-corner placement is being maintained
-    func hiddenWindowCurrentFrame(for id: CGWindowID) -> CGRect? {
-        guard let window = hiddenWindowList.first(where: { $0.id == id }) else { return nil }
-        guard let refreshed = WindowInfo(axElement: window.axElement, app: window.app) else {
-            return window.frame
-        }
-        return refreshed.frame
-    }
 
     func toggle() {
         if isActive {
@@ -66,11 +51,64 @@ class ZenModeManager: ObservableObject {
         }
     }
 
+    // MARK: - Windows coming and going
+
+    /// A window was admitted. A tiled window joining the Zen workspace would be laid out under the
+    /// centred window, so it ends Zen mode; floating windows and windows launched aside (which go
+    /// to a workspace of their own) leave it on. Checked once the changes of that moment are all
+    /// in, so a window that only took over from one with the same app and title does not count.
+    func noteAdmitted(_ windowID: CGWindowID) {
+        guard isActive else { return }
+        if admittedSinceCheck.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                self?.checkAdmittedWindows()
+            }
+        }
+        admittedSinceCheck.insert(windowID)
+    }
+
+    /// The window took over from a closed one with the same app and title
+    func noteRekeyed(to windowID: CGWindowID) {
+        admittedSinceCheck.remove(windowID)
+    }
+
+    /// A window closed: losing the centred window or one Zen mode put out of sight ends it
+    func noteRetired(_ windowID: CGWindowID) {
+        guard isActive else { return }
+        admittedSinceCheck.remove(windowID)
+        let reason: ZenExitReason
+        if windowID == focusedWindowID {
+            reason = .focusClosed
+        } else if hiddenWindowIDs.contains(windowID) {
+            reason = .hiddenClosed
+        } else {
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.exit(reason: reason)
+        }
+    }
+
+    private func checkAdmittedWindows() {
+        let admitted = admittedSinceCheck
+        admittedSinceCheck.removeAll()
+        let state = TrackingCoordinator.shared.state
+        guard isActive, let monitor = activeMonitor, let zenWorkspace = state.activeWorkspace(monitor) else { return }
+        let joined = admitted.contains { id in
+            guard let record = state.record(id) else { return false }
+            return record.placement == .tiled && record.workspace == zenWorkspace
+        }
+        if joined {
+            exit(reason: .tiledAdmitted)
+        }
+    }
+
     /// Reset the state without restoring windows, and return every window's original position
     /// Used when switching directly to another mode, such as the palette
     func exitAndHandOffHiddenFrames() -> [CGWindowID: CGRect] {
         guard isActive else { return [:] }
         isActive = false
+        admittedSinceCheck.removeAll()
         focusedWindowID = nil
         activeMonitor = nil
         widthRatio = 0.75
@@ -117,11 +155,13 @@ class ZenModeManager: ObservableObject {
         }
     }
     
-    func exit() {
-        PerfLog.event("zen: exit (was #\(focusedWindowID.map(String.init) ?? "-"))")
+    func exit(reason: ZenExitReason = .user) {
+        guard isActive else { return }
+        PerfLog.event("zen: exit (\(reason.logText); was #\(focusedWindowID.map(String.init) ?? "-"))")
 
         // Reset state (reset first to prevent re-entrancy)
         isActive = false
+        admittedSinceCheck.removeAll()
         focusedWindowID = nil
         activeMonitor = nil
         widthRatio = 0.75
@@ -162,33 +202,17 @@ class ZenModeManager: ObservableObject {
         hiddenWindowFrames.removeAll()
         hiddenWindowList.removeAll()
 
-        // Collect only the window IDs belonging to the workspace of the monitor that started Zen mode
-        let workspaceIDs = Set(WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen))
+        // Only the windows shown in the workspace of the monitor that started Zen mode (windows on
+        // other monitors, minimized ones and the like are left alone), with where they are now
+        let coordinator = TrackingCoordinator.shared
+        let workspaceIDs = WorkspaceManager.shared.windowIDsForCurrentWorkspace(on: screen)
+            .filter { $0 != exceptWindowID && coordinator.state.visibility($0) == .visible }
 
         // Determine the hidden corner
         let corner = optimalHideCorner(for: screen)
 
-        // Get all windows
-        let allWindows = AccessibilityManager.shared.getAllWindows()
-
-        for window in allWindows {
-            // Skip the focused window
-            if window.id == exceptWindowID {
-                continue
-            }
-
-            // Skip minimized windows
-            if window.isMinimized {
-                continue
-            }
-
-            // Skip windows outside the workspace of the monitor that started Zen mode
-            // (don't touch windows on other monitors)
-            if !workspaceIDs.contains(window.id) {
-                continue
-            }
-
-            // Save the original position and WindowInfo (so restoring doesn't depend on getAllWindows)
+        for window in coordinator.windowInfos(workspaceIDs.sorted(), onScreenOnly: true) {
+            // Save the original position and WindowInfo (so restoring doesn't depend on looking them up again)
             hiddenWindowFrames[window.id] = window.frame
             hiddenWindowList.append(window)
 
@@ -199,8 +223,7 @@ class ZenModeManager: ObservableObject {
     }
     
     private func restoreHiddenWindows() {
-        // Restore using the saved WindowInfo directly
-        // (because getAllWindows can fail to pick up off-screen windows like Excel's)
+        // Restore using the saved WindowInfo directly (a window that closed meanwhile just fails the write)
         for window in hiddenWindowList {
             if let originalFrame = hiddenWindowFrames[window.id] {
                 window.setFrame(originalFrame)
