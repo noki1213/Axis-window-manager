@@ -35,7 +35,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private static let maxConsecutiveGhostSkips = 5
     /// The monitor of the window that had focus on the previous timer cycle
     /// Used to determine the monitor when registering a new window (since focus has already moved to the new window by the time it's detected)
-    private var lastFocusedScreen: NSScreen?
     /// Windows last reported as unreadable, so the same situation is logged once instead of every 0.3s
     private var lastUnreadableWindowIDs: Set<CGWindowID> = []
     /// The window ID that had focus on the previous cycle (for detecting focus moving to
@@ -51,7 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var isSpaceSwitching = false
 
     // For detecting monitor changes
-    private var knownScreenIDs: Set<ScreenIdentifier> = []
+    private var knownMonitorKeys: Set<MonitorKey> = []
     private var isHandlingScreenChange = false
     private var pendingScreenChange: DispatchWorkItem?
     private var screenChangeCooldown: DispatchWorkItem?
@@ -149,7 +148,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        TrackingCoordinator.shared.stop()
         workspaceManager.rememberTiledWindowsForRelaunch()
         // Bring every off-screen window back on screen
         restoreAllWindowsBeforeQuit()
@@ -268,8 +266,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             WindowPaletteManager.shared.endPalette()
         }
 
-        // 3. Restore windows hidden by the workspace
-        workspaceManager.restoreAllHiddenWindows()
+        // 3. Restore windows parked in other workspaces (and stop tracking)
+        workspaceManager.prepareForQuit()
 
         // 4. Safety net: move any windows still off-screen back on-screen
         rescueOffScreenWindows()
@@ -332,17 +330,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Return the screen nearest to the given coordinates (NSScreen coordinate system)
-    /// Register a window on the screen holding its center, or on the nearest
-    /// screen when its center is off every screen.
+    /// Register a window found without having been seen opening: it joins the monitor holding its
+    /// center, or the nearest one when its center is off every screen.
     private func registerOnNearestScreen(_ id: CGWindowID, window: WindowInfo) {
         if LaunchAsideManager.shared.claim(window, workspaces: workspaceManager) { return }
-        let center = window.centerInScreenCoordinates
-        if let screen = window.screen ?? closestScreen(to: center) {
-            workspaceManager.registerWindow(id, on: screen)
-        }
+        workspaceManager.register(window, source: .discovered)
     }
 
+    /// Return the screen nearest to the given coordinates (NSScreen coordinate system)
     private func closestScreen(to point: CGPoint) -> NSScreen? {
         return NSScreen.screens.min(by: { screen1, screen2 in
             let center1 = CGPoint(x: screen1.frame.midX, y: screen1.frame.midY)
@@ -403,8 +398,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PerfLog.event("load: \(PerfLog.loadAverage())")
         }
 
-        // Record the current monitor list (for detecting monitor connect/disconnect)
-        knownScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
+        // Start the workspace state with the connected monitors, and record them (for detecting monitor connect/disconnect)
+        workspaceManager.start()
+        knownMonitorKeys = currentMonitorKeys()
 
         // Rescue off-screen windows right after launch (a fallback for when the previous quit couldn't restore them)
         rescueOffScreenWindows()
@@ -412,7 +408,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize workspaces: every window starts on workspace 0 of the monitor it is on
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
-            self.workspaceManager.initializeWithCurrentWindows()
+            self.workspaceManager.registerCurrentWindows()
         }
 
         // Run the initial tiling
@@ -429,9 +425,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Prefer the main screen, otherwise search the other screens
             let screens = [NSScreen.main].compactMap { $0 } + NSScreen.screens.filter { $0 != NSScreen.main }
             for screen in screens {
-                let screenID = ScreenIdentifier(from: screen)
-                if let columns = self.tilingEngine.tiledWindows[screenID],
-                   let firstWindow = columns.compactMap({ $0.first }).first {
+                if let firstWindow = self.tilingEngine.tiledColumns(on: screen).compactMap({ $0.first }).first {
                     firstWindow.focus()
                     break
                 }
@@ -440,7 +434,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Watch for window changes
         setupWindowObservers()
-        TrackingCoordinator.shared.start(mode: .shadow)
     }
     
     private func setupWindowObservers() {
@@ -696,8 +689,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // (this needs to run every cycle, so it's placed before the full-scan skip below)
         let focusedWindow = accessibilityManager.getFocusedWindow()
         if let focused = focusedWindow {
+            workspaceManager.noteFocusedWindow(focused)
             if workspaceManager.isWindowInAnyWorkspace(focused.id) {
-                lastFocusedScreen = workspaceManager.screenForWindow(focused.id)
                 FocusHistoryManager.shared.focusChanged(to: focused.id)
             }
 
@@ -761,42 +754,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let allWindows = accessibilityManager.getAllWindows()
 
-        // Check whether a window hidden with Ctrl+Opt+X was manually restored via the Dock or similar.
-        // Don't add a new poller — piggyback on this existing periodic scan (0.3s interval)
-        HiddenWindowManager.shared.checkForManualRestores(allWindows: allWindows)
+        // Minimized, fullscreen and Dock-restored windows as this reading shows them. A window back from
+        // fullscreen into a workspace that isn't shown is parked again, one restored from the Dock
+        // after Ctrl+Opt+X goes back next to its neighbors
+        workspaceManager.ingestWindowList(allWindows)
 
         let currentWindows = allWindows.filter { onScreenIDs.contains($0.id) && $0.shouldBeManaged() }
         let currentCount = currentWindows.count
 
-        // Watchdog: even though no window is registered to the workspace,
-        // If the window is visibly on screen, the state is broken, so restore it
-        // Note: while moving to an empty Space, the current Space may be empty but other Spaces still have windows, so
-        //       Treat it as fine if there's at least one registration across all Spaces
-        if currentCount > 0 {
-            let hasRegisteredWindows = workspaceManager.hasAnyRegisteredWindows()
-            if !hasRegisteredWindows {
-                PerfLog.event("watchdog: \(currentCount) windows on screen but none registered; restoring")
-                // First try restoring from closedWindowsCache
-                var restoredFromCache = false
-                for window in currentWindows {
-                    if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: window.id) {
-                        restoredFromCache = true
-                        break
-                    }
-                }
-
-                if !restoredFromCache {
-                    // Reinitialize if restoring from the cache fails
-                    workspaceManager.forceReinitialize()
-                }
-
-                lastWindowCount = currentCount
-                lastWindowIDs = Set(currentWindows.map { $0.id })
-                tilingEngine.tileAllScreens()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.borderManager.updateBorder()
-                }
-                return
+        // Watchdog: a window counted on screen since an earlier cycle that is not tracked (it showed up
+        // while its app could not be read, or its registration was missed) is admitted where it is
+        let untracked = currentWindows.filter { lastWindowIDs.contains($0.id) && !workspaceManager.isTracked($0.id) }
+        if !untracked.isEmpty {
+            PerfLog.event("watchdog: \(PerfLog.describe(untracked)) on screen but not tracked; admitting")
+            for window in untracked {
+                registerOnNearestScreen(window.id, window: window)
             }
         }
         let currentWindowIDs = Set(currentWindows.map { $0.id })
@@ -822,9 +794,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         consecutiveGhostSkips = 0
 
-        // Exited fullscreen and returned to the screen, but to a workspace that isn't currently active
-        // If it belongs to one, evacuate it to the hidden corner (do nothing if there's nothing to act on)
-        let strayHiddenIDs = workspaceManager.hideStrayVisibleWindows(currentWindows: currentWindows)
+        // Windows on screen that belong out of sight (back from fullscreen into a workspace that isn't
+        // shown) were parked by the window facts above; focus must not follow them
+        let strayHiddenIDs = Set(currentWindows.filter { workspaceManager.isWindowHidden($0.id) }.map { $0.id })
 
         // Whether a new window appeared this cycle (used by the delayed-retile check later)
         var windowsWereAdded = false
@@ -838,7 +810,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Save the cache and wait, without unregistering the window
                 // (the lock notification can arrive later than checkForWindowChanges)
                 if currentCount == 0 && lastWindowCount > 1 {
-                    workspaceManager.cacheCurrentStateOnWindowClose()
                     lastWindowCount = 0
                     lastWindowIDs = []
                     return
@@ -855,106 +826,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let fullscreenWindowIDs = closedWindowIDs.filter { allWindowsByID[$0]?.isFullscreen == true }
 
-                // A window hidden (minimized) with Ctrl+Opt+X still shows up in the AX list, but
+                // A minimized window (Cmd+M, or Ctrl+Opt+X) still shows up in the AX list, but
                 // it drops out of CGWindowList's onScreen list (minimized windows aren't considered on-screen).
-                // Excluded because misreading this as "closed" would lose the neighbor memory and workspace registration.
+                // Excluded because misreading this as "closed" would lose its slot and workspace; it goes
+                // back next to its neighbors when it comes back.
                 // But if it's also gone from allWindowsByID (the whole app really quit), then
                 // Treat it as closed normally
                 let stillHiddenWindowIDs = closedWindowIDs.filter {
-                    HiddenWindowManager.shared.isHidden($0) && allWindowsByID[$0] != nil
+                    allWindowsByID[$0] != nil
+                        && (HiddenWindowManager.shared.isHidden($0) || allWindowsByID[$0]?.isMinimized == true)
                 }
 
                 // A window that was never registered to a workspace was never tiled, so its disappearance
-                // must not move focus or retile (only the tracked set is updated below)
-                let reallyClosedWindowIDs = closedWindowIDs.subtracting(fullscreenWindowIDs).subtracting(stillHiddenWindowIDs)
-                    .filter { workspaceManager.isWindowInAnyWorkspace($0) }
+                // must not move focus (it only stops being tracked)
+                let closedTrackedIDs = closedWindowIDs.subtracting(fullscreenWindowIDs).subtracting(stillHiddenWindowIDs)
+                    .filter { workspaceManager.isTracked($0) }
+                let reallyClosedWindowIDs = closedTrackedIDs.filter { workspaceManager.isWindowInAnyWorkspace($0) }
                 PerfLog.event("windows: closed \(Self.describeIDs(reallyClosedWindowIDs))"
                     + (fullscreenWindowIDs.isEmpty ? "" : " fullscreen \(Self.describeIDs(fullscreenWindowIDs))")
                     + (stillHiddenWindowIDs.isEmpty ? "" : " hidden \(Self.describeIDs(stillHiddenWindowIDs))")
                     + " (\(lastWindowCount) -> \(currentCount), load=\(PerfLog.loadAverage()))")
 
-                // Only do the cache save, unregister, and focus handling if a window was genuinely closed
+                // Before retiring, record which monitor the closed window was on
+                // (screenForWindow no longer works once the window is retired)
+                let preferredScreen = reallyClosedWindowIDs.compactMap {
+                    workspaceManager.screenForWindow($0)
+                }.first
+                workspaceManager.retire(Array(closedTrackedIDs))
+
+                // Only move focus if a window that was in a workspace was genuinely closed
                 if !reallyClosedWindowIDs.isEmpty {
-                    // Save the cache before unregistering, so we can restore later
-                    workspaceManager.cacheCurrentStateOnWindowClose()
-
-                    // Before unregistering, record which monitor the closed window was on
-                    // (screenForWindow no longer works once the window is unregistered)
-                    let preferredScreen = reallyClosedWindowIDs.compactMap {
-                        workspaceManager.screenForWindow($0)
-                    }.first
-
-                    // Also unregister from the workspace
-                    for closedID in reallyClosedWindowIDs {
-                        workspaceManager.unregisterWindow(closedID)
-                        // If it was actually closed while hidden, drop it from the hidden list too
-                        HiddenWindowManager.shared.forgetIfPresent(closedID)
-                        TrackingCoordinator.shared.reportLegacyWindowClosed(closedID)
-                    }
-
                     focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
                 }
-                // fullscreenWindowIDs (windows that merely entered fullscreen) are
-                // Do nothing, keeping the workspace registration as is.
-                // Once fullscreen is exited, hideStrayVisibleWindows and normal tiling will
-                // It automatically returns to its original workspace/monitor assignment.
+                // Windows that merely entered fullscreen keep their workspace: their neighbors take
+                // the space meanwhile, and on exiting fullscreen they go back to their slot (or are
+                // parked when their workspace isn't shown)
             }
 
             // When a window was added
             if currentCount > lastWindowCount {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
-                newWindowIDs.forEach { TrackingCoordinator.shared.reportLegacyWindowAppeared($0) }
                 PerfLog.event("windows: appeared \(PerfLog.describe(currentWindows.filter { newWindowIDs.contains($0.id) }))"
-                    + " (\(lastWindowCount) -> \(currentCount), focus screen=\(lastFocusedScreen.map { PerfLog.describe($0) } ?? "-"))")
+                    + " (\(lastWindowCount) -> \(currentCount))")
 
-                // Try to restore from the cache
-                // Restore a vanished window if it comes back after unlock or wake from sleep
-                // A window that's still registered in a workspace (one that, on exiting fullscreen,
-                // a window that came back) doesn't need restoring, so skip it.
-                // Without this skip, the stale cache would roll back the current state.
-                var restoredFromCache = false
-                for newID in newWindowIDs {
-                    if workspaceManager.isWindowInAnyWorkspace(newID) {
-                        continue
-                    }
-                    if workspaceManager.restoreFromCacheIfNeeded(detectedWindowID: newID) {
-                        restoredFromCache = true
-                        break
-                    }
-                }
-
-                if restoredFromCache {
-                    // Even after restoring from the cache, anything not in the cache
-                    // Register new windows (Arc, etc.) individually
-                    for newID in newWindowIDs {
-                        if workspaceManager.isWindowInAnyWorkspace(newID) {
-                            continue
-                        }
-
-                        if let window = currentWindows.first(where: { $0.id == newID }) {
-                            guard !window.shouldFloat() else { continue }
-                            registerOnNearestScreen(newID, window: window)
-                        }
-                    }
-
-                    lastWindowCount = currentCount
-                    lastWindowIDs = currentWindowIDs
-                    tilingEngine.tileAllScreens()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                        self?.borderManager.updateBorder()
-                    }
-                    retileAfterNewWindowSettles()
-                    return
-                }
-
-                // The normal new-window registration path
-                // Prefer registering to the focus monitor recorded one cycle ago
-                // (when opening a new window via Cmd+N etc., place it on the monitor that had focus rather than by physical position)
+                // A just-opened window joins the monitor that had focus (or the placement reservation, Ctrl+Opt+N);
+                // dialogs and small windows float on their own
                 var setAsideIDs: Set<CGWindowID> = []
                 for newID in newWindowIDs {
-                    // Skip if it's already registered in some workspace
-                    // (avoids mistakenly registering a window from another workspace right after a workspace switch)
-                    if workspaceManager.isWindowInAnyWorkspace(newID) {
+                    // Skip windows already tracked (one back from fullscreen, or seen right after a workspace switch)
+                    if workspaceManager.isTracked(newID) {
                         continue
                     }
 
@@ -969,27 +889,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         continue
                     }
 
-                    guard !window.shouldFloat() else { continue }
-
-                    // If a placement reservation (Ctrl+Opt+N) is active, prefer that.
-                    // If the reservation was consumed, both workspace registration and placement are already done, so skip the normal path
-                    if PlacementReservationManager.shared.consumeIfApplicable(newWindow: window) {
-                        continue
-                    }
-
-                    // Register to the monitor that had focus one cycle ago, if it is still connected
-                    if let lastScreen = lastFocusedScreen,
-                       let screen = workspaceManager.screen(for: ScreenIdentifier(from: lastScreen)) {
-                        workspaceManager.registerWindow(newID, on: screen)
-                        continue
-                    }
-
-                    // Fall back to physical position when there's no focus information
-                    registerOnNearestScreen(newID, window: window)
+                    workspaceManager.register(window, source: .created)
                 }
 
-                // windows re-hidden by hideStrayVisibleWindows (whose original workspace
-                // don't move focus to a fullscreen-returned window that isn't currently active
+                // Don't move focus to a window that belongs out of sight (back from fullscreen into a
+                // workspace that isn't shown) or one set aside by a launch
                 focusNewWindow(newWindowIDs: newWindowIDs.subtracting(strayHiddenIDs).subtracting(setAsideIDs), allWindows: currentWindows)
                 windowsWereAdded = true
             }
@@ -1009,9 +913,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 retileAfterNewWindowSettles()
             }
 
-            // Keep the app and title of every window current, for matching after sleep
-            workspaceManager.refreshWindowIdentities()
-
         } else if currentWindowIDs != lastWindowIDs {
             // Same window count, but the IDs changed
             // (e.g. when opening a file from the Excel/PowerPoint start screen,
@@ -1020,19 +921,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
             PerfLog.event("windows: swapped \(Self.describeIDs(closedWindowIDs)) -> \(PerfLog.describe(currentWindows.filter { newWindowIDs.contains($0.id) }))")
 
-            // Unregister the closed window from the workspace
-            workspaceManager.cacheCurrentStateOnWindowClose()
-            for closedID in closedWindowIDs {
-                workspaceManager.unregisterWindow(closedID)
-                TrackingCoordinator.shared.reportLegacyWindowClosed(closedID)
-            }
+            // Stop tracking the closed window; a new one with the same app and title takes its place
+            workspaceManager.retire(Array(closedWindowIDs))
 
             // Register the new window to the workspace
             for newID in newWindowIDs {
-                TrackingCoordinator.shared.reportLegacyWindowAppeared(newID)
-                if workspaceManager.isWindowInAnyWorkspace(newID) { continue }
+                if workspaceManager.isTracked(newID) { continue }
                 if let window = currentWindows.first(where: { $0.id == newID }) {
-                    guard !window.shouldFloat() else { continue }
                     registerOnNearestScreen(newID, window: window)
                 }
             }
@@ -1105,9 +1000,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Prefer focusing a window on the same monitor as the one that closed
             // Works around macOS automatically shifting focus to another window of the same app on a different monitor
             if let screen = preferringScreen {
-                let screenID = ScreenIdentifier(from: screen)
-                if let columns = self.tilingEngine.tiledWindows[screenID],
-                   let firstWindow = columns.compactMap({ $0.first }).first {
+                if let firstWindow = self.tilingEngine.tiledColumns(on: screen).compactMap({ $0.first }).first {
                     firstWindow.focus()
                     return
                 }
@@ -1130,9 +1023,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if focused.map({ self.workspaceManager.isWindowHidden($0.id) }) ?? true {
                 // Focus the first of the tiled windows
                 for screen in NSScreen.screens {
-                    if let columns = self.tilingEngine.tiledWindows[ScreenIdentifier(from: screen)],
-                       let firstColumn = columns.first,
-                       let firstWindow = firstColumn.first {
+                    if let firstWindow = self.tilingEngine.tiledColumns(on: screen).first?.first {
                         firstWindow.focus()
                         return
                     }
@@ -1268,8 +1159,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Also skip when the monitor configuration has changed but processScreenChange hasn't run yet
         // (macOS can send the Space-switch notification before the monitor-change one)
-        let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
-        if currentScreenIDs != knownScreenIDs {
+        if currentMonitorKeys() != knownMonitorKeys {
             return
         }
 
@@ -1291,26 +1181,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.lastWindowCount = onScreenWindows.count
             self.lastWindowIDs = Set(onScreenWindows.map { $0.id })
 
-            // Initialize the workspace's window registration
-            // (runs only the first time; the isInitialized guard makes subsequent calls no-ops)
-            self.workspaceManager.initializeWithCurrentWindows()
-
-            // Register on-screen windows that aren't registered to any workspace
+            // Register on-screen windows that aren't tracked yet
             // (when actually switching real macOS Spaces, that Space's windows
             //   to make sure it doesn't get left behind unregistered)
             for window in onScreenWindows {
-                if self.workspaceManager.isWindowInAnyWorkspace(window.id) {
+                if self.workspaceManager.isTracked(window.id) {
                     continue
                 }
-                guard !window.shouldFloat() else { continue }
                 self.registerOnNearestScreen(window.id, window: window)
             }
 
-            // Exited fullscreen and returned, but to a workspace that's not currently active
-            // If it belongs to one, evacuate it to the hidden corner
-            self.workspaceManager.hideStrayVisibleWindows(currentWindows: onScreenWindows)
-
-            // Reapply tiling
+            // Reapply tiling (a window back from fullscreen into a workspace that isn't shown is parked again)
             self.tilingEngine.tileAllScreens()
 
             // Update the border
@@ -1347,8 +1228,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // A window that opened during the switch and is not registered yet is left out, so the
             // next cycle still sees it as new and registers it; absorbing it here would leave it untiled
             let onScreenWindows = allWindows.filter {
-                onScreenIDs.contains($0.id) && $0.shouldBeManaged()
-                    && (self.workspaceManager.isWindowInAnyWorkspace($0.id) || $0.shouldFloat())
+                onScreenIDs.contains($0.id) && $0.shouldBeManaged() && self.workspaceManager.isTracked($0.id)
             }
             // A registered window that closed during the switch stays tracked, so the next cycle
             // still sees it close and unregisters it; absorbing it here would leave its workspace
@@ -1391,8 +1271,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         PerfLog.event("system: will sleep")
         // Set a flag so window checks don't run during sleep
         isWaking = true
-        // Record window identities before sleep, when window IDs may change
-        workspaceManager.refreshWindowIdentities()
     }
 
     @objc private func onSystemWake() {
@@ -1436,9 +1314,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The main body of the recovery logic
     private func executeWakeRecovery() {
-        // The window ID may have changed, so re-match it
-        // (don't call rescueOffScreenWindows here — it would break intentionally hidden windows)
-        workspaceManager.rematchWindowIDsAfterWake()
+        // Window IDs may have changed: windows that are gone are retired and windows back under a
+        // new ID take their places (don't call rescueOffScreenWindows here — it would break intentionally hidden windows)
+        workspaceManager.rematchAfterWake()
 
         // Retile the current workspace after recovery
         tilingEngine.tileAllScreens()
@@ -1472,21 +1350,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    /// Screen IDs plus geometry, to tell whether the configuration kept moving after it was handled
+    /// Display keys plus geometry, to tell whether the configuration kept moving after it was handled
     private func screenLayoutSignature() -> String {
-        NSScreen.screens.map { screen in
-            let id = ScreenIdentifier(from: screen).displayID
-            return "\(id):\(NSStringFromRect(screen.frame)):\(NSStringFromRect(screen.visibleFrame))"
+        DisplayReader.read().map { display in
+            "\(display.key.raw):\(NSStringFromRect(display.frame)):\(NSStringFromRect(display.visibleFrame))"
         }.joined(separator: "|")
+    }
+
+    /// The keys of the connected displays
+    private func currentMonitorKeys() -> Set<MonitorKey> {
+        Set(DisplayReader.read().map(\.key))
     }
 
     /// Screen geometry, workspaces, and tiled columns, written to the log
     private func logScreenLayout() {
         guard PerfLog.enabled else { return }
         for screen in NSScreen.screens {
-            let id = ScreenIdentifier(from: screen)
-            let columns = (tilingEngine.tiledWindows[id] ?? []).map { "[\(PerfLog.describe($0))]" }.joined(separator: " ")
-            PerfLog.log("  screen \(screen.localizedName)#\(id.displayID) frame=\(NSStringFromRect(screen.frame)) visible=\(NSStringFromRect(screen.visibleFrame)) tiled=\(columns)")
+            let columns = tilingEngine.tiledColumns(on: screen).map { "[\(PerfLog.describe($0))]" }.joined(separator: " ")
+            PerfLog.log("  screen \(screen.localizedName) frame=\(NSStringFromRect(screen.frame)) visible=\(NSStringFromRect(screen.visibleFrame)) tiled=\(columns)")
         }
         for line in workspaceManager.layoutSummaryLines() {
             PerfLog.log("  workspaces \(line)")
@@ -1512,83 +1393,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func processScreenChange() {
-        let currentScreenIDs = Set(NSScreen.screens.map { ScreenIdentifier(from: $0) })
-        let previousScreenCount = knownScreenIDs.count
-        let currentScreenCount = currentScreenIDs.count
+        let currentKeys = currentMonitorKeys()
+        let removed = knownMonitorKeys.subtracting(currentKeys)
+        let added = currentKeys.subtracting(knownMonitorKeys)
 
-        let removedScreenIDs = knownScreenIDs.subtracting(currentScreenIDs)
-        let addedScreenIDs = currentScreenIDs.subtracting(knownScreenIDs)
-
-        // If the monitor count hasn't changed, just retile (a resolution or arrangement change only)
-        PerfLog.event("screen change: handling (before) previous=\(previousScreenCount) current=\(currentScreenCount) removed=\(removedScreenIDs.map { $0.displayID }) added=\(addedScreenIDs.map { $0.displayID })")
+        PerfLog.event("screen change: handling (before) previous=\(knownMonitorKeys.count) current=\(currentKeys.count) removed=\(removed.count) added=\(added.count)")
         logScreenLayout()
         defer { logScreenLayout() }
 
         // Between the old display going away and the new one arriving there can be no screen at all.
         // Keep the old list so the next notification sees one screen replacing the other.
-        guard !currentScreenIDs.isEmpty else {
+        guard !currentKeys.isEmpty else {
             PerfLog.event("screen change: no screens, waiting for the next change")
             return
         }
 
-        guard !removedScreenIDs.isEmpty || !addedScreenIDs.isEmpty else {
-            PerfLog.event("screen change: same monitors, retile only")
-            knownScreenIDs = currentScreenIDs
-            tilingEngine.tileAllScreens()
-            return
-        }
-
-        // Approach change:
-        // When a monitor is added, do an internal reset equivalent to a restart.
-        // (doesn't actually restart the app — just resets and rebuilds internal state)
-        // So it doesn't get added by mistake even when a displayID glitch during removal produces a spurious "added" event,
-        // Limited to the case where the monitor count actually increased.
-        if !addedScreenIDs.isEmpty && currentScreenCount > previousScreenCount {
-            PerfLog.event("screen change: monitor added, full reset")
-            workspaceManager.forceReinitialize()
-            knownScreenIDs = currentScreenIDs
-            tilingEngine.cleanupDisconnectedScreens()
-            tilingEngine.tileAllScreens()
-            borderManager.updateBorder()
-
-            refreshWindowTrackingAfterScreenChange()
-
-            // Record window identities after the reset
-            workspaceManager.refreshWindowIdentities()
-            return
-        }
-
-        // One screen took the place of another (closing the lid as an external monitor takes over,
-        // or the reverse): its workspaces move to the new screen as they are
-        if removedScreenIDs.count == 1, addedScreenIDs.count == 1,
-           let oldID = removedScreenIDs.first, let newID = addedScreenIDs.first {
-            PerfLog.event("screen change: screen replaced, moving workspaces \(oldID.displayID) -> \(newID.displayID)")
-            workspaceManager.handleScreenReplaced(oldScreenID: oldID, newScreenID: newID)
-            knownScreenIDs = currentScreenIDs
-            tilingEngine.cleanupDisconnectedScreens()
-            tilingEngine.tileAllScreens()
-            borderManager.updateBorder()
-            refreshWindowTrackingAfterScreenChange()
-            return
-        }
-
-        PerfLog.event("screen change: restoring per monitor")
-        // Handling for a disconnected monitor
-        for removedID in removedScreenIDs {
-            workspaceManager.handleScreenDisconnected(removedScreenID: removedID)
-        }
-
-        // Handling for a reconnected monitor
-        for addedID in addedScreenIDs {
-            workspaceManager.handleScreenReconnected(reconnectedScreenID: addedID)
-        }
-
-        // Refresh the monitor list
-        knownScreenIDs = currentScreenIDs
-
-        // Remove data keyed by the old NSScreen and retile across all screens
-        // (macOS rebuilds NSScreen objects when the monitor configuration changes)
-        tilingEngine.cleanupDisconnectedScreens()
+        // Displays that stay take their new geometry; the workspaces of one that went away move to
+        // another display (and go back when it returns); a new display starts with an empty workspace.
+        // Nothing is reset, and windows of workspaces not shown are parked at their display's corner
+        workspaceManager.reconcileDisplays()
+        knownMonitorKeys = currentKeys
         tilingEngine.tileAllScreens()
         borderManager.updateBorder()
 

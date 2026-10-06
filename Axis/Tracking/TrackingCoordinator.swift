@@ -587,11 +587,11 @@ final class TrackingCoordinator {
 			schedulePassTimer()
 			return
 		}
-		PerfLog.measure("tracking.pass", threshold: CoordinatorTiming.slowPass) {
-			let snapshot = ingest(pass, gather: gather, now: now)
-			if mode == .stateOnly {
-				planAndExecute(snapshot, isCommand: false, includeHidePhase: true, now: now)
-			}
+		let snapshot = PerfLog.measure("tracking.pass", threshold: CoordinatorTiming.slowPass) {
+			ingest(pass, gather: gather, now: now)
+		}
+		if mode == .stateOnly {
+			planAndExecute(snapshot, isCommand: false, includeHidePhase: true, now: now)
 		}
 		finishStep(now: now)
 	}
@@ -945,6 +945,11 @@ final class TrackingCoordinator {
 			let now = Self.uptime()
 			let snapshot = ServerProbe.onScreen(now: now)
 			mutate(&state)
+			if mode == .stateOnly {
+				// Each command is an ingest of its own: a window it admitted pairs only with a
+				// window retired shortly before, not with one a later command retires.
+				state.pairReplacements(now: now)
+			}
 			state.ingestServer(snapshot)
 			state.normalize(now: now)
 			if mode == .stateOnly {
@@ -1022,6 +1027,9 @@ final class TrackingCoordinator {
 		guard !plan.isEmpty else { return }
 		let results = WindowActuator.execute(plan)
 		state.recordWrites(results, now: Self.uptime())
+		// The window list read through Accessibility is cached briefly; frames just written make
+		// it stale.
+		AccessibilityManager.shared.invalidateWindowCache()
 	}
 
 	private static func withoutUnseenFrames(_ plan: Plan, snapshot: ServerSnapshot) -> Plan {

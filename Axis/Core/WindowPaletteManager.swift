@@ -55,6 +55,11 @@ class WindowPaletteManager {
 		return hiddenWindowFrames[windowID] != nil
 	}
 
+	/// The windows the palette moved out of sight while it is open
+	var hiddenWindowIDs: Set<CGWindowID> {
+		Set(hiddenWindowFrames.keys)
+	}
+
 	// MARK: - Public Methods
 
 	/// Start palette mode
@@ -392,19 +397,18 @@ class WindowPaletteManager {
 			windowInfoMap[window.id] = window
 		}
 
-		// Lookup table from ScreenIdentifier to monitor number (1-based)
-		var displayNumberMap: [ScreenIdentifier: Int] = [:]
-		for (index, screen) in NSScreen.screens.enumerated() {
-			let sid = ScreenIdentifier(from: screen)
-			displayNumberMap[sid] = index + 1
+		// Lookup table from monitor to monitor number (1-based)
+		var displayNumberMap: [MonitorKey: Int] = [:]
+		for (index, key) in workspaceManager.monitorKeys.enumerated() {
+			displayNumberMap[key] = index + 1
 		}
 
 		// Build the data per Display
-		var displayMap: [ScreenIdentifier: WindowPaletteDisplay] = [:]
+		var displayMap: [MonitorKey: WindowPaletteDisplay] = [:]
 
 		// Windows the user deliberately floated with Ctrl+Option+F (per Display)
 		// It normally appears in its own workspace's section, but pull it out here and group it into a separate section
-		var userFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		var userFloatItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
 
 		for (screenID, workspaces) in allWorkspaces {
 			let displayNumber = displayNumberMap[screenID] ?? 1
@@ -413,7 +417,7 @@ class WindowPaletteManager {
 			if displayMap[screenID] == nil {
 				displayMap[screenID] = WindowPaletteDisplay(
 					displayNumber: displayNumber,
-					screenID: screenID,
+					monitor: screenID,
 					spaces: []
 				)
 			}
@@ -437,7 +441,7 @@ class WindowPaletteManager {
 						windowTitle: windowInfo.title,
 						appIcon: windowInfo.app.icon,
 						workspace: workspace,
-						screenID: screenID
+						monitor: screenID
 					)
 
 					// Windows the user has floated are excluded from the normal Space section, and
@@ -464,7 +468,7 @@ class WindowPaletteManager {
 		// --- Add the Float section (windows the user deliberately floated) to each Display ---
 		// The real workspace number is kept on each item
 		for i in result.indices {
-			if let floatItems = userFloatItemsByScreen[result[i].screenID], !floatItems.isEmpty {
+			if let floatItems = userFloatItemsByScreen[result[i].monitor], !floatItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .float, items: floatItems))
 			}
 		}
@@ -474,7 +478,7 @@ class WindowPaletteManager {
 		// It doesn't show up in the normal collection. Pick it up here and add it as the "System" section.
 		let onScreenIDs = accessibilityManager.getOnScreenWindowIDs()
 		let myPID = ProcessInfo.processInfo.processIdentifier
-		var systemFloatItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
+		var systemFloatItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
 
 		for window in allWindows {
 			// Excludes Axis's own windows (palette, border, etc.)
@@ -493,8 +497,7 @@ class WindowPaletteManager {
 
 			// Identify the screen the window is on (falls back to the main screen if it can't be determined)
 			let screen = screenForWindow(window) ?? NSScreen.screens.first
-			guard let targetScreen = screen else { continue }
-			let screenID = ScreenIdentifier(from: targetScreen)
+			guard let targetScreen = screen, let screenID = workspaceManager.monitorKey(for: targetScreen) else { continue }
 
 			let item = WindowPaletteItem(
 				windowID: window.id,
@@ -502,34 +505,35 @@ class WindowPaletteManager {
 				windowTitle: window.title,
 				appIcon: window.app.icon,
 				workspace: nil,
-				screenID: screenID
+				monitor: screenID
 			)
 			systemFloatItemsByScreen[screenID, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let systemFloatItems = systemFloatItemsByScreen[result[i].screenID], !systemFloatItems.isEmpty {
+			if let systemFloatItems = systemFloatItemsByScreen[result[i].monitor], !systemFloatItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .system, items: systemFloatItems))
 			}
 		}
 
 		// --- Add the Hidden section (windows hidden with Ctrl+Opt+X) to the end of each Display ---
-		var hiddenItemsByScreen: [ScreenIdentifier: [WindowPaletteItem]] = [:]
-		for record in HiddenWindowManager.shared.hiddenStack {
-			guard let windowInfo = windowInfoMap[record.windowID] else { continue }
+		var hiddenItemsByScreen: [MonitorKey: [WindowPaletteItem]] = [:]
+		for windowID in HiddenWindowManager.shared.hiddenWindowIDs {
+			guard let windowInfo = windowInfoMap[windowID],
+				  let location = TrackingCoordinator.shared.state.location(windowID) else { continue }
 			let item = WindowPaletteItem(
-				windowID: record.windowID,
+				windowID: windowID,
 				appName: windowInfo.app.localizedName ?? "Unknown App",
 				windowTitle: windowInfo.title,
 				appIcon: windowInfo.app.icon,
-				workspace: record.workspace,
-				screenID: record.screenID
+				workspace: location.number,
+				monitor: location.monitor
 			)
-			hiddenItemsByScreen[record.screenID, default: []].append(item)
+			hiddenItemsByScreen[location.monitor, default: []].append(item)
 		}
 
 		for i in result.indices {
-			if let hiddenItems = hiddenItemsByScreen[result[i].screenID], !hiddenItems.isEmpty {
+			if let hiddenItems = hiddenItemsByScreen[result[i].monitor], !hiddenItems.isEmpty {
 				result[i].spaces.append(WindowPaletteSection(kind: .hidden, items: hiddenItems))
 			}
 		}
@@ -539,7 +543,7 @@ class WindowPaletteManager {
 
 	/// Switch to the selected window's workspace and focus it
 	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
-		guard let screen = workspaceManager.screen(for: item.screenID) else {
+		guard let screen = workspaceManager.screen(for: item.monitor) else {
 			return
 		}
 

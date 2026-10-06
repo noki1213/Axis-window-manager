@@ -149,7 +149,7 @@ class GapSelectManager: ObservableObject {
 		guard var focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return nil }
 		focusedWindow.refreshFrame()
 
-		let columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
+		let columns = tilingEngine.tiledColumns(on: screen)
 		guard columns.count > 0 else { return nil }
 
 		return tilingEngine.findWindowPosition(window: focusedWindow, in: columns)
@@ -200,7 +200,7 @@ class GapSelectManager: ObservableObject {
 	private func calculateGaps(for screen: NSScreen) {
 		var gaps: [GapInfo] = []
 
-		var columns = tilingEngine.tiledWindows[ScreenIdentifier(from: screen)] ?? []
+		var columns = tilingEngine.tiledColumns(on: screen)
 		guard columns.count > 0 else {
 			availableGaps = []
 			return
