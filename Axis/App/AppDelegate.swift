@@ -149,6 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        TrackingCoordinator.shared.stop()
         workspaceManager.rememberTiledWindowsForRelaunch()
         // Bring every off-screen window back on screen
         restoreAllWindowsBeforeQuit()
@@ -439,6 +440,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Watch for window changes
         setupWindowObservers()
+        TrackingCoordinator.shared.start(mode: .shadow)
     }
     
     private func setupWindowObservers() {
@@ -887,6 +889,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         workspaceManager.unregisterWindow(closedID)
                         // If it was actually closed while hidden, drop it from the hidden list too
                         HiddenWindowManager.shared.forgetIfPresent(closedID)
+                        TrackingCoordinator.shared.reportLegacyWindowClosed(closedID)
                     }
 
                     focusAdjacentWindowAfterClose(preferringScreen: preferredScreen)
@@ -900,6 +903,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // When a window was added
             if currentCount > lastWindowCount {
                 let newWindowIDs = currentWindowIDs.subtracting(lastWindowIDs)
+                newWindowIDs.forEach { TrackingCoordinator.shared.reportLegacyWindowAppeared($0) }
                 PerfLog.event("windows: appeared \(PerfLog.describe(currentWindows.filter { newWindowIDs.contains($0.id) }))"
                     + " (\(lastWindowCount) -> \(currentCount), focus screen=\(lastFocusedScreen.map { PerfLog.describe($0) } ?? "-"))")
 
@@ -1020,10 +1024,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             workspaceManager.cacheCurrentStateOnWindowClose()
             for closedID in closedWindowIDs {
                 workspaceManager.unregisterWindow(closedID)
+                TrackingCoordinator.shared.reportLegacyWindowClosed(closedID)
             }
 
             // Register the new window to the workspace
             for newID in newWindowIDs {
+                TrackingCoordinator.shared.reportLegacyWindowAppeared(newID)
                 if workspaceManager.isWindowInAnyWorkspace(newID) { continue }
                 if let window = currentWindows.first(where: { $0.id == newID }) {
                     guard !window.shouldFloat() else { continue }
