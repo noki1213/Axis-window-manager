@@ -330,7 +330,6 @@ nonisolated extension TrackingState {
 			livenessRetire(id, reason: .destroyed, deferCompaction: deferCompaction, now: now)
 			return
 		}
-		let wasListed = record.observed.listedInLastCompleteScan
 		record.observed.listedInLastCompleteScan = false
 		if serverHas {
 			// On another Space, or an app that stopped listing a window it still has: alive.
@@ -339,7 +338,7 @@ nonisolated extension TrackingState {
 			record.liveness.misses = 0
 			record.liveness.lastMissAt = nil
 			records[id] = record
-			if wasListed || hadMisses {
+			if hadMisses {
 				log("track: keep \(describe(record)) (missing from complete scan, window server has it)")
 			}
 			return

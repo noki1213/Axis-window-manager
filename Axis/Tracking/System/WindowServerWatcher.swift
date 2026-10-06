@@ -152,6 +152,8 @@ final class WindowServerWatcher {
 
 	/// Called for every signal, on the main thread.
 	var sink: (@MainActor (TrackingSignal) -> Void)?
+	/// Called for event logging, on the main thread.
+	var onLog: (@MainActor (String) -> Void)?
 	/// Called once per tick (20 times a second), so it should hand back a context that is cached
 	/// between state changes. Without a provider only the Mission Control check can fire.
 	var contextProvider: (@MainActor () -> Context)?
@@ -189,6 +191,7 @@ final class WindowServerWatcher {
 	private var lastSweep: Time = 0
 
 	func start() {
+		isMissionControlActive = false
 		guard timer == nil else { return }
 		let timer = DispatchSource.makeTimerSource(queue: .main)
 		timer.schedule(deadline: .now() + Self.tickInterval, repeating: Self.tickInterval, leeway: .milliseconds(10))
@@ -202,6 +205,7 @@ final class WindowServerWatcher {
 	func stop() {
 		timer?.cancel()
 		timer = nil
+		isMissionControlActive = false
 	}
 
 	// MARK: - Tick
@@ -275,7 +279,12 @@ final class WindowServerWatcher {
 					untrackedSignals[id] = nil
 					if announcedSetAside.insert(id).inserted {
 						let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
-						PerfLog.event("track: ignore #\(id) of \(name) (on screen at layer 0, not tracked after \(Self.maxUntrackedSignals) scans)")
+						let message = "track: ignore #\(id) of \(name) (on screen at layer 0, not tracked after \(Self.maxUntrackedSignals) scans)"
+						if let onLog {
+							onLog(message)
+						} else {
+							PerfLog.event(message)
+						}
 					}
 				} else {
 					untrackedSignals[id] = signals + 1
