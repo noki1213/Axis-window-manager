@@ -322,20 +322,22 @@ struct WindowInfo: Identifiable, Equatable {
     private static func getPosition(from element: AXUIElement) -> CGPoint? {
         var positionRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef)
-        guard result == .success, let positionValue = positionRef else { return nil }
+        guard result == .success, let positionValue = positionRef,
+              CFGetTypeID(positionValue) == AXValueGetTypeID() else { return nil }
         
         var position = CGPoint.zero
-        AXValueGetValue(positionValue as! AXValue, .cgPoint, &position)
+        AXValueGetValue(unsafeDowncast(positionValue, to: AXValue.self), .cgPoint, &position)
         return position
     }
     
     private static func getSize(from element: AXUIElement) -> CGSize? {
         var sizeRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef)
-        guard result == .success, let sizeValue = sizeRef else { return nil }
+        guard result == .success, let sizeValue = sizeRef,
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
         
         var size = CGSize.zero
-        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        AXValueGetValue(unsafeDowncast(sizeValue, to: AXValue.self), .cgSize, &size)
         return size
     }
 

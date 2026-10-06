@@ -139,8 +139,14 @@ class AccessibilityManager: ObservableObject {
             return nil
         }
 
-        // Treat it as an AXUIElement
-        let windowElement = axWindow as! AXUIElement
+        // Only an AXUIElement can be a window; a value of any other type from a misbehaving app
+        // counts as no focused window
+        guard CFGetTypeID(axWindow) == AXUIElementGetTypeID() else {
+            lastFocusedWindowError = nil
+            PerfLog.reportFocusLost(reason: "focused window is not an element", app: appName)
+            return nil
+        }
+        let windowElement = unsafeDowncast(axWindow, to: AXUIElement.self)
         guard let window = WindowInfo(axElement: windowElement, app: frontApp) else {
             lastFocusedWindowError = nil
             // When AX returned a window but its window ID couldn't be obtained
@@ -193,7 +199,8 @@ class AccessibilityManager: ObservableObject {
             return ranIntoTimeout ? .timedOut : .noWindow
         }
 
-        let element = axWindow as! AXUIElement
+        guard CFGetTypeID(axWindow) == AXUIElementGetTypeID() else { return .noWindow }
+        let element = unsafeDowncast(axWindow, to: AXUIElement.self)
         AXUIElementSetMessagingTimeout(element, Float(timeout))
 
         var windowID: CGWindowID = 0
