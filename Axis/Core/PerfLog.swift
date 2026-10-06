@@ -30,8 +30,9 @@ enum PerfLog {
 	/// Where the logs are kept (since NSLog doesn't always flow into the log stream depending on the environment,
 	/// Also write the same content to a file that's guaranteed to be readable)
 	private static let logDirectory: URL = {
-		let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-			.appendingPathComponent("Logs", isDirectory: true)
+		let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+			?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).appendingPathComponent("Library", isDirectory: true)
+		let dir = library.appendingPathComponent("Logs", isDirectory: true)
 		try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 		return dir
 	}()

@@ -144,6 +144,29 @@ nonisolated final class ElementCache: @unchecked Sendable {
 			}
 			apps[pid] = nil
 			storedScan[pid] = scanCounter
+			pruneStoredScans()
+		}
+	}
+
+	/// Drops stored scan tokens for processes that have quit once enough scans have passed.
+	private func pruneStoredScans() {
+		guard storedScan.count > 64 else { return }
+		let activePIDs = Set(windowIDsByPID.keys).union(apps.keys)
+		for (pid, token) in storedScan {
+			if !activePIDs.contains(pid) && (scanCounter >= token + 32 || scanCounter < token) {
+				storedScan.removeValue(forKey: pid)
+			}
+		}
+	}
+
+	/// Clears all cached elements and tokens when tracking stops.
+	func clear() {
+		lock.withLock {
+			windows.removeAll()
+			windowIDsByPID.removeAll()
+			apps.removeAll()
+			storedScan.removeAll()
+			scanCounter = 0
 		}
 	}
 }
