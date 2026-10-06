@@ -6,8 +6,6 @@
 //  the focused window closes. Pure: the caller passes what the state does not hold (the window
 //  under the mouse, when the change was seen).
 //
-//  Placeholder body: the rules are not implemented yet.
-//
 
 import Foundation
 import CoreGraphics
@@ -35,12 +33,25 @@ nonisolated struct FollowContext: Equatable, Sendable {
 	var changedAt: Time
 	/// The tracked window under the mouse pointer, if any.
 	var windowUnderMouse: WindowID?
+	/// The monitor the previous window was on.
+	var previousMonitor: MonitorKey?
+	/// Whether Zen mode ended because its focused window closed.
+	var zenClosed: Bool
 
-	init(focused: WindowID?, previous: WindowID?, changedAt: Time, windowUnderMouse: WindowID? = nil) {
+	init(
+		focused: WindowID?,
+		previous: WindowID?,
+		changedAt: Time,
+		windowUnderMouse: WindowID? = nil,
+		previousMonitor: MonitorKey? = nil,
+		zenClosed: Bool = false
+	) {
 		self.focused = focused
 		self.previous = previous
 		self.changedAt = changedAt
 		self.windowUnderMouse = windowUnderMouse
+		self.previousMonitor = previousMonitor
+		self.zenClosed = zenClosed
 	}
 }
 
@@ -49,6 +60,97 @@ nonisolated enum FocusRules {
 	static let settleDelay: TimeInterval = 0.3
 
 	static func followDecision(_ context: FollowContext, in state: TrackingState, now: Time) -> FollowDecision {
-		.stay
+		let previousRetired: Bool = {
+			guard let previous = context.previous else { return false }
+			return state.tombstones.contains(previous) || state.records[previous] == nil
+		}()
+
+		if previousRetired {
+			let settleTime = context.changedAt + settleDelay
+			if now < settleTime {
+				return .wait(until: settleTime)
+			}
+			if context.zenClosed || state.events.contains(where: {
+				if case .zenEnded(.focusClosed) = $0 { return true }
+				return false
+			}) {
+				return .stay
+			}
+			if let target = adjacentTarget(in: state, context: context) {
+				if context.focused == target {
+					return .stay
+				}
+				return .focus(target)
+			}
+			return .stay
+		}
+
+		guard let focused = context.focused else {
+			return .stay
+		}
+
+		guard let record = state.records[focused],
+			let targetWorkspace = record.workspace,
+			state.workspaces[targetWorkspace] != nil else {
+			return .stay
+		}
+
+		if state.isActive(targetWorkspace) {
+			return .stay
+		}
+
+		// When switching to an empty workspace, the previous window stays system-focused
+		// while parked; ignore the focus handoff so it does not switch back.
+		if let host = state.workspaces[targetWorkspace]?.host,
+			let active = state.activeWorkspace(host),
+			!state.hasMembers(active) {
+			return .stay
+		}
+
+		if context.zenClosed || state.events.contains(where: {
+			if case .zenEnded(.focusClosed) = $0 { return true }
+			return false
+		}) {
+			return .stay
+		}
+
+		if let bundleID = record.bundleID,
+			let entry = state.launchAside[bundleID],
+			let hold = entry.holdFocusUntil,
+			hold > now {
+			return .stay
+		}
+
+		let settleTime = context.changedAt + settleDelay
+		if now < settleTime {
+			return .wait(until: settleTime)
+		}
+
+		return .follow(window: focused, workspace: targetWorkspace)
+	}
+
+	private static func adjacentTarget(in state: TrackingState, context: FollowContext) -> WindowID? {
+		let preferredMonitor = context.previousMonitor ?? state.focus.lastTrackedMonitor ?? state.primaryMonitor
+		if let monitor = preferredMonitor, let active = state.activeWorkspace(monitor) {
+			if let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+				return firstTile
+			}
+		}
+
+		if let mouseID = context.windowUnderMouse,
+			let record = state.records[mouseID],
+			record.workspace != nil,
+			record.visibility == .visible {
+			return mouseID
+		}
+
+		for monitorKey in state.monitorOrder {
+			if let active = state.activeWorkspace(monitorKey),
+				let firstTile = state.layoutColumns(active).first?.first ?? state.workspaces[active]?.columns.first?.first {
+				return firstTile
+			}
+		}
+
+		return nil
 	}
 }
