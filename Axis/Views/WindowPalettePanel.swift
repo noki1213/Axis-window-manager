@@ -15,7 +15,7 @@ struct WindowPaletteItem {
 	let appIcon: NSImage?
 	/// nil for windows that don't belong to any workspace (the System section)
 	let workspace: Int?
-	let screenID: ScreenIdentifier
+	let monitor: MonitorKey
 }
 
 /// A section of the palette: one workspace (Space), or one of the special groups
@@ -38,7 +38,7 @@ struct WindowPaletteSection {
 /// Data for a single monitor (Display)
 struct WindowPaletteDisplay {
 	let displayNumber: Int
-	let screenID: ScreenIdentifier
+	let monitor: MonitorKey
 	var spaces: [WindowPaletteSection]
 }
 

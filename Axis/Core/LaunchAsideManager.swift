@@ -21,10 +21,10 @@ final class LaunchAsideManager {
 	private static let focusHoldInterval: TimeInterval = 3
 
 	private struct Pending {
-		let screen: NSScreen
+		let monitor: MonitorKey
 		var deadline: Date
 		/// Chosen when the first window arrives, so later windows join it.
-		var workspace: Int?
+		var workspace: WorkspaceID?
 		var holdFocusUntil: Date?
 	}
 
@@ -36,7 +36,8 @@ final class LaunchAsideManager {
 	/// Launch the app at `url`, its windows bound for an empty workspace on `screen`.
 	func launch(appAt url: URL, on screen: NSScreen?) {
 		guard let bundleID = Bundle(url: url)?.bundleIdentifier,
-		      let screen = screen ?? NSScreen.main
+		      let screen = screen ?? NSScreen.main,
+		      let monitor = WorkspaceManager.shared.monitorKey(for: screen)
 		else {
 			NSWorkspace.shared.open(url)
 			return
@@ -46,7 +47,7 @@ final class LaunchAsideManager {
 		   front.bundleIdentifier != Bundle.main.bundleIdentifier {
 			previousApp = front
 		}
-		pending[bundleID] = Pending(screen: screen, deadline: Date().addingTimeInterval(Self.firstWindowWait))
+		pending[bundleID] = Pending(monitor: monitor, deadline: Date().addingTimeInterval(Self.firstWindowWait))
 		PerfLog.event("launch-aside: \(bundleID) -> \(PerfLog.describe(screen))")
 
 		let configuration = NSWorkspace.OpenConfiguration()
@@ -62,18 +63,15 @@ final class LaunchAsideManager {
 			pending[bundleID] = nil
 			return false
 		}
-		let workspace = entry.workspace ?? workspaces.firstUnusedWorkspace(on: entry.screen)
+		guard let workspace = workspaces.registerOutOfSight(window, on: entry.monitor, workspace: entry.workspace) else {
+			return false
+		}
 		if entry.workspace == nil {
 			entry.deadline = Date().addingTimeInterval(Self.followingWindowWait)
 		}
 		entry.workspace = workspace
 		entry.holdFocusUntil = Date().addingTimeInterval(Self.focusHoldInterval)
 		pending[bundleID] = entry
-
-		// Read before registering: a registered window no longer counts as floating
-		let floating = window.shouldFloat()
-		PerfLog.event("launch-aside: \(PerfLog.describe(window)) -> ws\(workspace + 1)" + (floating ? " (floating)" : ""))
-		workspaces.registerWindowOutOfSight(window.id, on: entry.screen, workspace: workspace, floating: floating)
 		returnFocus(ifTakenBy: bundleID)
 		return true
 	}

@@ -379,17 +379,9 @@ class HotkeyManager: ObservableObject {
 		case .floatToggle:
 			DispatchQueue.main.async { [weak self] in
 				guard let focusedWindow = AccessibilityManager.shared.getFocusedWindow() else { return }
-				let wasFloating = WorkspaceManager.shared.isFloating(focusedWindow.id)
+				// Turning Float on centers the window on its monitor; turning it off tiles it
+				// where it is
 				WorkspaceManager.shared.toggleFloat(windowID: focusedWindow.id)
-
-				// When turning Float on, move the window to the center of the monitor
-				if !wasFloating, let screen = WorkspaceManager.shared.focusedScreen() {
-					let visibleFrame = screen.visibleFrame
-					let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-					let centerX = visibleFrame.midX - focusedWindow.frame.width / 2
-					let centerY = mainScreenHeight - visibleFrame.midY - focusedWindow.frame.height / 2
-					focusedWindow.setPosition(CGPoint(x: centerX, y: centerY))
-				}
 
 				self?.tilingEngine.tileAllScreens()
 				DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
