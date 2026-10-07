@@ -83,7 +83,8 @@ class TilingEngine: ObservableObject {
     /// - Parameter allowActivation: also bring buried windows forward by activating their app. kAXRaiseAction
     ///   only reorders a window within its own app, so a floating window of an inactive app stays behind the
     ///   active app's tiles even when the action reports success. That moves focus to the floating window,
-    ///   so it's reserved for the explicit hotkey; the automatic passes stay silent
+    ///   so it's reserved for the explicit hotkey; the automatic passes stay silent.
+    ///   Axis's own windows (Settings and the like) are never tracked, so this also raises those
     func raiseFloatingWindows(on screen: NSScreen, allowActivation: Bool = false) {
         let state = coordinator.state
 
@@ -121,6 +122,12 @@ class TilingEngine: ObservableObject {
         var needsActivation: [WindowInfo] = []
         // Windows that accepted kAXRaiseAction but whose app still has to come forward
         var needsFocus: [WindowInfo] = []
+        // Axis's own titled windows on screen, by window number (the border overlays are borderless)
+        let ownWindows: [CGWindowID: NSWindow] = allowActivation
+            ? Dictionary(NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) }
+                .map { (CGWindowID($0.windowNumber), $0) }, uniquingKeysWith: { first, _ in first })
+            : [:]
+        var buriedOwnWindows: [NSWindow] = []
 
         /// Log why a window was passed over, only for the explicit hotkey (automatic passes run constantly)
         func skip(_ window: WindowInfo, _ reason: String) {
@@ -130,6 +137,10 @@ class TilingEngine: ObservableObject {
         // Back to front, so the floating windows keep their order among themselves
         for index in stackingOrder.indices.reversed() {
             let entry = stackingOrder[index]
+            if let window = ownWindows[entry.id] {
+                if isBuriedUnderTile(index) { buriedOwnWindows.append(window) }
+                continue
+            }
             // Floating windows only: marked Float, or floating on their own (dialogs, small windows,
             // windows that belong to no workspace)
             guard let record = state.record(entry.id), record.placement != .tiled,
@@ -168,6 +179,17 @@ class TilingEngine: ObservableObject {
         for window in needsFocus {
             PerfLog.event("raiseFloating: focusing \(PerfLog.describe(window))")
             window.focus()
+        }
+        // orderFrontRegardless puts them above other apps' tiles without activating Axis
+        for window in buriedOwnWindows {
+            PerfLog.event("raiseFloating: raising own window \"\(window.title)\"")
+            window.orderFrontRegardless()
+        }
+        // Axis takes focus only when no other window was raised: focusing another app's window
+        // retries until it holds, and would fight Axis's activation
+        if needsActivation.isEmpty, needsFocus.isEmpty, let window = buriedOwnWindows.last {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKey()
         }
     }
 
