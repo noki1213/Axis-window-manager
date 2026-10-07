@@ -4,7 +4,8 @@
 //
 //	What happens when focus changes on its own: a window focused in another workspace brings that
 //	workspace on screen, the focused window closing hands focus to a window next to it, and a
-//	window that just opened takes focus. Focus changes come from the tracking coordinator;
+//	window that just opened takes focus. Closing Axis's own last window hands focus back to the
+//	windows it manages. Focus changes come from the tracking coordinator;
 //	`FocusRules` decides whether to follow, wait or move focus, and this class carries it out.
 //
 
@@ -18,6 +19,8 @@ final class FocusFollower {
 	/// none), and the monitor of the last tracked window that had it.
 	private var focused: WindowID?
 	private var focusedMonitor: MonitorKey?
+	/// The last tracked window that had focus, kept while focus is elsewhere.
+	private var lastFocused: WindowID?
 	/// The focus change waiting to settle before it is acted on.
 	private var pending: FollowContext?
 	/// The pending change was seen while a workspace switch settled: it belongs to the switch, so
@@ -28,6 +31,7 @@ final class FocusFollower {
 	/// a closed one.
 	private var openedWindows: Set<WindowID> = []
 	private var activationObserver: (any NSObjectProtocol)?
+	private var ownWindowCloseObserver: (any NSObjectProtocol)?
 
 	/// Right after an app comes to the front its focused window can be undetermined.
 	private static let activationDelay: TimeInterval = 0.05
@@ -49,6 +53,15 @@ final class FocusFollower {
 			let name = app.localizedName ?? app.bundleIdentifier ?? "?"
 			MainActor.assumeIsolated {
 				self?.appActivated(pid: pid, name: name)
+			}
+		}
+		ownWindowCloseObserver = NotificationCenter.default.addObserver(
+			forName: NSWindow.willCloseNotification, object: nil, queue: .main
+		) { [weak self] notification in
+			guard let window = notification.object as? NSWindow, window.styleMask.contains(.titled) else { return }
+			// The window is still on screen while it closes
+			DispatchQueue.main.async {
+				self?.ownWindowClosed()
 			}
 		}
 	}
@@ -76,6 +89,9 @@ final class FocusFollower {
 			if focused == old {
 				focused = new
 			}
+			if lastFocused == old {
+				lastFocused = new
+			}
 			if pending?.previous == old {
 				cancelPending()
 			}
@@ -94,6 +110,7 @@ final class FocusFollower {
 		let previousMonitor = focusedMonitor
 		focused = to
 		if let to, let record = state.record(to) {
+			lastFocused = to
 			focusedMonitor = state.location(to)?.monitor ?? record.observed.frame.flatMap { state.monitorKey(for: $0) }
 			if record.workspace != nil {
 				FocusHistoryManager.shared.focusChanged(to: to)
@@ -193,6 +210,29 @@ final class FocusFollower {
 			}
 		}
 		return nil
+	}
+
+	// MARK: - Axis's own windows
+
+	/// Axis's last window (Settings and the like) closed while Axis had focus. Axis stays the active
+	/// app with no window, so keystrokes would go nowhere: focus goes back to the window that had it
+	/// before, or else to a tile as when a tracked window closes.
+	private func ownWindowClosed() {
+		guard NSApp.isActive,
+		      !NSApp.windows.contains(where: { $0.isVisible && $0.styleMask.contains(.titled) })
+		else { return }
+		let state = coordinator.state
+		var target: WindowID?
+		if let lastFocused, state.visibility(lastFocused) == .visible, state.isFocusable(lastFocused) {
+			target = lastFocused
+		} else {
+			target = FocusRules.handoffTarget(in: state, context: FollowContext(
+				focused: nil, previous: nil, changedAt: Self.uptime(),
+				windowUnderMouse: windowUnderMouse(), previousMonitor: focusedMonitor))
+		}
+		guard let target, let window = coordinator.windowInfo(target) else { return }
+		PerfLog.event("own window closed: focus back to \(PerfLog.describe(window))")
+		window.focus()
 	}
 
 	// MARK: - Windows that just opened

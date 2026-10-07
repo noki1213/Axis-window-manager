@@ -76,7 +76,7 @@ nonisolated enum FocusRules {
 			}) {
 				return .stay
 			}
-			if let target = adjacentTarget(in: state, context: context) {
+			if let target = handoffTarget(in: state, context: context) {
 				if context.focused == target {
 					return .stay
 				}
@@ -130,7 +130,9 @@ nonisolated enum FocusRules {
 		return .follow(window: focused, workspace: targetWorkspace)
 	}
 
-	private static func adjacentTarget(in state: TrackingState, context: FollowContext) -> WindowID? {
+	/// Where focus goes when the window that had it is gone: the first tile on the monitor it was
+	/// on, the tile under the mouse, or the first tile on another monitor.
+	static func handoffTarget(in state: TrackingState, context: FollowContext) -> WindowID? {
 		if let monitor = context.previousMonitor, let active = state.activeWorkspace(monitor) {
 			if let firstTile = firstFocusableTile(in: active, state: state) {
 				return firstTile
