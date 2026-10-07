@@ -12,6 +12,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Window Movement: Reorganize windows with keyboard shortcuts.
 - Step Move (Merge / Split): Move the focused window one step left/right — it splits out of a shared column into its own column, or merges into the neighboring column if it's already alone.
 - Float: Pull a window out of the tiling layout and position it freely.
+- Always-Floating Apps: Choose apps in the Floating tab of Settings (System Settings is on the list from the start). Their windows are never tiled: they float above the tiles and stay on screen when you switch workspaces.
 - Focus Follows Mouse: Automatically focus and raise the window under the mouse pointer (delay adjustable in Settings, can be turned off).
 - Floating Windows on Top: Dialogs and floating windows are automatically kept above tiled windows. A rescue shortcut brings them all to the front at once.
 - Zen Mode: Focus on a single window by centering it and hiding others (distraction-free).
@@ -92,7 +93,7 @@ If the key combination is already used by another action, a conflict warning wil
 ### Window Palette
 - Lists all windows across all workspaces
 - Navigate up/down (across workspaces) and left/right (between windows)
-- Floating windows toggled with Float appear in a "Float" section, windows not assigned to any workspace (e.g. System Settings, dialogs) appear in a "System" section, and windows hidden via Hide/Restore appear in a "Hidden" section — each at the bottom of its display column
+- Floating windows toggled with Float appear in a "Float" section, windows not assigned to any workspace (the apps set to float such as System Settings, and dialogs) appear in a "System" section, and windows hidden via Hide/Restore appear in a "Hidden" section — each at the bottom of its display column
 - Press Return to switch to (or restore) the selected window
 
 ### Workspace Peek
@@ -190,6 +191,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - ウィンドウ移動：キーボードショートカットでウィンドウを再配置
 - 合流/分離（ステップ移動）：フォーカス中のウィンドウを左右へ1ステップ移動。複数ウィンドウの列にいれば抜けて隣に単独列として出て、単独列にいれば隣の列の末尾に合流します
 - Float：ウィンドウをタイリングから外して、自由に配置できるフローティング状態にします
+- 常に浮かせるアプリ：設定の Floating タブでアプリを選びます（システム設定は最初から入っています）。そのアプリのウィンドウはタイルに並べず、タイルの上に浮かべます。ワークスペースを切り替えても画面に残ります
 - Focus Follows Mouse：マウスを乗せたウィンドウを自動でフォーカス＆前面化します（遅延は設定で変更可能、オフにもできます）
 - 浮遊ウィンドウの前面キープ：ダイアログなどの浮遊ウィンドウがタイルの裏に隠れないよう常に前面に保ちます。全部をまとめて前面に出す救出キーもあります
 - Zen モード：一つのウィンドウに集中するため、中央に配置して他のウィンドウを非表示にします
@@ -271,7 +273,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 ### ウィンドウパレット
 - 全ワークスペースのウィンドウを一覧表示
 - 上下に移動（ワークスペース間）、左右に移動（ウィンドウ間）
-- Float で浮遊化したウィンドウは「Float」セクションに、ワークスペースに属さない浮遊ウィンドウ（システム設定・ダイアログ等）は「System」セクションに、隠す/復元機能で隠したウィンドウは「Hidden」セクションに、それぞれ各モニター列の一番下にまとめて表示
+- Float で浮遊化したウィンドウは「Float」セクションに、ワークスペースに属さない浮遊ウィンドウ（システム設定など常に浮かせるアプリの窓・ダイアログ等）は「System」セクションに、隠す/復元機能で隠したウィンドウは「Hidden」セクションに、それぞれ各モニター列の一番下にまとめて表示
 - Return で選択したウィンドウに切り替え（またはウィンドウを復元）
 
 ### 隣ワークスペースのチラ見せ

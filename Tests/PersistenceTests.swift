@@ -434,6 +434,45 @@ let persistenceTests: [TestCase] = [
 		expectInvariants(relaunched)
 	},
 
+	TestCase("a saved tiled window of an app set to float is not restored into the columns") {
+		var state = testState()
+		let home = state.testActive()
+		state.testAddWindow(10, workspace: home, pid: 100, app: "Calculator", title: "Calculator",
+			frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+		state.records[10]?.bundleID = "com.test.float"
+		state.testAddWindow(11, workspace: home, pid: 200, app: "Notes", title: "Notes",
+			frame: CGRect(x: 800, y: 0, width: 600, height: 600))
+		state.records[11]?.bundleID = "com.test.app"
+		state.testSetColumns(home, [[10], [11]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		relaunched.floatingApps = ["com.test.float"]
+		let facts = [
+			WindowFacts(id: 10, pid: 100, title: "Calculator", frame: CGRect(x: 0, y: 0, width: 800, height: 600)),
+			WindowFacts(id: 11, pid: 200, title: "Notes", frame: CGRect(x: 800, y: 0, width: 600, height: 600)),
+		]
+		let apps = [
+			AppFacts(pid: 100, bundleID: "com.test.float", name: "Calculator"),
+			AppFacts(pid: 200, bundleID: "com.test.app", name: "Notes"),
+		]
+		relaunched.applyPersistence(snapshot, windows: facts, apps: apps, now: 10)
+		expectEqual(relaunched.records[10], nil)
+		expectEqual(relaunched.testColumns(relaunched.testActive()), [[11]])
+
+		relaunched.admit(facts[0], app: apps[0], source: .startup, now: 11)
+		expectEqual(relaunched.records[10]?.placement, .unmanaged)
+		expectEqual(relaunched.records[10]?.workspace, nil)
+		expectInvariants(relaunched)
+
+		// The app's facts carry no bundle identifier: the saved one counts.
+		var unnamed = testState()
+		unnamed.floatingApps = ["com.test.float"]
+		unnamed.applyPersistence(snapshot, windows: facts, apps: [AppFacts(pid: 100, bundleID: nil, name: "Calculator"), apps[1]], now: 10)
+		expectEqual(unnamed.records[10], nil)
+		expectInvariants(unnamed)
+	},
+
 	TestCase("windows without a title are never matched by bundle") {
 		var state = testState()
 		let home = state.testActive()
