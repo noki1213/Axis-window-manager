@@ -12,6 +12,7 @@
 
 import SwiftUI
 import ServiceManagement
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     var body: some View {
@@ -185,47 +186,105 @@ struct LayoutSettingsView: View {
 // MARK: - Floating Apps
 
 struct FloatingAppsView: View {
-    @State private var floatingApps: [String] = [
-        "com.apple.systempreferences"
-    ]
-    
+    @ObservedObject private var store = FloatingAppsStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("These apps will always float (not tiled)")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Windows of these apps are never tiled. Like System Settings, they float above the tiles and stay on screen when you switch workspaces.")
+                .font(.caption)
                 .foregroundColor(.secondary)
-                .padding(.bottom, 8)
-            
+                .fixedSize(horizontal: false, vertical: true)
+
             List {
-                ForEach(floatingApps, id: \.self) { bundleId in
-                    HStack {
-                        Text(bundleId)
-                        Spacer()
-                        Button(action: {
-                            floatingApps.removeAll { $0 == bundleId }
-                        }) {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundColor(.red)
+                ForEach(store.apps) { app in
+                    FloatingAppRow(app: app) {
+                        withAnimation(listAnimation) {
+                            store.remove(bundleID: app.bundleID)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(minHeight: 150)
-            
+            .listStyle(.bordered(alternatesRowBackgrounds: false))
+            .overlay {
+                if store.apps.isEmpty {
+                    Text("No apps")
+                        .foregroundColor(.secondary)
+                }
+            }
+
             HStack {
-                Button("Add App...") {
-                    // App picker dialog (to be implemented later)
+                Button("Add App…") {
+                    chooseApps()
                 }
                 Spacer()
             }
         }
         .padding()
     }
+
+    /// Rows come and go with a spring that does not bounce, or a short fade with Reduce Motion
+    private var listAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.3, bounce: 0)
+    }
+
+    /// Picks apps to add, starting in /Applications, as a sheet on the settings window
+    private func chooseApps() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.message = "Choose apps whose windows always float."
+        panel.prompt = "Add"
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK else { return }
+            withAnimation(listAnimation) {
+                store.add(appsAt: panel.urls)
+            }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+        }
+    }
+}
+
+/// One app on the floating list: its icon and name, and a button that takes it off the list
+private struct FloatingAppRow: View {
+    let app: FloatingApp
+    let onRemove: () -> Void
+    @State private var isHoveringRemove = false
+
+    /// The red of the color scheme
+    private static let removeHoverColor = Color(red: 0xfc / 255, green: 0x9c / 255, blue: 0x9c / 255)
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: app.icon)
+                .resizable()
+                .frame(width: 24, height: 24)
+            Text(app.name)
+            Spacer()
+            Button(action: onRemove) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(isHoveringRemove ? Self.removeHoverColor : .secondary)
+            .onHover { isHoveringRemove = $0 }
+            .help("Remove")
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 // MARK: - About
 
 struct AboutView: View {
+    /// The version in the app's Info.plist
+    private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "rectangle.split.3x1")
@@ -239,13 +298,13 @@ struct AboutView: View {
             Text("Window Manager for macOS")
                 .foregroundColor(.secondary)
             
-            Text("Version 0.1.0")
+            Text("Version \(version)")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            
+
             Spacer()
-            
-            Link("GitHub", destination: URL(string: "https://github.com")!)
+
+            Link("GitHub", destination: URL(string: "https://github.com/noki1213/Axis-window-manager")!)
                 .font(.caption)
         }
         .padding()

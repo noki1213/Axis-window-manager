@@ -38,7 +38,7 @@ class WorkspaceManager {
 			self?.closePaletteForScreenChange()
 		}
 		coordinator.onStarted = ready
-		coordinator.start(config: TilingEngine.shared.layoutConfig)
+		coordinator.start(config: TilingEngine.shared.layoutConfig, floatingApps: FloatingAppsStore.shared.bundleIDs)
 	}
 
 	/// Saves the layout, puts every window moved out of sight back on screen (those of Zen mode
@@ -82,6 +82,24 @@ class WorkspaceManager {
 	/// The windows that are Float
 	var floatWindowIDs: Set<CGWindowID> {
 		Set(state.records.values.filter { $0.placement == .floating }.map(\.id))
+	}
+
+	/// The windows of these apps are never tiled: they float in no workspace, like System Settings.
+	/// The windows already open follow at once
+	func setFloatingApps(_ bundleIDs: Set<String>) {
+		guard coordinator.isRunning, state.floatingApps != bundleIDs else { return }
+		coordinator.perform("floating apps") { state in
+			state.setFloatingApps(bundleIDs)
+		}
+		// The windows that left the columns stay over the tiles that moved
+		for screen in NSScreen.screens {
+			TilingEngine.shared.raiseFloatingWindows(on: screen)
+		}
+		// The workspaces they left empty are gone, which can renumber the others
+		NotificationCenter.default.post(name: .workspaceChanged, object: nil)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+			BorderManager.shared.updateBorder()
+		}
 	}
 
 	// MARK: - Screens and monitor keys

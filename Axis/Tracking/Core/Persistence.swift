@@ -473,7 +473,8 @@ nonisolated extension TrackingState {
 		var tiledClass = Set<WindowID>()
 		var seen = Set<WindowID>()
 		for facts in windows where !tombstones.contains(facts.id) && seen.insert(facts.id).inserted {
-			let windowClass = Classifier.classify(facts, bundleID: appBundles[facts.pid], ownPID: ownPID, relaunchTiled: [facts.id])
+			let windowClass = Classifier.classify(
+				facts, bundleID: appBundles[facts.pid], ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: [facts.id])
 			guard windowClass != .ignore else { continue }
 			candidates.append(facts)
 			if windowClass == .tiled {
@@ -495,9 +496,12 @@ nonisolated extension TrackingState {
 		var pairs: [MatchedPair] = []
 		var rekeyed = [WindowID: WindowID]()
 
-		// Primary matching: exact window ID and PID, which a relaunch of Axis leaves as they were.
+		// Primary matching: exact window ID and PID, which a relaunch of Axis leaves as they were. A
+		// window of an app set to float comes back only as a floating window, never into the columns.
 		for candidate in candidates {
-			guard let persisted = persistedByID[candidate.id], persisted.pid == candidate.pid else { continue }
+			guard let persisted = persistedByID[candidate.id], persisted.pid == candidate.pid,
+				persisted.isFloating || !((appBundles[candidate.pid] ?? persisted.bundleID).map { floatingApps.contains($0) } ?? false)
+			else { continue }
 			matchedCandidateIDs.insert(candidate.id)
 			matchedPersistedIDs.insert(persisted.id)
 			pairs.append(MatchedPair(

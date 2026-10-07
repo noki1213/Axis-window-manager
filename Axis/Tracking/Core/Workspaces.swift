@@ -629,6 +629,56 @@ nonisolated extension TrackingState {
 		return record.placement
 	}
 
+	/// Sets the apps whose windows are never tiled, and treats their tracked windows the way the
+	/// apps' new windows are admitted. The tiled windows of an app added leave the columns and their
+	/// workspace, centred on its monitor. The unmanaged windows of an app removed that would be tiled
+	/// now (not dialogs or small panels) join the active workspace of the monitor holding them.
+	/// Floating windows stay as they are.
+	mutating func setFloatingApps(_ apps: Set<String>) {
+		guard apps != floatingApps else { return }
+		let added = apps.subtracting(floatingApps)
+		let removed = floatingApps.subtracting(apps)
+		floatingApps = apps
+		log("floating apps: \(apps.sorted().joined(separator: ", "))")
+		var leftMonitors = Set<MonitorKey>()
+		for id in records.keys.sorted() {
+			guard var record = records[id], let bundleID = record.bundleID else { continue }
+			if added.contains(bundleID), record.placement == .tiled {
+				if let host = record.workspace.flatMap({ workspaces[$0]?.host }) {
+					leftMonitors.insert(host)
+				}
+				centre(&record)
+				removeFromColumns(id)
+				record.placement = .unmanaged
+				record.workspace = nil
+				record.slotMemory = nil
+				records[id] = record
+				// The hide stack holds members of a workspace only: a hidden window stays minimized
+				// like one the user minimized.
+				hiddenStack.removeAll { $0.window == id }
+				plannerState.minimized.remove(id)
+				log("floating apps: \(describe(record)) unmanaged")
+			} else if removed.contains(bundleID), record.placement == .unmanaged,
+				Classifier.classify(record, ownPID: ownPID, floatingApps: apps, relaunchTiled: relaunchTiled) == .tiled,
+				let frame = record.observed.frame, let monitor = monitorKey(for: frame),
+				let workspace = monitors[monitor]?.active {
+				record.placement = .tiled
+				record.workspace = workspace
+				record.pendingFloatRestore = false
+				records[id] = record
+				if record.visibility.keepsSlot {
+					insertByMidX(id, midX: frame.midX, into: workspace)
+				}
+				log("floating apps: \(describe(record)) -> \(describeWorkspace(workspace)) tiled")
+				zenNoteAdmission(record)
+			}
+		}
+		// Workspaces the windows left empty go, except the ones shown.
+		for monitor in leftMonitors.sorted() {
+			compact(monitor, keepingActive: true)
+		}
+	}
+
 	/// Sets a centred floatingFrame on the window's monitor (its workspace host, else the monitor
 	/// holding its frame) and asks for it to be applied once.
 	private func centre(_ record: inout WindowRecord) {

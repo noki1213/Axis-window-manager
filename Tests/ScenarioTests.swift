@@ -1092,6 +1092,7 @@ let scenarioTests: [TestCase] = [
 
 	TestCase("unmanagedState") {
 		var world = ScenarioWorld()
+		world.state.floatingApps = ["com.apple.systempreferences"]
 		world.addApp(pid: 100, bundleID: "com.apple.systempreferences", name: "Settings")
 		world.addWindow(id: 1, pid: 100, frame: CGRect(x: 100, y: 100, width: 800, height: 600))
 		world.runPass()

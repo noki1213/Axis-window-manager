@@ -137,12 +137,12 @@ final class TrackingCoordinator {
 	/// Starts tracking. The "starting" barrier holds every pass until the displays are stable;
 	/// then the monitors are read and a full scan admits the windows of every app, putting back
 	/// the workspaces and columns of the saved layout where the file has one.
-	func start(config: LayoutConfig = LayoutConfig()) {
+	func start(config: LayoutConfig = LayoutConfig(), floatingApps: Set<String> = []) {
 		guard !isRunning else { return }
 		isRunning = true
 		runID += 1
 		let now = Self.uptime()
-		state = TrackingState(config: config, ownPID: ownPID)
+		state = TrackingState(config: config, ownPID: ownPID, floatingApps: floatingApps)
 		pending = PendingWork()
 		inFlight = nil
 		endingReasons = []

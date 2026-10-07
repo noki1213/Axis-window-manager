@@ -3,8 +3,9 @@
 //  Axis
 //
 //  Decides once, at admission, how a new window is managed: ignored (helpers, non-windows, Axis
-//  itself), unmanaged (dialogs, small panels, settings windows) or tiled. Tracked windows are
-//  never re-classified, so a window does not flip between tiled and floating as layouts resize it.
+//  itself), unmanaged (dialogs, small panels, the windows of the apps set to float) or tiled.
+//  Tracked windows are classified again only when their app joins or leaves the apps set to
+//  float, so a window does not flip between tiled and floating as layouts resize it.
 //
 
 import Foundation
@@ -19,14 +20,6 @@ nonisolated enum WindowClass: Hashable, Sendable {
 }
 
 nonisolated enum Classifier {
-	/// System Settings shows fixed-size panes that do not tile (older and newer bundle ids).
-	static let settingsBundleIDs: Set<String> = [
-		"com.apple.systempreferences",
-		"com.apple.SystemPreferences",
-		"com.apple.systemsettings",
-		"com.apple.SystemSettings",
-	]
-
 	/// Subroles of real windows that are tracked but never tiled.
 	static let unmanagedSubroles: Set<String> = [
 		AXNames.dialogSubrole,
@@ -38,9 +31,12 @@ nonisolated enum Classifier {
 	/// panels often report the standard subrole.
 	static let smallWindowSize = CGSize(width: 500, height: 500)
 
+	/// `floatingApps` holds the bundle identifiers of the apps whose windows are never tiled.
 	/// `relaunchTiled` holds windows that were tiled when Axis last quit: a stacked column may have
 	/// left them small enough to look like dialogs.
-	static func classify(_ facts: WindowFacts, bundleID: String?, ownPID: PID, relaunchTiled: Set<WindowID>) -> WindowClass {
+	static func classify(
+		_ facts: WindowFacts, bundleID: String?, ownPID: PID, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
+	) -> WindowClass {
 		guard facts.pid != ownPID, facts.role == AXNames.windowRole else { return .ignore }
 		let isStandard = facts.subrole == AXNames.standardWindowSubrole
 		let isUnmanagedKind = facts.subrole.map { unmanagedSubroles.contains($0) } ?? false
@@ -51,7 +47,7 @@ nonisolated enum Classifier {
 		if isUnmanagedKind {
 			return .unmanaged
 		}
-		if let bundleID, settingsBundleIDs.contains(bundleID) {
+		if let bundleID, floatingApps.contains(bundleID) {
 			return .unmanaged
 		}
 		if facts.frame.width < smallWindowSize.width && facts.frame.height < smallWindowSize.height
@@ -59,5 +55,15 @@ nonisolated enum Classifier {
 			return .unmanaged
 		}
 		return .tiled
+	}
+
+	/// The class a tracked window would get if it were admitted now, at its last observed frame.
+	static func classify(
+		_ record: WindowRecord, ownPID: PID, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
+	) -> WindowClass {
+		let facts = WindowFacts(
+			id: record.id, pid: record.pid, role: record.role, subrole: record.subrole, title: record.title,
+			frame: record.observed.frame ?? .zero, hasCloseButton: record.hasCloseButton)
+		return classify(facts, bundleID: record.bundleID, ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
 	}
 }

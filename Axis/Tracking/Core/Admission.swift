@@ -75,7 +75,8 @@ nonisolated extension TrackingState {
 	@discardableResult
 	mutating func admit(_ facts: WindowFacts, app: AppFacts, source: AdmissionSource, now: Time) -> WindowID? {
 		guard records[facts.id] == nil, !tombstones.contains(facts.id), let fallbackMonitor = primaryMonitor else { return nil }
-		let windowClass = Classifier.classify(facts, bundleID: app.bundleID, ownPID: ownPID, relaunchTiled: relaunchTiled)
+		let windowClass = Classifier.classify(
+			facts, bundleID: app.bundleID, ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
 		guard windowClass != .ignore else { return nil }
 		admissionExpireLaunchAside(now: now)
 		admissionPruneRetired(now: now)
@@ -350,13 +351,15 @@ nonisolated extension TrackingState {
 
 	/// Stores `draft` (the new window's identity and observations) in the place of a retired
 	/// window: its placement, its workspace (else the active one of its monitor, else `fallback`),
-	/// its column slot, floating frame, last visible frame and hidden-stack entry.
+	/// its column slot, floating frame, last visible frame and hidden-stack entry. A tiled place
+	/// goes to an app set to float since only as an unmanaged window.
 	private mutating func admissionTakePlace(_ draft: WindowRecord, of retired: RetiredWindow, fallback: WorkspaceID?) -> WindowRecord {
 		let old = retired.record
 		var record = draft
-		record.placement = old.placement
+		let floats = draft.bundleID.map { floatingApps.contains($0) } ?? false
+		record.placement = old.placement == .tiled && floats ? .unmanaged : old.placement
 		record.workspace = nil
-		if old.placement != .unmanaged {
+		if record.placement != .unmanaged {
 			let candidates: [WorkspaceID?] = [
 				old.workspace,
 				retired.monitor.flatMap { monitors[$0]?.active },

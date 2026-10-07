@@ -683,6 +683,108 @@ private let membershipTests: [TestCase] = [
 		expect(!state.moveWindowToMonitor(4, to: right, edge: .left), "already there")
 		expectInvariants(state)
 	},
+
+	TestCase("setting an app to float takes its tiled windows out of the columns and their workspaces") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 2, active: 0)
+		state.testSetColumns(row[0], [[1], [2]])
+		state.testSetColumns(row[1], [[3]], visibility: [3: .parked(.workspaceInactive)])
+		state.testAddWindow(4, placement: .floating, workspace: row[0])
+		state.records[1]!.observed.frame = CGRect(x: 12, y: 37, width: 696, height: 851)
+		state.records[2]!.observed.frame = CGRect(x: 720, y: 37, width: 696, height: 851)
+		state.records[3]!.observed.frame = CGRect(x: 1439, y: 899, width: 696, height: 851)
+		for id: WindowID in [1, 3, 4] {
+			state.records[id]!.bundleID = "com.test.float"
+		}
+		state.records[2]!.bundleID = "com.test.app"
+
+		state.setFloatingApps(["com.test.float"])
+		expectEqual(state.floatingApps, ["com.test.float"])
+		expectEqual(state.records[1]?.placement, .unmanaged)
+		expectEqual(state.records[1]?.workspace, nil)
+		expect(state.records[1]?.pendingFloatRestore == true)
+		expectEqual(state.records[1]?.floatingFrame?.frame(in: state.monitors[main]!.visibleFrame),
+			CGRect(x: 372, y: 37, width: 696, height: 851), "centred on its monitor")
+		expectEqual(state.testColumns(row[0]), [[2]])
+		expectEqual(state.records[2]?.placement, .tiled)
+		expectEqual(state.records[3]?.placement, .unmanaged)
+		expectEqual(state.testRow(), [row[0]], "the hidden workspace it emptied is dropped")
+		expectEqual(state.records[4]?.placement, .floating, "a floating window stays a member")
+		expectEqual(state.records[4]?.workspace, row[0])
+		state.normalize(now: 1)
+		expectEqual(state.records[3]?.visibility, .visible, "no workspace keeps it out of sight any more")
+		expectInvariants(state)
+
+		let before = state
+		state.setFloatingApps(["com.test.float"])
+		expectEqual(state, before, "the same list changes nothing")
+	},
+
+	TestCase("a hidden window of an app set to float leaves the hide stack and stays minimized") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1]])
+		state.testAddWindow(2, workspace: home, visibility: .axisMinimized, frame: CGRect(x: 720, y: 37, width: 696, height: 851))
+		state.records[2]!.observed.isMinimized = true
+		state.records[2]!.bundleID = "com.test.float"
+		state.hiddenStack = [HiddenEntry(window: 2, minimizeConfirmed: true)]
+		state.plannerState.minimized = [2]
+		expectInvariants(state)
+
+		state.setFloatingApps(["com.test.float"])
+		expectEqual(state.records[2]?.placement, .unmanaged)
+		expectEqual(state.hiddenStack, [])
+		expect(!state.plannerState.minimized.contains(2), "the planner does not unminimize it")
+		state.normalize(now: 1)
+		expectEqual(state.records[2]?.visibility, .nativeMinimized)
+		expectEqual(state.testColumns(home), [[1]])
+		expectInvariants(state)
+	},
+
+	TestCase("taking an app off the floating list tiles the windows that would be tiled when admitted") {
+		var state = testState()
+		state.floatingApps = ["com.test.float", "com.test.other"]
+		let home = state.testActive()
+		state.testSetColumns(home, [[1]])
+		state.records[1]!.observed.frame = CGRect(x: 12, y: 37, width: 1416, height: 851)
+		let large = CGRect(x: 800, y: 100, width: 600, height: 600)
+		state.testAddWindow(2, placement: .unmanaged, workspace: nil, frame: large)
+		state.testAddWindow(3, placement: .unmanaged, workspace: nil, frame: CGRect(x: 100, y: 100, width: 300, height: 300))
+		state.testAddWindow(4, placement: .unmanaged, workspace: nil, frame: large)
+		state.records[4]!.subrole = AXNames.dialogSubrole
+		state.testAddWindow(5, placement: .unmanaged, workspace: nil, frame: large)
+		for id: WindowID in [2, 3, 4] {
+			state.records[id]!.bundleID = "com.test.float"
+		}
+		state.records[5]!.bundleID = "com.test.other"
+
+		state.setFloatingApps(["com.test.other"])
+		expectEqual(state.records[2]?.placement, .tiled)
+		expectEqual(state.records[2]?.workspace, home)
+		expectEqual(state.testColumns(home), [[1], [2]], "placed by its centre")
+		expectEqual(state.records[3]?.placement, .unmanaged, "small windows start out unmanaged")
+		expectEqual(state.records[4]?.placement, .unmanaged, "dialogs are never tiled")
+		expectEqual(state.records[5]?.placement, .unmanaged, "its app still floats")
+		state.normalize(now: 1)
+		expectInvariants(state)
+	},
+
+	TestCase("a window that joins the Zen workspace when its app stops floating ends Zen") {
+		var state = testState()
+		state.floatingApps = ["com.test.float"]
+		let home = state.testActive()
+		state.testSetColumns(home, [[1]])
+		state.zen = ZenSession(monitor: main, workspace: home, focus: 1)
+		state.testAddWindow(2, placement: .unmanaged, workspace: nil, frame: CGRect(x: 800, y: 100, width: 600, height: 600))
+		state.records[2]!.bundleID = "com.test.float"
+
+		state.setFloatingApps([])
+		expectEqual(state.zen, nil)
+		expectEqual(state.testColumns(home), [[1], [2]])
+		state.normalize(now: 1)
+		expectEqual(state.records[2]?.visibility, .visible)
+		expectInvariants(state)
+	},
 ]
 
 // MARK: - Size ratios
