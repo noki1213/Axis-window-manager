@@ -45,6 +45,8 @@ nonisolated struct PlannerState: Equatable, Sendable {
 	var zenRefusal: PlannerZenRefusal?
 	/// The phantom slot of the placement reservation in the last layout, for its preview.
 	var reservedSlot: CGRect?
+	/// Shown tiled windows the last layout left out: out of sight while their app does not answer.
+	var leftOut: Set<WindowID> = []
 
 	init() {}
 }
@@ -184,7 +186,7 @@ nonisolated extension TrackingState {
 			plannerState.zenRefusal = nil
 		}
 		if !hideOnly {
-			pass.slots = plannerLayOutActiveWorkspaces()
+			pass.slots = plannerLayOutActiveWorkspaces(pass)
 		}
 		for id in records.keys.sorted() {
 			guard let record = records[id] else { continue }
@@ -279,6 +281,7 @@ nonisolated extension TrackingState {
 		plannerState.expected[id] = nil
 		plannerState.parked[id] = nil
 		plannerState.minimized.remove(id)
+		plannerState.leftOut.remove(id)
 		if plannerState.zenRefusal?.window == id {
 			plannerState.zenRefusal = nil
 		}
@@ -290,22 +293,66 @@ nonisolated extension TrackingState {
 nonisolated extension TrackingState {
 	/// Lays out every monitor's active workspace (with the reservation's phantom slot on its
 	/// monitor), stores the normalized ratios back and returns the slots of the tiled windows.
-	private mutating func plannerLayOutActiveWorkspaces() -> [WindowID: CGRect] {
+	///
+	/// A shown window that is out of sight while its app does not answer cannot be brought into
+	/// its slot, so the layout leaves it out and the others share the screen at an even split
+	/// instead of leaving its slot empty. The stored ratios stay as they are and apply again once
+	/// the app answers and the window is laid out with the others.
+	private mutating func plannerLayOutActiveWorkspaces(_ pass: PlannerPass) -> [WindowID: CGRect] {
 		var slots: [WindowID: CGRect] = [:]
+		var leftOut = Set<WindowID>()
 		plannerState.reservedSlot = nil
 		for key in monitorOrder {
-			guard let monitor = monitors[key], let input = layoutInput(monitor.active) else { continue }
+			guard let monitor = monitors[key], var input = layoutInput(monitor.active) else { continue }
 			let reservation = self.reservation?.monitor == key ? self.reservation : nil
+			// The reservation's column index counts the windows left out too.
+			let unreachable = reservation == nil ? plannerUnreachable(in: input.columns, pass) : []
+			if !unreachable.isEmpty {
+				leftOut.formUnion(unreachable)
+				input = LayoutInput(columns: input.columns.map { $0.filter { !unreachable.contains($0) } }.filter { !$0.isEmpty })
+			}
 			let result = ColumnLayout.frames(for: input, visibleFrame: monitor.visibleFrame, config: config,
 				reservation: reservation)
-			workspaces[monitor.active]?.widthRatios = result.widthRatios
-			workspaces[monitor.active]?.rowRatios = result.rowRatios
+			if unreachable.isEmpty {
+				workspaces[monitor.active]?.widthRatios = result.widthRatios
+				workspaces[monitor.active]?.rowRatios = result.rowRatios
+			}
 			slots.merge(result.frames) { current, _ in current }
 			if reservation != nil {
 				plannerState.reservedSlot = result.reservedSlot
 			}
 		}
+		plannerNoteLeftOut(leftOut)
 		return slots
+	}
+
+	/// The shown tiled windows in `columns` whose app does not answer and that are out of sight. A
+	/// window of such an app that is on screen keeps its slot: it is where the user sees it.
+	private func plannerUnreachable(in columns: [[WindowID]], _ pass: PlannerPass) -> Set<WindowID> {
+		var unreachable = Set<WindowID>()
+		for id in columns.joined() {
+			guard let record = records[id], record.visibility == .visible, zen?.focus != id,
+				apps[record.pid]?.unresponsiveSince != nil
+			else { continue }
+			if let observed = plannerObservedFrame(id, snapshot: pass.snapshot),
+				!ParkGeometry.isEffectivelyHidden(observed, monitors: pass.monitors) {
+				continue
+			}
+			unreachable.insert(id)
+		}
+		return unreachable
+	}
+
+	private mutating func plannerNoteLeftOut(_ leftOut: Set<WindowID>) {
+		for id in leftOut.subtracting(plannerState.leftOut).sorted() {
+			guard let record = records[id] else { continue }
+			log("layout: leave out \(describe(record)) (app not answering, window out of sight)")
+		}
+		for id in plannerState.leftOut.subtracting(leftOut).sorted() {
+			guard let record = records[id] else { continue }
+			log("layout: \(describe(record)) no longer left out")
+		}
+		plannerState.leftOut = leftOut
 	}
 
 	private mutating func plannerPlan(_ record: WindowRecord, _ pass: inout PlannerPass) {
