@@ -623,6 +623,45 @@ private let appTests: [TestCase] = [
 		expectEqual(plan.hide.map(\.pid), [200])
 	},
 
+	TestCase("a shown window out of sight while its app does not answer is left out of the layout until it answers") {
+		var (state, active, _) = twoWorkspaces()
+		state.testAddWindow(2, workspace: active, pid: 300, app: "Busy")
+		state.workspaces[active]?.widthRatios = [0.3, 0.7]
+		state.apps[300] = AppState(pid: 300, name: "Busy", unresponsiveSince: 5)
+		let parkedTwo = CGRect(origin: parkPoint, size: rightSlot.size)
+		var plan = state.plan(snapshot: showing([1: leftSlot, 2: parkedTwo, 3: parkedThree], pids: [2: 300, 3: 200], at: 6),
+			options: PlanOptions(), now: 6)
+		expectEqual(plan.actions, [setFrame(1, fullSlot, .layout, observed: leftSlot)])
+		expectEqual(state.workspaces[active]?.widthRatios, [0.3, 0.7])
+		expectEqual(state.drainLog(), [TrackingLog("layout: leave out Busy/W2#2 (app not answering, window out of sight)")])
+		state.recordWrites(landed(plan), now: 6.01)
+
+		// Answering again, it takes its slot back with the stored widths.
+		state.ingestScan(pid: 300, result: .complete([WindowFacts(id: 2, pid: 300, title: "W2", frame: parkedTwo)]),
+			serverHas: [], now: 7)
+		_ = state.drainLog()
+		plan = state.plan(snapshot: showing([1: fullSlot, 2: parkedTwo, 3: parkedThree], pids: [2: 300, 3: 200], at: 7),
+			options: PlanOptions(), now: 7)
+		let stored = ColumnLayout.frames(for: LayoutInput(columns: [[1], [2]], widthRatios: [0.3, 0.7]),
+			visibleFrame: state.monitors[main]!.visibleFrame, config: state.config, reservation: nil).frames
+		expectEqual(plan.actions, [
+			setFrame(1, stored[1]!, .layout, observed: fullSlot),
+			setFrame(2, stored[2]!, .layout, observed: parkedTwo, pid: 300, label: "Busy/W2#2"),
+		])
+		expectEqual(state.drainLog(), [TrackingLog("layout: Busy/W2#2 no longer left out")])
+		expectInvariants(state)
+	},
+
+	TestCase("a window of an unanswering app that is on screen keeps its slot") {
+		var (state, active, _) = twoWorkspaces()
+		state.testAddWindow(2, workspace: active, pid: 300, app: "Busy")
+		state.apps[300] = AppState(pid: 300, name: "Busy", unresponsiveSince: 5)
+		let plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot, 3: parkedThree], pids: [2: 300, 3: 200], at: 6),
+			options: PlanOptions(), now: 6)
+		expect(plan.isEmpty, "\(plan)")
+		expectEqual(state.log, [])
+	},
+
 	TestCase("an app that did not answer a write is scanned again a second later and its windows are written once it answers") {
 		var (state, _, _) = twoWorkspaces()
 		state.apps[100] = AppState(pid: 100, name: "App")
