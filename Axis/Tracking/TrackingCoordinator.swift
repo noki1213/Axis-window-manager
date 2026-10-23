@@ -688,6 +688,14 @@ final class TrackingCoordinator {
 			scans[pid] = nil
 			appQuit(pid, now: now)
 		}
+		// A full scan covers running apps only, so a window whose app quit without a terminated
+		// notification reaching Axis would stay tracked forever; the process check retires it.
+		if pass.work.scanAll {
+			for pid in Set(state.records.values.map(\.pid)).sorted() where scans[pid] == nil && !Self.isProcessAlive(pid) {
+				event("track: app pid \(pid) is gone without a terminated notification")
+				appQuit(pid, now: now)
+			}
+		}
 		let scannedPIDs = scans.keys.sorted()
 
 		let snapshot = ServerProbe.onScreen(now: now)
