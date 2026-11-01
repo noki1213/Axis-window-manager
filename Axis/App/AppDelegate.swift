@@ -9,6 +9,7 @@
 
 import AppKit
 import SwiftUI
+import Combine
 
 /// Manages the application's lifecycle
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -28,6 +29,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // The settings window
     private var settingsWindow: NSWindow?
+
+    // Problems with hotkeys.json: a menu item while they last, and a popover once for each new set of them
+    private var hotkeyProblemsItem: NSMenuItem?
+    private var hotkeyProblemsSeparator: NSMenuItem?
+    private var hotkeyProblemsObserver: AnyCancellable?
+    private var shownHotkeyProblems: [String] = []
+    private var hotkeyProblemsPopover: NSPopover?
     
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Registered before launch finishes, so a URL that launched Axis is not missed
@@ -67,6 +75,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Create the status bar item
         setupStatusItem()
+
+        hotkeyProblemsObserver = HotkeyStore.shared.$problems.sink { [weak self] problems in
+            // Published before the value changes, so handled on the next turn of the run loop
+            DispatchQueue.main.async { self?.showHotkeyProblems(problems) }
+        }
         
         // Check the Accessibility permission
         if !accessibilityManager.checkAccessibility() {
@@ -119,6 +132,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Set up the menu
         let menu = NSMenu()
+
+        // Shown only while hotkeys.json has problems
+        let problemsItem = NSMenuItem(title: "Problems in hotkeys.json…", action: #selector(openHotkeyProblems), keyEquivalent: "")
+        problemsItem.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+        problemsItem.isHidden = true
+        menu.addItem(problemsItem)
+        hotkeyProblemsItem = problemsItem
+        let problemsSeparator = NSMenuItem.separator()
+        problemsSeparator.isHidden = true
+        menu.addItem(problemsSeparator)
+        hotkeyProblemsSeparator = problemsSeparator
         
         // Tile Windows: Ctrl+Option+T
         let tileItem = NSMenuItem(title: "Tile Windows", action: #selector(tileWindows), keyEquivalent: "t")
@@ -158,6 +182,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: mode.rawValue)
     }
     
+    // MARK: - Hotkeys file problems
+
+    /// Keep the menu item in step with the problems, and point at them from the menu bar icon when a new set appears
+    private func showHotkeyProblems(_ problems: [String]) {
+        hotkeyProblemsItem?.isHidden = problems.isEmpty
+        hotkeyProblemsSeparator?.isHidden = problems.isEmpty
+
+        if problems.isEmpty {
+            shownHotkeyProblems = []
+            hotkeyProblemsPopover?.close()
+            return
+        }
+        guard problems != shownHotkeyProblems, let button = statusItem?.button else { return }
+        shownHotkeyProblems = problems
+
+        hotkeyProblemsPopover?.close()
+        let view = VStack(alignment: .leading, spacing: 0) {
+            HotkeyProblemsView(problems: problems)
+            HStack {
+                Spacer()
+                Button("Open Settings") { [weak self] in
+                    self?.hotkeyProblemsPopover?.close()
+                    self?.openHotkeyProblems()
+                }
+            }
+            .padding([.horizontal, .bottom], 12)
+        }
+        .frame(width: 380)
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: view)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        hotkeyProblemsPopover = popover
+
+        // Gets out of the way on its own; the menu item and the Shortcuts tab keep the details
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak popover] in
+            popover?.close()
+        }
+    }
+
+    /// Open Settings at the Shortcuts tab, where the problems are listed
+    @objc private func openHotkeyProblems() {
+        SettingsNavigation.shared.tab = .shortcuts
+        openSettings()
+    }
+
     // MARK: - Actions
     
     @objc private func statusItemClicked() {

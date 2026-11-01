@@ -16,14 +16,19 @@ struct ShortcutsSettingsView: View {
 
 	var body: some View {
 		VStack(spacing: 0) {
+			if !store.problems.isEmpty {
+				HotkeyProblemsView(problems: store.problems)
+				Divider()
+			}
+
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
 					ForEach(HotkeySection.allCases, id: \.rawValue) { section in
 						ShortcutSectionView(
 							section: section,
 							bindings: store.bindings.filter { $0.section == section },
-							onUpdate: { action, keyCode, modifiers in
-								handleUpdate(action: action, keyCode: keyCode, modifiers: modifiers)
+							onUpdate: { action, key in
+								handleUpdate(action: action, key: key)
 							}
 						)
 					}
@@ -38,7 +43,6 @@ struct ShortcutsSettingsView: View {
 				Spacer()
 				Button("Reset to Defaults") {
 					store.resetToDefaults()
-					HotkeyManager.shared.reloadBindings()
 				}
 				.padding()
 			}
@@ -53,15 +57,14 @@ struct ShortcutsSettingsView: View {
 	}
 
 	/// Update a key setting (with a duplicate check)
-	private func handleUpdate(action: HotkeyAction, keyCode: Int, modifiers: HotkeyModifiers) {
+	private func handleUpdate(action: HotkeyAction, key: HotkeyKey) {
 		// Duplicate check
-		if let conflict = store.findConflict(keyCode: keyCode, modifiers: modifiers, excludeAction: action) {
+		if let conflict = store.findConflict(key: key, excludeAction: action) {
 			conflictAlert = ConflictAlertInfo(conflictingDisplayName: conflict.displayName)
 			return
 		}
 
-		store.updateBinding(action: action, keyCode: keyCode, modifiers: modifiers)
-		HotkeyManager.shared.reloadBindings()
+		store.updateBinding(action: action, key: key)
 	}
 }
 
@@ -71,13 +74,37 @@ struct ConflictAlertInfo: Identifiable {
 	let conflictingDisplayName: String
 }
 
+// MARK: - Problems with hotkeys.json
+
+/// Lists what's wrong with hotkeys.json above the shortcuts
+struct HotkeyProblemsView: View {
+	let problems: [String]
+
+	var body: some View {
+		HStack(alignment: .top, spacing: 8) {
+			Image(systemName: "exclamationmark.triangle.fill")
+				.foregroundColor(.orange)
+			VStack(alignment: .leading, spacing: 4) {
+				ForEach(problems, id: \.self) { problem in
+					Text(problem)
+						.font(.callout)
+						.fixedSize(horizontal: false, vertical: true)
+				}
+			}
+			Spacer(minLength: 0)
+		}
+		.padding(12)
+		.background(Color.orange.opacity(0.1))
+	}
+}
+
 // MARK: - Section view
 
 /// A single section (heading + list of keys)
 struct ShortcutSectionView: View {
 	let section: HotkeySection
 	let bindings: [HotkeyBinding]
-	let onUpdate: (HotkeyAction, Int, HotkeyModifiers) -> Void
+	let onUpdate: (HotkeyAction, HotkeyKey) -> Void
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
@@ -88,8 +115,8 @@ struct ShortcutSectionView: View {
 			ForEach(bindings) { binding in
 				ShortcutRowView(
 					binding: binding,
-					onUpdate: { keyCode, modifiers in
-						onUpdate(binding.action, keyCode, modifiers)
+					onUpdate: { key in
+						onUpdate(binding.action, key)
 					}
 				)
 			}
@@ -102,7 +129,7 @@ struct ShortcutSectionView: View {
 /// A single key assignment (action name + record button)
 struct ShortcutRowView: View {
 	let binding: HotkeyBinding
-	let onUpdate: (Int, HotkeyModifiers) -> Void
+	let onUpdate: (HotkeyKey) -> Void
 
 	var body: some View {
 		HStack {
@@ -110,10 +137,9 @@ struct ShortcutRowView: View {
 				.frame(maxWidth: .infinity, alignment: .leading)
 
 			KeyRecorderButton(
-				currentKeyCode: binding.keyCode,
-				currentModifiers: binding.modifiers,
-				onRecorded: { keyCode, modifiers in
-					onUpdate(keyCode, modifiers)
+				currentKeys: binding.keys,
+				onRecorded: { key in
+					onUpdate(key)
 				}
 			)
 			.frame(width: 180, height: 28)

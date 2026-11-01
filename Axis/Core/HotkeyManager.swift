@@ -30,7 +30,10 @@ class HotkeyManager: ObservableObject {
 	// MARK: - Lookup table (supports customization)
 
 	/// A lookup table from (keyCode, modifiers) to HotkeyAction
-	private var lookupTable: [HotkeyLookupKey: HotkeyAction] = [:]
+	private var lookupTable: [HotkeyKey: HotkeyAction] = [:]
+
+	/// Rebuilds the lookup table whenever the bindings change (settings screen or edits to hotkeys.json)
+	private var bindingsObserver: AnyCancellable?
 
 	/// Flag for whether a key is being recorded (when true, the EventTap passes events through)
 	var isRecordingHotkey: Bool = false
@@ -58,7 +61,9 @@ class HotkeyManager: ObservableObject {
 
 	/// Start hotkey monitoring
 	func start() {
-		reloadBindings()
+		bindingsObserver = HotkeyStore.shared.$bindings.sink { [weak self] bindings in
+			self?.lookupTable = HotkeyStore.resolve(bindings).table
+		}
 		setupEventTap()
 		startHeartbeat()
 	}
@@ -68,11 +73,6 @@ class HotkeyManager: ObservableObject {
 		heartbeatTimer?.invalidate()
 		heartbeatTimer = nil
 		destroyEventTap()
-	}
-
-	/// Rebuild the lookup table from HotkeyStore
-	func reloadBindings() {
-		lookupTable = HotkeyStore.shared.buildLookupTable()
 	}
 
 	// MARK: - Event Tap Setup
@@ -123,7 +123,7 @@ class HotkeyManager: ObservableObject {
 				let eventModifiers = HotkeyModifiers.from(flags)
 				// Check whether a modifier key matching a lookup table key is present
 				let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-				let lookupKey = HotkeyLookupKey(keyCode: keyCode, modifiers: eventModifiers)
+				let lookupKey = HotkeyKey(keyCode: keyCode, modifiers: eventModifiers)
 				if hotkeyManager.lookupTable[lookupKey] == nil {
 					return Unmanaged.passUnretained(event)
 				}
@@ -272,7 +272,7 @@ class HotkeyManager: ObservableObject {
 
 		// Look up the action in the lookup table
 		let eventModifiers = HotkeyModifiers.from(event.modifierFlags)
-		let lookupKey = HotkeyLookupKey(keyCode: Int(event.keyCode), modifiers: eventModifiers)
+		let lookupKey = HotkeyKey(keyCode: Int(event.keyCode), modifiers: eventModifiers)
 
 		guard let action = lookupTable[lookupKey] else {
 			return false
