@@ -13,34 +13,53 @@
 import SwiftUI
 import ServiceManagement
 import UniformTypeIdentifiers
+import Combine
+
+/// The settings tab on show, so other parts of the app can open the window at a given tab
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+
+    enum Tab: Hashable {
+        case general, layout, shortcuts, floating, about
+    }
+
+    @Published var tab: Tab = .general
+}
 
 struct SettingsView: View {
+    @ObservedObject private var navigation = SettingsNavigation.shared
+
     var body: some View {
-        TabView {
+        TabView(selection: $navigation.tab) {
             GeneralSettingsView()
                 .tabItem {
                     Label("General", systemImage: "gear")
                 }
+                .tag(SettingsNavigation.Tab.general)
             
             LayoutSettingsView()
                 .tabItem {
                     Label("Layout", systemImage: "rectangle.split.3x1")
                 }
+                .tag(SettingsNavigation.Tab.layout)
 
             ShortcutsSettingsView()
                 .tabItem {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
+                .tag(SettingsNavigation.Tab.shortcuts)
 
             FloatingAppsView()
                 .tabItem {
                     Label("Floating", systemImage: "square.on.square")
                 }
+                .tag(SettingsNavigation.Tab.floating)
             
             AboutView()
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
+                .tag(SettingsNavigation.Tab.about)
         }
         .frame(width: 500, height: 500)
     }

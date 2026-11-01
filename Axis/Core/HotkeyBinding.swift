@@ -106,22 +106,137 @@ struct HotkeyModifiers: OptionSet, Codable, Hashable {
 	}
 }
 
-// MARK: - HotkeyLookupKey (a key for lookups)
+// MARK: - HotkeyKey (one key combination)
 
-/// The key used to look up an action by its (keyCode, modifiers) combination
-struct HotkeyLookupKey: Hashable {
+/// One key combination: a Carbon key code plus modifiers. Also the key for looking up an action.
+/// In hotkeys.json it is written as a string such as "ctrl+opt+shift+j".
+struct HotkeyKey: Hashable {
 	let keyCode: Int
 	let modifiers: HotkeyModifiers
+
+	init(keyCode: Int, modifiers: HotkeyModifiers) {
+		self.keyCode = keyCode
+		self.modifiers = modifiers
+	}
+
+	/// Reads "ctrl+opt+j", "cmd+shift+left", "opt+f5". Returns nil when a modifier or the key name is unknown.
+	init?(string: String) {
+		let parts = string.lowercased()
+			.split(separator: "+", omittingEmptySubsequences: false)
+			.map { $0.trimmingCharacters(in: .whitespaces) }
+		guard let name = parts.last, !name.isEmpty else { return nil }
+		var mods: HotkeyModifiers = []
+		for part in parts.dropLast() {
+			switch part {
+			case "cmd", "command", "super": mods.insert(.command)
+			case "shift": mods.insert(.shift)
+			case "opt", "option", "alt": mods.insert(.option)
+			case "ctrl", "control": mods.insert(.control)
+			default: return nil
+			}
+		}
+		if let code = Self.keyCodes[name] {
+			self.init(keyCode: code, modifiers: mods)
+		} else if name.hasPrefix("keycode"), let code = Int(name.dropFirst("keycode".count)) {
+			// Keys without a name (other layouts) round-trip by their raw code
+			self.init(keyCode: code, modifiers: mods)
+		} else {
+			return nil
+		}
+	}
+
+	/// The string form used in hotkeys.json (e.g. ctrl+opt+shift+j)
+	var string: String {
+		var parts: [String] = []
+		if modifiers.contains(.control) { parts.append("ctrl") }
+		if modifiers.contains(.option)  { parts.append("opt") }
+		if modifiers.contains(.shift)   { parts.append("shift") }
+		if modifiers.contains(.command) { parts.append("cmd") }
+		parts.append(Self.keyNames[keyCode] ?? "keycode\(keyCode)")
+		return parts.joined(separator: "+")
+	}
+
+	/// The display string (e.g. Ctrl+Option+J)
+	var displayString: String {
+		let modStr = modifiers.displayString
+		let keyStr = HotkeyBinding.keyCodeToDisplayName(keyCode)
+		if modStr.isEmpty {
+			return keyStr
+		}
+		return "\(modStr)+\(keyStr)"
+	}
+
+	/// The value hotkeys.json holds for a list of keys: "" for none, a string for one, a list for several
+	static func fileValue(_ keys: [HotkeyKey]) -> Any {
+		switch keys.count {
+		case 0: return ""
+		case 1: return keys[0].string
+		default: return keys.map(\.string)
+		}
+	}
+
+	/// Key code -> the name written in hotkeys.json
+	private static let keyNames: [Int: String] = {
+		var names: [Int: String] = [
+			kVK_ANSI_A: "a", kVK_ANSI_B: "b", kVK_ANSI_C: "c", kVK_ANSI_D: "d",
+			kVK_ANSI_E: "e", kVK_ANSI_F: "f", kVK_ANSI_G: "g", kVK_ANSI_H: "h",
+			kVK_ANSI_I: "i", kVK_ANSI_J: "j", kVK_ANSI_K: "k", kVK_ANSI_L: "l",
+			kVK_ANSI_M: "m", kVK_ANSI_N: "n", kVK_ANSI_O: "o", kVK_ANSI_P: "p",
+			kVK_ANSI_Q: "q", kVK_ANSI_R: "r", kVK_ANSI_S: "s", kVK_ANSI_T: "t",
+			kVK_ANSI_U: "u", kVK_ANSI_V: "v", kVK_ANSI_W: "w", kVK_ANSI_X: "x",
+			kVK_ANSI_Y: "y", kVK_ANSI_Z: "z",
+			kVK_ANSI_0: "0", kVK_ANSI_1: "1", kVK_ANSI_2: "2", kVK_ANSI_3: "3",
+			kVK_ANSI_4: "4", kVK_ANSI_5: "5", kVK_ANSI_6: "6", kVK_ANSI_7: "7",
+			kVK_ANSI_8: "8", kVK_ANSI_9: "9",
+			kVK_ANSI_Minus: "-", kVK_ANSI_Equal: "=",
+			kVK_ANSI_LeftBracket: "[", kVK_ANSI_RightBracket: "]",
+			kVK_ANSI_Semicolon: ";", kVK_ANSI_Quote: "'",
+			kVK_ANSI_Comma: ",", kVK_ANSI_Period: ".",
+			kVK_ANSI_Slash: "/", kVK_ANSI_Backslash: "\\",
+			kVK_ANSI_Grave: "`",
+			kVK_Return: "return", kVK_Tab: "tab", kVK_Space: "space",
+			kVK_Delete: "delete", kVK_ForwardDelete: "forwarddelete",
+			kVK_Escape: "escape",
+			kVK_LeftArrow: "left", kVK_RightArrow: "right",
+			kVK_UpArrow: "up", kVK_DownArrow: "down",
+			kVK_Home: "home", kVK_End: "end",
+			kVK_PageUp: "pageup", kVK_PageDown: "pagedown",
+		]
+		let functionKeys = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+		                    kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
+		for (index, code) in functionKeys.enumerated() {
+			names[code] = "f\(index + 1)"
+		}
+		return names
+	}()
+
+	/// Name -> key code, including the other spellings accepted when reading
+	private static let keyCodes: [String: Int] = {
+		var codes = Dictionary(uniqueKeysWithValues: keyNames.map { ($1, $0) })
+		codes["enter"] = kVK_Return
+		codes["backspace"] = kVK_Delete
+		codes["esc"] = kVK_Escape
+		return codes
+	}()
 }
 
 // MARK: - HotkeyBinding (a single key assignment)
 
-/// Represents a single hotkey assignment
-struct HotkeyBinding: Codable, Identifiable {
+/// Represents the keys assigned to one action
+struct HotkeyBinding: Identifiable {
 	var id: String { action.rawValue }
 	let action: HotkeyAction
-	var keyCode: Int
-	var modifiers: HotkeyModifiers
+	/// Every key that runs the action; empty leaves the action without a key
+	var keys: [HotkeyKey]
+
+	init(action: HotkeyAction, keys: [HotkeyKey]) {
+		self.action = action
+		self.keys = keys
+	}
+
+	init(action: HotkeyAction, keyCode: Int, modifiers: HotkeyModifiers) {
+		self.init(action: action, keys: [HotkeyKey(keyCode: keyCode, modifiers: modifiers)])
+	}
 
 	/// The action name (for UI display)
 	var displayName: String {
@@ -135,17 +250,15 @@ struct HotkeyBinding: Codable, Identifiable {
 
 	/// The shortcut's display string (e.g. Ctrl+Option+J)
 	var shortcutDisplayString: String {
-		let modStr = modifiers.displayString
-		let keyStr = HotkeyBinding.keyCodeToDisplayName(keyCode)
-		if modStr.isEmpty {
-			return keyStr
-		}
-		return "\(modStr)+\(keyStr)"
+		return HotkeyBinding.displayString(of: keys)
 	}
 
-	/// Generate the lookup key
-	var lookupKey: HotkeyLookupKey {
-		return HotkeyLookupKey(keyCode: keyCode, modifiers: modifiers)
+	/// The display string for a list of keys
+	static func displayString(of keys: [HotkeyKey]) -> String {
+		if keys.isEmpty {
+			return "None"
+		}
+		return keys.map(\.displayString).joined(separator: ", ")
 	}
 
 	// MARK: - Action name dictionary

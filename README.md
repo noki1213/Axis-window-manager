@@ -36,7 +36,60 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 5. Press the new key combination
 6. The shortcut is applied immediately
 
-If the key combination is already used by another action, a conflict warning will appear. To restore all shortcuts to their defaults, click "Restore Defaults" at the bottom of the settings.
+If the key combination is already used by another action, a conflict warning will appear. To restore all shortcuts to their defaults, click "Reset to Defaults" at the bottom of the settings.
+
+### The hotkeys file
+
+Shortcuts are stored in `~/Library/Application Support/Axis/hotkeys.json`, which can also be edited by hand. It is a JSON object from action name to key, and holds only the shortcuts that differ from the defaults:
+
+```json
+{
+  "zenToggle": "ctrl+opt+shift+z",
+  "focusLeft": ["ctrl+opt+j", "ctrl+opt+left"],
+  "hideWindow": ""
+}
+```
+
+- A key is written as modifiers and a key name joined by `+`. Modifiers: `cmd`, `shift`, `opt` (or `alt`), `ctrl`. Key names: letters, digits, symbols such as `,` `=` `[`, and `left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`–`f20`
+- A list gives one action several keys; an empty string leaves it without a key
+- Edits are picked up within a couple of seconds while Axis is running
+- An entry Axis can't read is skipped and that action keeps its default; the rest of the file still applies. If the file as a whole can't be read, Axis keeps the shortcuts already in use (the defaults at launch) and doesn't save over the file until it is fixed
+- Problems are listed at the top of the Shortcuts tab and in the menu bar menu, and pointed out once from the menu bar icon when they first appear
+- Changes made in Settings are merged into the file: other entries, including ones Axis doesn't know, are kept
+- `hotkeys.json` may be a symlink (for example into a dotfiles repository); Axis reads and writes the file it points to
+- A file in the older list format is converted on launch, after a copy of it is saved as `hotkeys.json.bak-array` next to it
+
+Actions and their default keys:
+
+| Action | In Settings | Default |
+|---|---|---|
+| `focusLeft` | Focus Left | `ctrl+opt+j` |
+| `focusRight` | Focus Right | `ctrl+opt+l` |
+| `focusUp` | Focus Up | `ctrl+opt+i` |
+| `focusDown` | Focus Down | `ctrl+opt+k` |
+| `focusBack` | Focus Previous Window | `ctrl+opt+a` |
+| `moveWindowLeft` | Move Window Left | `ctrl+opt+shift+j` |
+| `moveWindowRight` | Move Window Right | `ctrl+opt+shift+l` |
+| `moveWindowUp` | Move Window Up | `ctrl+opt+shift+i` |
+| `moveWindowDown` | Move Window Down | `ctrl+opt+shift+k` |
+| `stepMoveLeft` | Step Move Left (Merge / Split) | `ctrl+opt+h` |
+| `stepMoveRight` | Step Move Right (Merge / Split) | `ctrl+opt+;` |
+| `floatToggle` | Float ON/OFF | `ctrl+opt+f` |
+| `floatFocusCycle` | Focus Float Window | `ctrl+opt+shift+f` |
+| `raiseFloatingWindows` | Raise Floating Windows | `ctrl+opt+b` |
+| `hideWindow` | Hide Window | `ctrl+opt+x` |
+| `unhideLastWindow` | Restore Last Hidden Window | `ctrl+opt+shift+x` |
+| `zenToggle` | Zen Mode ON/OFF | `ctrl+opt+z` |
+| `gapSelectMode` | Gap Adjust Mode | `ctrl+opt+g` |
+| `windowPaletteMode` | Window Palette Mode | `ctrl+opt+p` |
+| `resetLayout` | Reset Layout | `ctrl+opt+r` |
+| `resizeIncrease` | Enlarge Window | `ctrl+opt+=` |
+| `resizeDecrease` | Shrink Window | `ctrl+opt+-` |
+| `workspaceNext` | Next Workspace | `ctrl+opt+o` |
+| `workspacePrev` | Previous Workspace | `ctrl+opt+u` |
+| `moveWindowToNextWorkspace` | Move Window to Next Workspace | `ctrl+opt+shift+o` |
+| `moveWindowToPrevWorkspace` | Move Window to Previous Workspace | `ctrl+opt+shift+u` |
+| `placementReserve` | Placement Reserve (Await Next Key) | `ctrl+opt+n` |
 
 ## Modes
 
@@ -215,7 +268,19 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 5. 新しいキーの組み合わせを押す
 6. ショートカットはすぐに反映されます
 
-すでに他の操作で使われているキーの組み合わせを設定しようとすると、重複の警告が表示されます。すべてのショートカットを元に戻したい場合は、設定画面の下にある「デフォルトに戻す」をクリックしてください。
+すでに他の操作で使われているキーの組み合わせを設定しようとすると、重複の警告が表示されます。すべてのショートカットを元に戻したい場合は、設定画面の下にある「Reset to Defaults」をクリックしてください。
+
+### ショートカットのファイル
+
+ショートカットは `~/Library/Application Support/Axis/hotkeys.json` に保存され、手で書き換えることもできます。操作名からキーへの JSON オブジェクトで、デフォルトと違うものだけを持ちます（書き方は英語版の「The hotkeys file」の例と同じ）。
+
+- キーは修飾キー（`cmd` `shift` `opt`（`alt`） `ctrl`）とキー名を `+` でつないで書きます。リストにすると1つの操作に複数のキー、空の文字列にするとキーなしになります
+- Axis の起動中に書き換えると、数秒のうちに反映されます
+- 読めない項目はその操作だけデフォルトに戻り、ほかはそのまま効きます。ファイル全体が読めないときは、使っていたショートカットのまま（起動時ならデフォルト）にし、直るまでファイルに上書きしません
+- 問題は Shortcuts タブの上とメニューバーのメニューに出て、新しく起きたときに一度だけメニューバーのアイコンから知らせます
+- 設定画面での変更はファイルに混ぜて書き込み、Axis の知らない項目も残します
+- `hotkeys.json` はシンボリックリンクでもよく、Axis はリンク先のファイルを読み書きします
+- 古いリスト形式のファイルは、起動時に `hotkeys.json.bak-array` として隣にコピーしてから変換します
 
 ## モード
 

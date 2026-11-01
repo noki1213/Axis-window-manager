@@ -11,22 +11,19 @@ import Carbon
 
 /// A button that records a key press (a SwiftUI wrapper)
 struct KeyRecorderButton: NSViewRepresentable {
-	let currentKeyCode: Int
-	let currentModifiers: HotkeyModifiers
-	let onRecorded: (Int, HotkeyModifiers) -> Void
+	let currentKeys: [HotkeyKey]
+	let onRecorded: (HotkeyKey) -> Void
 
 	func makeNSView(context: Context) -> KeyRecorderNSView {
 		let view = KeyRecorderNSView()
-		view.currentKeyCode = currentKeyCode
-		view.currentModifiers = currentModifiers
+		view.currentKeys = currentKeys
 		view.onRecorded = onRecorded
 		view.updateDisplayText()
 		return view
 	}
 
 	func updateNSView(_ nsView: KeyRecorderNSView, context: Context) {
-		nsView.currentKeyCode = currentKeyCode
-		nsView.currentModifiers = currentModifiers
+		nsView.currentKeys = currentKeys
 		nsView.onRecorded = onRecorded
 		if !nsView.isRecording {
 			nsView.updateDisplayText()
@@ -36,9 +33,8 @@ struct KeyRecorderButton: NSViewRepresentable {
 
 /// The NSView that receives key input
 class KeyRecorderNSView: NSView {
-	var currentKeyCode: Int = 0
-	var currentModifiers: HotkeyModifiers = []
-	var onRecorded: ((Int, HotkeyModifiers) -> Void)?
+	var currentKeys: [HotkeyKey] = []
+	var onRecorded: ((HotkeyKey) -> Void)?
 
 	/// Whether it's currently recording
 	var isRecording = false
@@ -164,11 +160,11 @@ class KeyRecorderNSView: NSView {
 		let modifiers = HotkeyModifiers.from(event.modifierFlags)
 
 		// Record it as a key code
-		currentKeyCode = keyCode
-		currentModifiers = modifiers
+		let key = HotkeyKey(keyCode: keyCode, modifiers: modifiers)
+		currentKeys = [key]
 
 		// Notify via the callback
-		onRecorded?(keyCode, modifiers)
+		onRecorded?(key)
 
 		stopRecording()
 	}
@@ -176,12 +172,7 @@ class KeyRecorderNSView: NSView {
 	// MARK: - Display update
 
 	func updateDisplayText() {
-		let binding = HotkeyBinding(
-			action: .focusLeft, // Dummy (not used to build the display name)
-			keyCode: currentKeyCode,
-			modifiers: currentModifiers
-		)
-		label.stringValue = binding.shortcutDisplayString
+		label.stringValue = HotkeyBinding.displayString(of: currentKeys)
 		label.textColor = NSColor.labelColor
 		backgroundBox.borderColor = NSColor.separatorColor
 		backgroundBox.fillColor = NSColor.controlBackgroundColor
