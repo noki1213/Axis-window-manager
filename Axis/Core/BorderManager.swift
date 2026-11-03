@@ -28,9 +28,7 @@ class BorderManager: ObservableObject {
     private let animationDuration: TimeInterval = 0.24 // Slide animation duration
 
     /// Apps that don't get a border.
-    /// Windows that appear only briefly, like a launcher, are distracting with a border on them, and moreover
-    /// Also excluded because it flickers while the border returns to the original window right after a close.
-    /// Nothing is excluded currently (the policy is to show a border on popups too). Add exclusions here if needed.
+    /// Empty, so popups get a border too. Add an app's bundle ID here to leave its windows without one.
     private let borderExcludedBundleIds: Set<String> = []
 
     /// System overlays, like notification banners and Control Center, that temporarily steal the frontmost position but have no focus window of their own.
@@ -114,7 +112,7 @@ class BorderManager: ObservableObject {
         
         let view = SelectionBorderView(frame: overlay.contentView!.bounds)
         view.wantsLayer = true
-        view.showsFill = false // No fill in normal mode!
+        view.showsFill = false // No fill in normal mode
         view.isDashed = isDashed // Keep the dashed style even if the border is rebuilt while waiting
         view.autoresizingMask = [.width, .height]
         overlay.contentView?.addSubview(view)

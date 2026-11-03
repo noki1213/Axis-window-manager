@@ -121,7 +121,7 @@ struct WindowInfo: Identifiable, Equatable {
         if !useAppActivate, setFrontProcessWithThisWindow() {
             // Raising the app and designating the key window are both already done by this point.
             // The follow-up AX write is a just-in-case backup, but for slow-responding apps
-            // Each call could block for up to 0.3 seconds, and two of those back to back were what made key presses feel sluggish.
+            // Each call can block for up to 0.3 seconds, and two of those back to back make key presses feel sluggish.
             // No need to wait for the result, so run it off the main thread in the background
             let element = axElement
             DispatchQueue.global(qos: .userInitiated).async {

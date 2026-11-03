@@ -522,9 +522,9 @@ class HotkeyManager: ObservableObject {
 
 	// MARK: - Gap Select Mode Key Handling
 
-	/// Key handling while in the new gap mode
+	/// Key handling while in gap mode
 	/// Each key is responsible for one edge, directly moving that edge of the focused window.
-	/// There's no select-then-confirm step; the edge moves the instant the key is pressed.
+	/// The edge moves the instant the key is pressed.
 	private func handleGapSelectModeKeyEvent(_ event: NSEvent) -> Bool {
 		// Enter: exit the mode (same as Escape)
 		if event.keyCode == kVK_Return {

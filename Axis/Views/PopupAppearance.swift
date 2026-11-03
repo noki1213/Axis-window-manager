@@ -52,7 +52,7 @@ enum PopupAppearance {
 
 	// MARK: - Appearance
 
-	/// Set up the panel's backing (rounded corners, border, black overlay) per the rules
+	/// Set up the panel's backing (rounded corners, border, black overlay)
 	static func styleBackground(_ view: NSView) {
 		view.wantsLayer = true
 		guard let layer = view.layer else { return }
