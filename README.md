@@ -159,7 +159,7 @@ Actions and their default keys:
 ### Workspace Management
 - Switch to next/previous workspace
 - Move the focused window to next/previous workspace
-- Empty workspaces are automatically removed and reordered
+- Empty workspaces are removed automatically, and the numbers of the remaining workspaces close up the gap
 
 ### Launching an App Aside
 Opens an app with its windows on an empty workspace of their own, past the last one in use, without touching the workspace on screen: its tiling and the keyboard focus stay as they are. Useful for build scripts that relaunch an app while you keep working.
@@ -272,15 +272,56 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 
 ### ショートカットのファイル
 
-ショートカットは `~/Library/Application Support/Axis/hotkeys.json` に保存され、手で書き換えることもできます。操作名からキーへの JSON オブジェクトで、デフォルトと違うものだけを持ちます（書き方は英語版の「The hotkeys file」の例と同じ）。
+ショートカットは `~/Library/Application Support/Axis/hotkeys.json` に保存され、手で書き換えることもできます。操作名からキーへの JSON オブジェクトで、デフォルトと違うものだけを持ちます。
 
-- キーは修飾キー（`cmd` `shift` `opt`（`alt`） `ctrl`）とキー名を `+` でつないで書きます。リストにすると1つの操作に複数のキー、空の文字列にするとキーなしになります
+```json
+{
+  "zenToggle": "ctrl+opt+shift+z",
+  "focusLeft": ["ctrl+opt+j", "ctrl+opt+left"],
+  "hideWindow": ""
+}
+```
+
+- キーは修飾キーとキー名を `+` でつないで書きます。修飾キー：`cmd`、`shift`、`opt`（または `alt`）、`ctrl`。キー名：英字、数字、`,` `=` `[` などの記号、`left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`〜`f20`
+- リストにすると1つの操作に複数のキー、空の文字列にするとキーなしになります
 - Axis の起動中に書き換えると、数秒のうちに反映されます
 - 読めない項目はその操作だけデフォルトに戻り、ほかはそのまま効きます。ファイル全体が読めないときは、使っていたショートカットのまま（起動時ならデフォルト）にし、直るまでファイルに上書きしません
 - 問題は Shortcuts タブの上とメニューバーのメニューに出て、新しく起きたときに一度だけメニューバーのアイコンから知らせます
 - 設定画面での変更はファイルに混ぜて書き込み、Axis の知らない項目も残します
 - `hotkeys.json` はシンボリックリンクでもよく、Axis はリンク先のファイルを読み書きします
 - 古いリスト形式のファイルは、起動時に `hotkeys.json.bak-array` として隣にコピーしてから変換します
+
+操作とデフォルトのキー：
+
+| 操作名 | 設定画面での表示 | デフォルト |
+|---|---|---|
+| `focusLeft` | Focus Left | `ctrl+opt+j` |
+| `focusRight` | Focus Right | `ctrl+opt+l` |
+| `focusUp` | Focus Up | `ctrl+opt+i` |
+| `focusDown` | Focus Down | `ctrl+opt+k` |
+| `focusBack` | Focus Previous Window | `ctrl+opt+a` |
+| `moveWindowLeft` | Move Window Left | `ctrl+opt+shift+j` |
+| `moveWindowRight` | Move Window Right | `ctrl+opt+shift+l` |
+| `moveWindowUp` | Move Window Up | `ctrl+opt+shift+i` |
+| `moveWindowDown` | Move Window Down | `ctrl+opt+shift+k` |
+| `stepMoveLeft` | Step Move Left (Merge / Split) | `ctrl+opt+h` |
+| `stepMoveRight` | Step Move Right (Merge / Split) | `ctrl+opt+;` |
+| `floatToggle` | Float ON/OFF | `ctrl+opt+f` |
+| `floatFocusCycle` | Focus Float Window | `ctrl+opt+shift+f` |
+| `raiseFloatingWindows` | Raise Floating Windows | `ctrl+opt+b` |
+| `hideWindow` | Hide Window | `ctrl+opt+x` |
+| `unhideLastWindow` | Restore Last Hidden Window | `ctrl+opt+shift+x` |
+| `zenToggle` | Zen Mode ON/OFF | `ctrl+opt+z` |
+| `gapSelectMode` | Gap Adjust Mode | `ctrl+opt+g` |
+| `windowPaletteMode` | Window Palette Mode | `ctrl+opt+p` |
+| `resetLayout` | Reset Layout | `ctrl+opt+r` |
+| `resizeIncrease` | Enlarge Window | `ctrl+opt+=` |
+| `resizeDecrease` | Shrink Window | `ctrl+opt+-` |
+| `workspaceNext` | Next Workspace | `ctrl+opt+o` |
+| `workspacePrev` | Previous Workspace | `ctrl+opt+u` |
+| `moveWindowToNextWorkspace` | Move Window to Next Workspace | `ctrl+opt+shift+o` |
+| `moveWindowToPrevWorkspace` | Move Window to Previous Workspace | `ctrl+opt+shift+u` |
+| `placementReserve` | Placement Reserve (Await Next Key) | `ctrl+opt+n` |
 
 ## モード
 
@@ -351,7 +392,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 ### ワークスペース管理
 - 次/前のワークスペースに切り替え
 - フォーカス中のウィンドウを次/前のワークスペースに移動
-- 空のワークスペースは自動的に削除され、ID が再割り当てされます
+- 空のワークスペースは自動的に削除され、残りのワークスペースの番号が詰め直される
 
 ### アプリを脇に起動する
 アプリを、使用中のいちばん右のワークスペースのさらに右にある空きワークスペースに起動します。いま表示中のワークスペースのタイリングとフォーカスはそのままです。作業中にビルドスクリプトがアプリを入れ直すときに使います。
@@ -360,6 +401,12 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 |---|---|
 | `open-aside /Applications/Some.app` | `bin/open-aside` のスクリプト。`~/.local/bin` など `PATH` の通ったフォルダにコピーして使う。Axis が起動していなければ普通に開く |
 | `axis://launch-aside?path=/Applications/Some.app` | コマンドの中身の URL スキーム（パスは URL エンコードする） |
+
+ビルドスクリプトでは次のように書きます。
+
+```bash
+if command -v open-aside >/dev/null; then open-aside "$APP"; else open "$APP"; fi
+```
 
 ## インストール
 
@@ -411,3 +458,7 @@ cp -R build/Build/Products/Release/Axis.app /Applications/
 3. システム設定 > プライバシーとセキュリティ > アクセシビリティ を開く
 4. Axis をリストに追加して有効化
 5. 必要に応じて Axis を再起動
+
+## ライセンス
+
+MIT
