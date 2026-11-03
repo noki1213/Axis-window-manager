@@ -362,7 +362,7 @@ struct HotkeyBinding: Identifiable {
 
 	// MARK: - Default values
 
-	/// The list of default settings matching the current hardcoded values
+	/// The default key of every action
 	static func defaults() -> [HotkeyBinding] {
 		let ctrlOpt: HotkeyModifiers = [.control, .option]
 		let ctrlOptShift: HotkeyModifiers = [.control, .option, .shift]

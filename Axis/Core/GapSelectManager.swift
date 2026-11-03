@@ -32,7 +32,7 @@ struct GapInfo: Equatable {
 	}
 }
 
-/// Manages the new gap mode
+/// Manages gap mode
 /// Directly moves the four edges (left, right, top, bottom) of the focused window.
 /// While in this mode, each key immediately switches which edge is being adjusted, allowing continuous adjustment.
 class GapSelectManager: ObservableObject {
@@ -40,7 +40,7 @@ class GapSelectManager: ObservableObject {
 
 	// MARK: - Published Properties
 
-	/// Whether the new gap mode is active
+	/// Whether gap mode is active
 	var isActive: Bool {
 		return !availableGaps.isEmpty
 	}
@@ -63,7 +63,7 @@ class GapSelectManager: ObservableObject {
 
 	// MARK: - Public Methods
 
-	/// Start the new gap mode
+	/// Start gap mode
 	func startGapSelectMode() {
 		guard let screen = getCurrentScreen() else { return }
 
@@ -80,7 +80,7 @@ class GapSelectManager: ObservableObject {
 		BorderManager.shared.updateBorder()
 	}
 
-	/// End the new gap mode
+	/// End gap mode
 	func endGapSelectMode() {
 		hideOverlay()
 
