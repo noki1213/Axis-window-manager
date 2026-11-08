@@ -30,13 +30,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // The settings window
     private var settingsWindow: NSWindow?
 
-    // Problems with hotkeys.json: a menu item while they last, and a popover once for each new set of them
-    private var hotkeyProblemsItem: NSMenuItem?
-    private var hotkeyProblemsSeparator: NSMenuItem?
+    // The panel the menu bar icon opens
+    private lazy var menuPanel = MenuPanelController(actions: MenuPanelActions(
+        openHotkeyProblems: { [weak self] in self?.runFromPanel { $0.openHotkeyProblems() } },
+        tileWindows: { [weak self] in self?.runFromPanel { $0.tileWindows() } },
+        openSettings: { [weak self] in self?.runFromPanel { $0.openSettings() } },
+        quit: { [weak self] in self?.runFromPanel { $0.quitApp() } }
+    ))
+
+    // Problems with hotkeys.json: a row in the panel while they last, and the panel opened once for each new set of them
     private var hotkeyProblemsObserver: AnyCancellable?
     private var shownHotkeyProblems: [String] = []
-    private var hotkeyProblemsPopover: NSPopover?
-    
+    /// Counts the panel's openings, so the timer that closes a problems notice leaves a later opening alone
+    private var panelOpenings = 0
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Registered before launch finishes, so a URL that launched Axis is not missed
         NSAppleEventManager.shared().setEventHandler(
@@ -130,40 +137,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
         
-        // Set up the menu
-        let menu = NSMenu()
-
-        // Shown only while hotkeys.json has problems
-        let problemsItem = NSMenuItem(title: "Problems in hotkeys.json…", action: #selector(openHotkeyProblems), keyEquivalent: "")
-        problemsItem.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
-        problemsItem.isHidden = true
-        menu.addItem(problemsItem)
-        hotkeyProblemsItem = problemsItem
-        let problemsSeparator = NSMenuItem.separator()
-        problemsSeparator.isHidden = true
-        menu.addItem(problemsSeparator)
-        hotkeyProblemsSeparator = problemsSeparator
-        
-        // Tile Windows: Ctrl+Option+T
-        let tileItem = NSMenuItem(title: "Tile Windows", action: #selector(tileWindows), keyEquivalent: "t")
-        tileItem.keyEquivalentModifierMask = [.control, .option]
-        menu.addItem(tileItem)
-        
-        menu.addItem(NSMenuItem.separator())
-        
-        // Settings: Ctrl+Option+,
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.keyEquivalentModifierMask = [.control, .option]
-        menu.addItem(settingsItem)
-        
-        menu.addItem(NSMenuItem.separator())
-        
-        // Quit: Ctrl+Option+Q
-        let quitItem = NSMenuItem(title: "Quit Axis", action: #selector(quitApp), keyEquivalent: "q")
-        quitItem.keyEquivalentModifierMask = [.control, .option]
-        menu.addItem(quitItem)
-        
-        statusItem?.menu = menu
+        menuPanel.onVisibilityChanged = { [weak self] visible in
+            self?.statusItem?.button?.highlight(visible)
+        }
     }
     
     private func updateStatusItemIcon(mode: HotkeyManager.Mode) {
@@ -184,46 +160,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // MARK: - Hotkeys file problems
 
-    /// Keep the menu item in step with the problems, and point at them from the menu bar icon when a new set appears
+    /// Point at a new set of problems by opening the panel, where they are listed under their row
     private func showHotkeyProblems(_ problems: [String]) {
-        hotkeyProblemsItem?.isHidden = problems.isEmpty
-        hotkeyProblemsSeparator?.isHidden = problems.isEmpty
-
         if problems.isEmpty {
             shownHotkeyProblems = []
-            hotkeyProblemsPopover?.close()
             return
         }
-        guard problems != shownHotkeyProblems, let button = statusItem?.button else { return }
+        guard problems != shownHotkeyProblems else { return }
         shownHotkeyProblems = problems
+        guard !menuPanel.isVisible, let anchor = statusItemFrame() else { return }
 
-        hotkeyProblemsPopover?.close()
-        let view = VStack(alignment: .leading, spacing: 0) {
-            HotkeyProblemsView(problems: problems)
-            HStack {
-                Spacer()
-                Button("Open Settings") { [weak self] in
-                    self?.hotkeyProblemsPopover?.close()
-                    self?.openHotkeyProblems()
-                }
-            }
-            .padding([.horizontal, .bottom], 12)
-        }
-        .frame(width: 380)
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: view)
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        hotkeyProblemsPopover = popover
+        // Not made key: the problems usually come from editing the file, and that typing carries on
+        menuPanel.show(below: anchor, takesKey: false)
+        panelOpenings += 1
+        let opening = panelOpenings
 
-        // Gets out of the way on its own; the menu item and the Shortcuts tab keep the details
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak popover] in
-            popover?.close()
+        // Gets out of the way on its own; the panel's row and the Shortcuts tab keep the details
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.panelOpenings == opening else { return }
+            self.menuPanel.hide()
         }
     }
 
     /// Open Settings at the Shortcuts tab, where the problems are listed
-    @objc private func openHotkeyProblems() {
+    private func openHotkeyProblems() {
         SettingsNavigation.shared.tab = .shortcuts
         openSettings()
     }
@@ -231,14 +191,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
     
     @objc private func statusItemClicked() {
-        // The right-click menu is shown by default
+        if menuPanel.isVisible {
+            menuPanel.hide()
+        } else if let anchor = statusItemFrame() {
+            menuPanel.show(below: anchor)
+            panelOpenings += 1
+        }
+    }
+
+    /// The status item's rect in screen coordinates
+    private func statusItemFrame() -> NSRect? {
+        guard let button = statusItem?.button, let window = button.window else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
+    }
+
+    /// Close the panel first, so the command's own windows and focus changes aren't covered by it
+    private func runFromPanel(_ command: (AppDelegate) -> Void) {
+        menuPanel.hide()
+        command(self)
     }
     
-    @objc private func tileWindows() {
+    private func tileWindows() {
         tilingEngine.tileAllScreens()
     }
     
-    @objc private func openSettings() {
+    private func openSettings() {
         // Bring it to the front if the window is already open
         if let window = settingsWindow, window.isVisible {
             window.makeKeyAndOrderFront(nil)
@@ -261,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
     
-    @objc private func quitApp() {
+    private func quitApp() {
         // Runs the window-restore logic from applicationWillTerminate
         NSApp.terminate(nil)
     }
