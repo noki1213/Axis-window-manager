@@ -248,7 +248,17 @@ class FocusFollowsMouseManager: ObservableObject {
 				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
 				// The border overlay always sits in front of the focused window, so
 				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
-				if pid == ownPID { continue }
+				// The menu bar panel sits at menu level above everything; the pointer on it is not
+				// on any window behind it, and focusing one would take the keyboard from the panel
+				if pid == ownPID {
+					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+					if layer >= Int(CGWindowLevelForKey(.popUpMenuWindow)), bounds.contains(cgPoint) {
+						hitTestSkipReason = "Axis menu panel"
+						return nil
+					}
+					continue
+				}
 
 				let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
 									width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
