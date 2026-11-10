@@ -12,7 +12,7 @@ import SwiftUI
 
 /// What the panel's rows do; supplied by the app delegate.
 struct MenuPanelActions {
-	let openHotkeyProblems: () -> Void
+	let openFileProblems: () -> Void
 	let tileWindows: () -> Void
 	let openSettings: () -> Void
 	let quit: () -> Void
@@ -20,7 +20,7 @@ struct MenuPanelActions {
 
 /// A row of the panel the pointer can rest on.
 enum MenuPanelRow: Hashable {
-	case hotkeyProblems, tileWindows, settings
+	case fileProblems, tileWindows, settings
 }
 
 /// State the controller drives and the sheet animates from.
@@ -237,7 +237,7 @@ final class MenuPanelController {
 
 // MARK: - Content
 
-private enum PanelPalette {
+enum PanelPalette {
 	static let black = Color(.sRGB, red: 0x26 / 255, green: 0x24 / 255, blue: 0x27 / 255, opacity: 1)
 	static let selection = Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255).opacity(0.3)
 	static let selectedText = Color(red: 0xfc / 255, green: 0xfc / 255, blue: 0xfa / 255)
@@ -248,18 +248,21 @@ struct MenuBarContentView: View {
 	let actions: MenuPanelActions
 
 	@ObservedObject private var hotkeyStore = HotkeyStore.shared
+	@ObservedObject private var settingsStore = SettingsStore.shared
 	@Namespace private var rowNamespace
 	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+	private var problems: [String] { settingsStore.problems + hotkeyStore.problems }
+
 	var body: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			if !hotkeyStore.problems.isEmpty {
+			if !problems.isEmpty {
 				VStack(alignment: .leading, spacing: 4) {
-					row(.hotkeyProblems, title: "Problems in hotkeys.json…",
+					row(.fileProblems, title: "Problems in the settings files…",
 						symbol: "exclamationmark.triangle", symbolColor: .orange, shortcut: nil,
-						action: actions.openHotkeyProblems)
+						action: actions.openFileProblems)
 					VStack(alignment: .leading, spacing: 2) {
-						ForEach(hotkeyStore.problems, id: \.self) { problem in
+						ForEach(problems, id: \.self) { problem in
 							Text(problem)
 								.font(.caption)
 								.foregroundColor(.secondary)
@@ -269,7 +272,7 @@ struct MenuBarContentView: View {
 					.padding(.horizontal, 6)
 				}
 
-				Divider()
+				Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 			}
 
 			VStack(alignment: .leading, spacing: 2) {
@@ -279,10 +282,10 @@ struct MenuBarContentView: View {
 					symbolColor: nil, shortcut: "⌃⌥,", action: actions.openSettings)
 			}
 
-			Divider()
+			Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
 
 			HStack {
-				Button("Quit Axis", action: actions.quit)
+				TextButton(title: "Quit Axis", action: actions.quit)
 				Spacer()
 				Text("⌃⌥Q")
 					.foregroundColor(.secondary)
@@ -334,7 +337,7 @@ struct MenuBarContentView: View {
 
 // MARK: - Material
 
-private struct VisualEffectView: NSViewRepresentable {
+struct VisualEffectView: NSViewRepresentable {
 	let material: NSVisualEffectView.Material
 	let blendingMode: NSVisualEffectView.BlendingMode
 
@@ -354,7 +357,7 @@ private struct VisualEffectView: NSViewRepresentable {
 
 /// Liquid Glass tinted dark where the system has it, frosted blur under the same tint before that.
 /// The tint fixes how bright the ground is, so light text stays readable over any window behind.
-private struct GlassBackground<S: Shape>: View {
+struct GlassBackground<S: Shape>: View {
 	let shape: S
 
 	var body: some View {

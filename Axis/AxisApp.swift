@@ -12,9 +12,9 @@ struct AxisApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        // Since it's a menu bar app, the WindowGroup is for the settings screen
+        // A menu bar app has no window of its own; the settings are a popup (SettingsView)
         Settings {
-            SettingsView()
+            EmptyView()
         }
     }
 }

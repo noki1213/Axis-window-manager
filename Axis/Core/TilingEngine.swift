@@ -16,13 +16,36 @@ class TilingEngine: ObservableObject {
     // MARK: - Configuration
     
     /// The gap between windows (in pixels)
-    @Published var windowGap: CGFloat = 12 {
-        didSet { applyLayoutConfig() }
+    @Published var windowGap: CGFloat = TilingEngine.savedGap("windowGap") {
+        didSet {
+            SettingsStore.shared.set("windowGap", Double(windowGap))
+            applyLayoutConfig()
+        }
     }
     
     /// The padding from the screen edge (in pixels)
-    @Published var screenPadding: CGFloat = 12 {
-        didSet { applyLayoutConfig() }
+    @Published var screenPadding: CGFloat = TilingEngine.savedGap("screenPadding") {
+        didSet {
+            SettingsStore.shared.set("screenPadding", Double(screenPadding))
+            applyLayoutConfig()
+        }
+    }
+
+    private static func savedGap(_ key: String) -> CGFloat {
+        CGFloat(SettingsStore.shared.number(key, default: 12, in: 0...200))
+    }
+
+    private var settingsObserver: AnyCancellable?
+
+    /// Take over the gap and padding of an edited settings file
+    private func observeSettingsFile() {
+        settingsObserver = SettingsStore.shared.externalChange.sink { [weak self] in
+            guard let self else { return }
+            let gap = Self.savedGap("windowGap")
+            if gap != self.windowGap { self.windowGap = gap }
+            let padding = Self.savedGap("screenPadding")
+            if padding != self.screenPadding { self.screenPadding = padding }
+        }
     }
 
     /// The gap and padding as the tracking state lays them out
@@ -45,7 +68,9 @@ class TilingEngine: ObservableObject {
     private let accessibilityManager = AccessibilityManager.shared
     private var coordinator: TrackingCoordinator { TrackingCoordinator.shared }
 
-    private init() {}
+    private init() {
+        observeSettingsFile()
+    }
 
     /// The tiled windows of the workspace shown on `screen`, per column (top to bottom), from the
     /// tracking state. Windows out of the layout this moment (on another Space, say) are left out.

@@ -2,7 +2,7 @@
 //  FloatingAppsStore.swift
 //  Axis
 //
-//  The apps whose windows always float (Settings > Floating), saved in UserDefaults. Their
+//  The apps whose windows always float (Settings > Floating), saved in settings.json. Their
 //  windows are never tiled: they float in no workspace, like System Settings.
 //
 
@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 /// An app on the floating list, with the name and icon the Floating tab shows
 struct FloatingApp: Identifiable, Equatable {
 	let bundleID: String
-	/// As Finder shows it; the name saved when it was added if the app cannot be found
+	/// As Finder shows it; the bundle identifier if the app cannot be found
 	let name: String
 	let icon: NSImage
 
@@ -32,19 +32,29 @@ final class FloatingAppsStore: ObservableObject {
 		Set(apps.map(\.bundleID))
 	}
 
-	/// Saved as [["bundleID": ..., "name": ...]]
-	private static let defaultsKey = "floatingApps"
+	/// Saved as a list of bundle identifiers
+	private static let settingsKey = "floatingApps"
+	private static let defaultBundleIDs = ["com.apple.systempreferences"]
+
+	private var settingsObserver: AnyCancellable?
 
 	private init() {
-		if let saved = UserDefaults.standard.array(forKey: Self.defaultsKey) as? [[String: String]] {
-			apps = saved.compactMap { entry in
-				guard let bundleID = entry["bundleID"] else { return nil }
-				return Self.app(bundleID: bundleID, savedName: entry["name"] ?? bundleID)
-			}
-		} else {
-			// System Settings shows fixed-size panes that do not tile
-			apps = [Self.app(bundleID: "com.apple.systempreferences", savedName: "System Settings")]
+		apps = Self.savedApps()
+		settingsObserver = SettingsStore.shared.externalChange.sink { [weak self] in
+			guard let self else { return }
+			let updated = Self.savedApps()
+			guard updated != self.apps else { return }
+			self.apps = updated
+			self.applyToTracking()
 		}
+	}
+
+	private static func savedApps() -> [FloatingApp] {
+		// System Settings shows fixed-size panes that do not tile
+		var seen = Set<String>()
+		return SettingsStore.shared.strings(settingsKey, default: defaultBundleIDs)
+			.filter { seen.insert($0).inserted }
+			.map { app(bundleID: $0, savedName: $0) }
 	}
 
 	// MARK: - Editing
@@ -73,8 +83,11 @@ final class FloatingAppsStore: ObservableObject {
 
 	/// Saves the list. The windows already open follow it once the list on screen has updated
 	private func listChanged() {
-		let entries = apps.map { ["bundleID": $0.bundleID, "name": $0.name] }
-		UserDefaults.standard.set(entries, forKey: Self.defaultsKey)
+		SettingsStore.shared.set(Self.settingsKey, apps.map(\.bundleID))
+		applyToTracking()
+	}
+
+	private func applyToTracking() {
 		DispatchQueue.main.async { [weak self] in
 			guard let self else { return }
 			WorkspaceManager.shared.setFloatingApps(self.bundleIDs)
