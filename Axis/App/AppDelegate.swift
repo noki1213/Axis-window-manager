@@ -24,23 +24,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Follows focus into other workspaces and hands it on when the focused window closes
     private let focusFollower = FocusFollower()
 
-    // The startup guide window
-    private var startupGuideController: StartupGuideWindowController?
-
-    // The settings window
-    private var settingsWindow: NSWindow?
+    // The popups shown at launch
+    private let startupGuide = GlassDialog()
+    private let accessibilityDialog = GlassDialog()
 
     // The panel the menu bar icon opens
     private lazy var menuPanel = MenuPanelController(actions: MenuPanelActions(
-        openHotkeyProblems: { [weak self] in self?.runFromPanel { $0.openHotkeyProblems() } },
+        openFileProblems: { [weak self] in self?.runFromPanel { $0.openFileProblems() } },
         tileWindows: { [weak self] in self?.runFromPanel { $0.tileWindows() } },
         openSettings: { [weak self] in self?.runFromPanel { $0.openSettings() } },
         quit: { [weak self] in self?.runFromPanel { $0.quitApp() } }
     ))
 
-    // Problems with hotkeys.json: a row in the panel while they last, and the panel opened once for each new set of them
+    // Problems with the settings files: a row in the panel while they last, and the panel opened once for each new set of them
     private var hotkeyProblemsObserver: AnyCancellable?
-    private var shownHotkeyProblems: [String] = []
+    private var shownFileProblems: [String] = []
     /// Counts the panel's openings, so the timer that closes a problems notice leaves a later opening alone
     private var panelOpenings = 0
 
@@ -58,6 +56,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ///     launch the app with its windows on an empty workspace, out of sight
     /// axis://focus-back
     ///     jump back to the previously focused window
+    /// axis://settings
+    ///     open the settings popup
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let components = URLComponents(string: string)
@@ -71,6 +71,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             LaunchAsideManager.shared.launch(appAt: url, on: workspaceManager.focusedScreen())
         case "focus-back":
             FocusHistoryManager.shared.jumpBack()
+        case "settings":
+            openSettings()
         default:
             break
         }
@@ -83,10 +85,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create the status bar item
         setupStatusItem()
 
-        hotkeyProblemsObserver = HotkeyStore.shared.$problems.sink { [weak self] problems in
-            // Published before the value changes, so handled on the next turn of the run loop
-            DispatchQueue.main.async { self?.showHotkeyProblems(problems) }
-        }
+        hotkeyProblemsObserver = HotkeyStore.shared.$problems
+            .combineLatest(SettingsStore.shared.$problems)
+            .sink { [weak self] hotkeyProblems, settingsProblems in
+                // Published before the value changes, so handled on the next turn of the run loop
+                DispatchQueue.main.async { self?.showFileProblems(settingsProblems + hotkeyProblems) }
+            }
         
         // Check the Accessibility permission
         if !accessibilityManager.checkAccessibility() {
@@ -158,16 +162,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: mode.rawValue)
     }
     
-    // MARK: - Hotkeys file problems
+    // MARK: - Settings file problems
 
     /// Point at a new set of problems by opening the panel, where they are listed under their row
-    private func showHotkeyProblems(_ problems: [String]) {
+    private func showFileProblems(_ problems: [String]) {
         if problems.isEmpty {
-            shownHotkeyProblems = []
+            shownFileProblems = []
             return
         }
-        guard problems != shownHotkeyProblems else { return }
-        shownHotkeyProblems = problems
+        guard problems != shownFileProblems else { return }
+        shownFileProblems = problems
         guard !menuPanel.isVisible, let anchor = statusItemFrame() else { return }
 
         // Not made key: the problems usually come from editing the file, and that typing carries on
@@ -182,9 +186,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Open Settings at the Shortcuts tab, where the problems are listed
-    private func openHotkeyProblems() {
-        SettingsNavigation.shared.tab = .shortcuts
+    /// Open Settings, where the problems are listed at the top
+    private func openFileProblems() {
+        SettingsNavigation.shared.tab = HotkeyStore.shared.problems.isEmpty ? .general : .shortcuts
         openSettings()
     }
 
@@ -216,26 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func openSettings() {
-        // Bring it to the front if the window is already open
-        if let window = settingsWindow, window.isVisible {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        // Create the NSWindow that hosts the settings screen
-        let settingsView = SettingsView()
-        let hostingController = NSHostingController(rootView: settingsView)
-
-        let window = NSWindow(contentViewController: hostingController)
-        window.title = "Axis Settings"
-        window.styleMask = [.titled, .closable]
-        window.center()
-        window.isReleasedWhenClosed = false
-
-        settingsWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        SettingsPanelController.shared.show()
     }
     
     private func quitApp() {
@@ -246,21 +231,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Accessibility
     
     private func showAccessibilityAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "Axis needs Accessibility permission to manage windows. Click 'Open System Settings' to grant permission."
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Quit")
-        alert.alertStyle = .warning
-        
-        NSApp.activate(ignoringOtherApps: true)
-        
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            accessibilityManager.requestAccessibility()
-        } else {
-            NSApp.terminate(nil)
-        }
+        accessibilityDialog.show(
+            title: "Accessibility Permission Required",
+            message: "Axis needs Accessibility permission to manage windows. Open System Settings to grant it.",
+            cancelTitle: "Quit",
+            confirmTitle: "Open System Settings",
+            onConfirm: { [weak self] in self?.accessibilityManager.requestAccessibility() },
+            onCancel: { NSApp.terminate(nil) }
+        )
     }
     
     @objc private func onAccessibilityPermissionGranted() {
@@ -271,11 +249,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Show the startup guide, and begin window management once the user signals they're ready
     private func showStartupGuide() {
-        startupGuideController = StartupGuideWindowController()
-        startupGuideController?.show { [weak self] in
-            self?.startupGuideController = nil
-            self?.startWindowManagement()
-        }
+        startupGuide.show(
+            title: "Before You Start Axis",
+            message: "Axis cannot manage windows across multiple macOS virtual desktops. Move all windows to a single desktop before continuing.",
+            confirmTitle: "Ready",
+            onConfirm: { [weak self] in self?.startWindowManagement() }
+        )
     }
 
     private func startWindowManagement() {

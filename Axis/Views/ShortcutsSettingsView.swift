@@ -6,19 +6,24 @@
 //
 
 import SwiftUI
+import Combine
 
 /// The overall view for the shortcut settings tab
 struct ShortcutsSettingsView: View {
 	@ObservedObject private var store = HotkeyStore.shared
 
-	/// For showing a duplicate-error alert
-	@State private var conflictAlert: ConflictAlertInfo?
+	/// The name of the action that already uses the key just recorded
+	@State private var conflictName: String?
+	@State private var conflictClearTask: DispatchWorkItem?
 
 	var body: some View {
 		VStack(spacing: 0) {
-			if !store.problems.isEmpty {
-				HotkeyProblemsView(problems: store.problems)
-				Divider()
+			if let conflictName {
+				Text("Key already used by \(conflictName).")
+					.foregroundColor(Color(red: 0xfc / 255, green: 0x9c / 255, blue: 0x9c / 255))
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.padding(.horizontal, 20)
+					.padding(.top, 12)
 			}
 
 			ScrollView {
@@ -36,23 +41,18 @@ struct ShortcutsSettingsView: View {
 				.padding()
 			}
 
-			Divider()
+			Rectangle()
+				.fill(Color.white.opacity(0.12))
+				.frame(height: 1)
 
 			// Reset-to-default button
 			HStack {
 				Spacer()
-				Button("Reset to Defaults") {
+				TextButton(title: "Reset to Defaults") {
 					store.resetToDefaults()
 				}
-				.padding()
+				.padding(12)
 			}
-		}
-		.alert(item: $conflictAlert) { info in
-			Alert(
-				title: Text("Key Already Assigned"),
-				message: Text("Already used by \(info.conflictingDisplayName)."),
-				dismissButton: .default(Text("OK"))
-			)
 		}
 	}
 
@@ -60,41 +60,16 @@ struct ShortcutsSettingsView: View {
 	private func handleUpdate(action: HotkeyAction, key: HotkeyKey) {
 		// Duplicate check
 		if let conflict = store.findConflict(key: key, excludeAction: action) {
-			conflictAlert = ConflictAlertInfo(conflictingDisplayName: conflict.displayName)
+			conflictName = conflict.displayName
+			conflictClearTask?.cancel()
+			let task = DispatchWorkItem { conflictName = nil }
+			conflictClearTask = task
+			DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: task)
 			return
 		}
 
+		conflictName = nil
 		store.updateBinding(action: action, key: key)
-	}
-}
-
-/// Data for the duplicate alert
-struct ConflictAlertInfo: Identifiable {
-	let id = UUID()
-	let conflictingDisplayName: String
-}
-
-// MARK: - Problems with hotkeys.json
-
-/// Lists what's wrong with hotkeys.json above the shortcuts
-struct HotkeyProblemsView: View {
-	let problems: [String]
-
-	var body: some View {
-		HStack(alignment: .top, spacing: 8) {
-			Image(systemName: "exclamationmark.triangle.fill")
-				.foregroundColor(.orange)
-			VStack(alignment: .leading, spacing: 4) {
-				ForEach(problems, id: \.self) { problem in
-					Text(problem)
-						.font(.callout)
-						.fixedSize(horizontal: false, vertical: true)
-				}
-			}
-			Spacer(minLength: 0)
-		}
-		.padding(12)
-		.background(Color.orange.opacity(0.1))
 	}
 }
 
@@ -110,6 +85,7 @@ struct ShortcutSectionView: View {
 		VStack(alignment: .leading, spacing: 4) {
 			Text(section.rawValue)
 				.font(.headline)
+				.foregroundColor(PanelPalette.selectedText)
 				.padding(.bottom, 4)
 
 			ForEach(bindings) { binding in

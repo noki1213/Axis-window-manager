@@ -23,14 +23,14 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Workspace Peek: Hold Ctrl+Option to preview the adjacent workspaces as two cards in the middle of the screen.
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
-- Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
+- Custom Keyboard Shortcuts: Remap all shortcuts from the Settings popup.
 - State Persistence: Workspaces and window positions are preserved across sleep and lock. After Axis is relaunched or updated, the workspaces, their order, the columns and the floating windows come back as they were; windows that no longer exist are skipped.
 - Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
 ## Customizing Keyboard Shortcuts
 
 1. Click the Axis icon in the menu bar
-2. Select "Settings..."
+2. Select "Settings…"
 3. Open the Shortcuts tab
 4. Click the key field next to the action you want to change
 5. Press the new key combination
@@ -54,7 +54,7 @@ Shortcuts are stored in `~/Library/Application Support/Axis/hotkeys.json`, which
 - A list gives one action several keys; an empty string leaves it without a key
 - Edits are picked up within a couple of seconds while Axis is running
 - An entry Axis can't read is skipped and that action keeps its default; the rest of the file still applies. If the file as a whole can't be read, Axis keeps the shortcuts already in use (the defaults at launch) and doesn't save over the file until it is fixed
-- Problems are listed at the top of the Shortcuts tab and in the menu bar menu, and pointed out once from the menu bar icon when they first appear
+- Problems are listed at the top of the Settings popup and in the menu bar panel, and pointed out once from the menu bar icon when they first appear
 - Changes made in Settings are merged into the file: other entries, including ones Axis doesn't know, are kept
 - `hotkeys.json` may be a symlink (for example into a dotfiles repository); Axis reads and writes the file it points to
 - A file in the older list format is converted on launch, after a copy of it is saved as `hotkeys.json.bak-array` next to it
@@ -90,6 +90,34 @@ Actions and their default keys:
 | `moveWindowToNextWorkspace` | Move Window to Next Workspace | `ctrl+opt+shift+o` |
 | `moveWindowToPrevWorkspace` | Move Window to Previous Workspace | `ctrl+opt+shift+u` |
 | `placementReserve` | Placement Reserve (Await Next Key) | `ctrl+opt+n` |
+
+### The settings file
+
+All other settings are stored in `~/Library/Application Support/Axis/settings.json`, which can also be edited by hand. Settings changed in the Settings popup are written to it, and edits to the file take effect within a couple of seconds while Axis is running. It may be a symlink; Axis reads and writes the file it points to.
+
+```json
+{
+  "focusFollowsMouse": true,
+  "focusFollowsMouseDelayMs": 50,
+  "focusBackSettleSeconds": 10,
+  "windowGap": 12,
+  "screenPadding": 12,
+  "floatingApps": ["com.apple.systempreferences"],
+  "perfLog": true
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `focusFollowsMouse` | Focus the window under the mouse pointer | `true` |
+| `focusFollowsMouseDelayMs` | Delay before focusing, 0–500 | `50` |
+| `focusBackSettleSeconds` | Seconds a window must keep focus to count for Focus Previous Window, 1–30 | `10` |
+| `windowGap` | Gap between windows in pixels, 0–200 | `12` |
+| `screenPadding` | Padding from the screen edge in pixels, 0–200 | `12` |
+| `floatingApps` | Bundle identifiers of the apps whose windows always float | System Settings |
+| `perfLog` | Write timing measurements to `~/Library/Logs` | `true` |
+
+A value of the wrong type or out of range is skipped and that setting keeps its default; problems are listed at the top of the Settings popup and in the menu bar panel. Entries Axis doesn't know are kept when it saves. If the file can't be read as a whole, Axis keeps the settings in use and doesn't save over it until it is fixed. Launch at Login is the system's login item and is not part of the file.
 
 ## Modes
 
@@ -168,6 +196,8 @@ Opens an app with its windows on an empty workspace of their own, past the last 
 |---|---|
 | `open-aside /Applications/Some.app` | The `bin/open-aside` script; copy it to a folder on your `PATH` such as `~/.local/bin`. Opens the app normally when Axis is not running |
 | `axis://launch-aside?path=/Applications/Some.app` | URL scheme behind the command (the path is URL-encoded) |
+| `axis://focus-back` | Jump back to the previously focused window |
+| `axis://settings` | Open the Settings popup |
 
 In a build script:
 
@@ -286,7 +316,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 - リストにすると1つの操作に複数のキー、空の文字列にするとキーなしになります
 - Axis の起動中に書き換えると、数秒のうちに反映されます
 - 読めない項目はその操作だけデフォルトに戻り、ほかはそのまま効きます。ファイル全体が読めないときは、使っていたショートカットのまま（起動時ならデフォルト）にし、直るまでファイルに上書きしません
-- 問題は Shortcuts タブの上とメニューバーのメニューに出て、新しく起きたときに一度だけメニューバーのアイコンから知らせます
+- 問題は 設定画面の上部とメニューバーのパネルに出て、新しく起きたときに一度だけメニューバーのアイコンから知らせます
 - 設定画面での変更はファイルに混ぜて書き込み、Axis の知らない項目も残します
 - `hotkeys.json` はシンボリックリンクでもよく、Axis はリンク先のファイルを読み書きします
 - 古いリスト形式のファイルは、起動時に `hotkeys.json.bak-array` として隣にコピーしてから変換します
@@ -322,6 +352,22 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 | `moveWindowToNextWorkspace` | Move Window to Next Workspace | `ctrl+opt+shift+o` |
 | `moveWindowToPrevWorkspace` | Move Window to Previous Workspace | `ctrl+opt+shift+u` |
 | `placementReserve` | Placement Reserve (Await Next Key) | `ctrl+opt+n` |
+
+### 設定ファイル
+
+ショートカット以外の設定は `~/Library/Application Support/Axis/settings.json` に保存され、手で書き換えることもできます。設定画面で変えた内容はここに書かれ、ファイルの編集は Axis の起動中に数秒で反映されます。シンボリックリンクでもよく、Axis はリンク先を読み書きします。
+
+| キー | 意味 | 初期値 |
+|---|---|---|
+| `focusFollowsMouse` | マウスポインタの下のウィンドウにフォーカスする | `true` |
+| `focusFollowsMouseDelayMs` | フォーカスするまでの遅れ（0〜500） | `50` |
+| `focusBackSettleSeconds` | 前のウィンドウに戻る対象になるまでフォーカスを保つ秒数（1〜30） | `10` |
+| `windowGap` | ウィンドウの間隔（px、0〜200） | `12` |
+| `screenPadding` | 画面端の余白（px、0〜200） | `12` |
+| `floatingApps` | ウィンドウを常に浮かせるアプリの bundle ID の一覧 | システム設定 |
+| `perfLog` | 計測ログを `~/Library/Logs` に書く | `true` |
+
+型や範囲が違う値は読み飛ばされ、その項目だけ初期値になります。問題は設定画面の上部とメニューバーのパネルに出ます。Axis が知らない項目は保存時にも残ります。ファイル全体が読めないときは、使っている設定を保ったまま、直るまで上書きしません。ログイン時に起動はシステムのログイン項目で、このファイルには含まれません。
 
 ## モード
 
@@ -401,6 +447,8 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 |---|---|
 | `open-aside /Applications/Some.app` | `bin/open-aside` のスクリプト。`~/.local/bin` など `PATH` の通ったフォルダにコピーして使う。Axis が起動していなければ普通に開く |
 | `axis://launch-aside?path=/Applications/Some.app` | コマンドの中身の URL スキーム（パスは URL エンコードする） |
+| `axis://focus-back` | 前にフォーカスしていたウィンドウに戻る |
+| `axis://settings` | 設定画面を開く |
 
 ビルドスクリプトでは次のように書きます。
 

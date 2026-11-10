@@ -13,12 +13,9 @@ import AppKit
 /// A helper for measurement logging
 enum PerfLog {
 
-	/// Whether measurement logging is enabled ("perfLogEnabled" in UserDefaults, default true)
+	/// Whether measurement logging is enabled ("perfLog" in settings.json, default true)
 	static var enabled: Bool {
-		if UserDefaults.standard.object(forKey: "perfLogEnabled") == nil {
-			return true
-		}
-		return UserDefaults.standard.bool(forKey: "perfLogEnabled")
+		SettingsStore.shared.bool("perfLog", default: true)
 	}
 
 	// MARK: - File output

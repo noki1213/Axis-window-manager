@@ -14,16 +14,14 @@ import Combine
 class FocusHistoryManager: ObservableObject {
 	static let shared = FocusHistoryManager()
 
-	// MARK: - Settings (persisted to UserDefaults)
-
-	private static let settleSecondsKey = "focusHistorySettleSeconds"
+	// MARK: - Settings (settings.json)
 
 	/// How long a window must keep focus before it is remembered (seconds)
 	@Published var settleSeconds: Double {
-		didSet {
-			UserDefaults.standard.set(settleSeconds, forKey: Self.settleSecondsKey)
-		}
+		didSet { SettingsStore.shared.set("focusBackSettleSeconds", settleSeconds) }
 	}
+
+	private var settingsObserver: AnyCancellable?
 
 	// MARK: - Internal state
 
@@ -36,10 +34,13 @@ class FocusHistoryManager: ObservableObject {
 	private var pendingSettle: DispatchWorkItem?
 
 	private init() {
-		if UserDefaults.standard.object(forKey: Self.settleSecondsKey) == nil {
-			UserDefaults.standard.set(10.0, forKey: Self.settleSecondsKey)
+		let settings = SettingsStore.shared
+		settleSeconds = settings.number("focusBackSettleSeconds", default: 10, in: 1...30)
+		settingsObserver = settings.externalChange.sink { [weak self] in
+			guard let self else { return }
+			let seconds = settings.number("focusBackSettleSeconds", default: 10, in: 1...30)
+			if seconds != self.settleSeconds { self.settleSeconds = seconds }
 		}
-		self.settleSeconds = UserDefaults.standard.double(forKey: Self.settleSecondsKey)
 	}
 
 	// MARK: - Tracking

@@ -12,24 +12,19 @@ import Combine
 class FocusFollowsMouseManager: ObservableObject {
 	static let shared = FocusFollowsMouseManager()
 
-	// MARK: - Settings (persisted to UserDefaults)
-
-	private static let enabledKey = "focusFollowsMouseEnabled"
-	private static let delayKey = "focusFollowsMouseDelayMs"
+	// MARK: - Settings (settings.json)
 
 	/// Whether the feature is on or off
 	@Published var isEnabled: Bool {
-		didSet {
-			UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
-		}
+		didSet { SettingsStore.shared.set("focusFollowsMouse", isEnabled) }
 	}
 
 	/// The delay from the mouse landing on it to focusing (milliseconds)
 	@Published var delayMs: Double {
-		didSet {
-			UserDefaults.standard.set(delayMs, forKey: Self.delayKey)
-		}
+		didSet { SettingsStore.shared.set("focusFollowsMouseDelayMs", delayMs) }
 	}
+
+	private var settingsObserver: AnyCancellable?
 
 	// MARK: - Internal state
 
@@ -45,15 +40,20 @@ class FocusFollowsMouseManager: ObservableObject {
 	private var hitTestSkipReason: String?
 
 	private init() {
-		// Default: enabled, 50ms (same as the AutoRaise setting)
-		if UserDefaults.standard.object(forKey: Self.enabledKey) == nil {
-			UserDefaults.standard.set(true, forKey: Self.enabledKey)
-		}
-		if UserDefaults.standard.object(forKey: Self.delayKey) == nil {
-			UserDefaults.standard.set(50.0, forKey: Self.delayKey)
-		}
-		self.isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
-		self.delayMs = UserDefaults.standard.double(forKey: Self.delayKey)
+		let settings = SettingsStore.shared
+		// Default: enabled, 50ms
+		isEnabled = settings.bool("focusFollowsMouse", default: true)
+		delayMs = settings.number("focusFollowsMouseDelayMs", default: 50, in: 0...500)
+		settingsObserver = settings.externalChange.sink { [weak self] in self?.reloadSettings() }
+	}
+
+	/// Take over the values of an edited settings file
+	private func reloadSettings() {
+		let settings = SettingsStore.shared
+		let enabled = settings.bool("focusFollowsMouse", default: true)
+		if enabled != isEnabled { isEnabled = enabled }
+		let delay = settings.number("focusFollowsMouseDelayMs", default: 50, in: 0...500)
+		if delay != delayMs { delayMs = delay }
 	}
 
 	// MARK: - Starting monitoring
