@@ -281,6 +281,14 @@ class HotkeyStore: ObservableObject {
 		}
 	}
 
+	/// Leave an action without a key; hotkeys.json holds "" for it
+	func clearBinding(action: HotkeyAction) {
+		if let index = bindings.firstIndex(where: { $0.action == action }) {
+			bindings[index].keys = []
+			saveToDisk([action])
+		}
+	}
+
 	// MARK: - Duplicate check
 
 	/// Check whether the given key combination is already used by another action.
