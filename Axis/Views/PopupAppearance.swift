@@ -64,6 +64,17 @@ enum PopupAppearance {
 		layer.borderColor = borderColor.cgColor
 	}
 
+	/// Set up a backing that carries the glass itself: only rounding, clipping, and the border
+	static func styleGlassBackground(_ view: NSView) {
+		view.wantsLayer = true
+		guard let layer = view.layer else { return }
+		layer.cornerRadius = cornerRadius
+		layer.cornerCurve = .continuous
+		layer.masksToBounds = true
+		layer.borderWidth = 1
+		layer.borderColor = borderColor.cgColor
+	}
+
 	// MARK: - Appearing and disappearing
 
 	/// Bring the window to the front with an appearance animation
