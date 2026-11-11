@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import SwiftUI
 
 /// Data displayed in the window palette (for a single window)
 struct WindowPaletteItem {
@@ -81,8 +82,13 @@ class WindowPalettePanel: NSPanel {
 	/// The widest the card area may grow before cards wrap onto the next line
 	private var maxContentWidth: CGFloat = 0
 
-	/// The visual effect view used for the background blur
-	private let visualEffectView = NSVisualEffectView()
+	/// The rounded backing that clips the content and draws the border
+	private let backgroundView = NSView()
+
+	/// The tinted Liquid Glass behind the content
+	private let glassView = NSHostingView(
+		rootView: GlassBackground(shape: RoundedRectangle(cornerRadius: PopupAppearance.cornerRadius, style: .continuous))
+	)
 
 	/// The spacing between cards
 	private let cardSpacing: CGFloat = 8
@@ -127,14 +133,19 @@ class WindowPalettePanel: NSPanel {
 		setupViews()
 	}
 
+	/// AppKit asks the window for these two values when it decides how to draw glass; answering
+	/// the same in every focus state keeps the glass dense instead of washing out when unfocused.
+	@objc func hasKeyAppearance() -> Bool { true }
+	@objc func hasMainAppearance() -> Bool { true }
+
 	// MARK: - Setup
 
 	private func setupViews() {
-		// The background blur view
-		visualEffectView.material = .hudWindow
-		visualEffectView.blendingMode = .behindWindow
-		visualEffectView.state = .active
-		PopupAppearance.styleBackground(visualEffectView)
+		// The rounded glass backing
+		PopupAppearance.styleGlassBackground(backgroundView)
+		glassView.sizingOptions = []
+		glassView.translatesAutoresizingMaskIntoConstraints = false
+		backgroundView.addSubview(glassView)
 
 		// The sliding selection highlight view
 		highlightView.wantsLayer = true
@@ -161,17 +172,22 @@ class WindowPalettePanel: NSPanel {
 		scrollView.translatesAutoresizingMaskIntoConstraints = false
 		scrollView.documentView = documentView
 
-		visualEffectView.addSubview(scrollView)
-		visualEffectView.translatesAutoresizingMaskIntoConstraints = false
+		backgroundView.addSubview(scrollView)
+		backgroundView.translatesAutoresizingMaskIntoConstraints = false
 
-		self.contentView = visualEffectView
+		self.contentView = backgroundView
 
 		let clipView = scrollView.contentView
 		NSLayoutConstraint.activate([
-			scrollView.topAnchor.constraint(equalTo: visualEffectView.topAnchor),
-			scrollView.bottomAnchor.constraint(equalTo: visualEffectView.bottomAnchor),
-			scrollView.leadingAnchor.constraint(equalTo: visualEffectView.leadingAnchor),
-			scrollView.trailingAnchor.constraint(equalTo: visualEffectView.trailingAnchor),
+			glassView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+			glassView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
+			glassView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+			glassView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+
+			scrollView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+			scrollView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
+			scrollView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+			scrollView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
 
 			documentView.topAnchor.constraint(equalTo: clipView.topAnchor),
 			documentView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
@@ -201,7 +217,7 @@ class WindowPalettePanel: NSPanel {
 
 		rebuildViews()
 		positionOnScreen()
-		visualEffectView.layoutSubtreeIfNeeded()
+		backgroundView.layoutSubtreeIfNeeded()
 		updateSelection(animated: false)
 
 		PopupAppearance.show(self) { [weak self] in
@@ -417,7 +433,7 @@ class WindowPalettePanel: NSPanel {
 		      cardViews[displayIndex].indices.contains(spaceIndex),
 		      cardViews[displayIndex][spaceIndex].indices.contains(itemIndex) else { return nil }
 
-		visualEffectView.layoutSubtreeIfNeeded()
+		backgroundView.layoutSubtreeIfNeeded()
 		let current = cardViews[displayIndex][spaceIndex][itemIndex].convert(
 			cardViews[displayIndex][spaceIndex][itemIndex].bounds, to: documentView
 		)
@@ -452,7 +468,7 @@ class WindowPalettePanel: NSPanel {
 	private func positionOnScreen() {
 		guard let screen = NSScreen.main else { return }
 
-		visualEffectView.layoutSubtreeIfNeeded()
+		backgroundView.layoutSubtreeIfNeeded()
 		let contentSize = mainVerticalStack.fittingSize
 		let visible = screen.visibleFrame
 
@@ -467,7 +483,7 @@ class WindowPalettePanel: NSPanel {
 		)
 
 		self.setFrame(panelFrame, display: true)
-		visualEffectView.layoutSubtreeIfNeeded()
+		backgroundView.layoutSubtreeIfNeeded()
 		documentView.scroll(.zero)
 	}
 
