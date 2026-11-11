@@ -32,6 +32,7 @@ struct ShortcutsSettingsView: View {
 						ShortcutSectionView(
 							section: section,
 							bindings: store.bindings.filter { $0.section == section },
+							keyColumnWidth: keyColumnWidth,
 							onUpdate: { action, key in
 								handleUpdate(action: action, key: key)
 							}
@@ -56,8 +57,17 @@ struct ShortcutsSettingsView: View {
 		}
 	}
 
-	/// Update a key setting (with a duplicate check)
-	private func handleUpdate(action: HotkeyAction, key: HotkeyKey) {
+	/// One key column width for every cell, fitted to the longest key name in the list
+	private var keyColumnWidth: CGFloat {
+		KeyCellMetrics.keyColumnWidth(for: store.bindings.flatMap(\.keys))
+	}
+
+	/// Update a key setting (with a duplicate check); nil clears it
+	private func handleUpdate(action: HotkeyAction, key: HotkeyKey?) {
+		guard let key else {
+			store.clearBinding(action: action)
+			return
+		}
 		// Duplicate check
 		if let conflict = store.findConflict(key: key, excludeAction: action) {
 			conflictName = conflict.displayName
@@ -79,7 +89,8 @@ struct ShortcutsSettingsView: View {
 struct ShortcutSectionView: View {
 	let section: HotkeySection
 	let bindings: [HotkeyBinding]
-	let onUpdate: (HotkeyAction, HotkeyKey) -> Void
+	let keyColumnWidth: CGFloat
+	let onUpdate: (HotkeyAction, HotkeyKey?) -> Void
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 4) {
@@ -91,6 +102,7 @@ struct ShortcutSectionView: View {
 			ForEach(bindings) { binding in
 				ShortcutRowView(
 					binding: binding,
+					keyColumnWidth: keyColumnWidth,
 					onUpdate: { key in
 						onUpdate(binding.action, key)
 					}
@@ -102,23 +114,26 @@ struct ShortcutSectionView: View {
 
 // MARK: - Single-row shortcut display
 
-/// A single key assignment (action name + record button)
+/// A single key assignment (action name + one key cell per key)
 struct ShortcutRowView: View {
 	let binding: HotkeyBinding
-	let onUpdate: (HotkeyKey) -> Void
+	let keyColumnWidth: CGFloat
+	let onUpdate: (HotkeyKey?) -> Void
 
 	var body: some View {
 		HStack {
 			Text(binding.displayName)
 				.frame(maxWidth: .infinity, alignment: .leading)
 
-			KeyRecorderButton(
-				currentKeys: binding.keys,
-				onRecorded: { key in
-					onUpdate(key)
+			VStack(spacing: 4) {
+				if binding.keys.isEmpty {
+					KeyRecorderButton(key: nil, keyColumnWidth: keyColumnWidth, onRecorded: onUpdate)
+				} else {
+					ForEach(binding.keys, id: \.self) { key in
+						KeyRecorderButton(key: key, keyColumnWidth: keyColumnWidth, onRecorded: onUpdate)
+					}
 				}
-			)
-			.frame(width: 180, height: 28)
+			}
 		}
 		.padding(.vertical, 2)
 	}

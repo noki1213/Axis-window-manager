@@ -2,193 +2,187 @@
 //  KeyRecorderButton.swift
 //  Axis
 //
-//  A button for recording a shortcut key
+//  A key cell: modifiers in fixed columns, then the key. Click it, then press the key to assign.
 //
 
 import SwiftUI
 import AppKit
 import Carbon
+import Combine
 
-/// A button that records a key press (a SwiftUI wrapper)
-struct KeyRecorderButton: NSViewRepresentable {
-	let currentKeys: [HotkeyKey]
-	let onRecorded: (HotkeyKey) -> Void
+/// The fixed layout of key cells: four modifier columns (⌘ ⌥ ⌃ ⇧) and a key column
+enum KeyCellMetrics {
+	static let modifierWidth: CGFloat = 18
+	static let height: CGFloat = 26
+	static let padding: CGFloat = 8
+	static let font = NSFont.systemFont(ofSize: 13, weight: .semibold)
 
-	func makeNSView(context: Context) -> KeyRecorderNSView {
-		let view = KeyRecorderNSView()
-		view.currentKeys = currentKeys
-		view.onRecorded = onRecorded
-		view.updateDisplayText()
-		return view
+	/// The key column width that fits the longest key name among the given keys
+	static func keyColumnWidth(for keys: [HotkeyKey]) -> CGFloat {
+		let widest = keys
+			.map { ($0.keyName as NSString).size(withAttributes: [.font: font]).width }
+			.max() ?? 0
+		return ceil(max(widest, 16)) + 4
 	}
 
-	func updateNSView(_ nsView: KeyRecorderNSView, context: Context) {
-		nsView.currentKeys = currentKeys
-		nsView.onRecorded = onRecorded
-		if !nsView.isRecording {
-			nsView.updateDisplayText()
+	static func cellWidth(keyColumnWidth: CGFloat) -> CGFloat {
+		modifierWidth * 4 + keyColumnWidth + padding * 2
+	}
+}
+
+/// One key cell. Recording state is local to the cell; `onRecorded` gets nil when Delete clears the key.
+struct KeyRecorderButton: View {
+	/// The key shown; nil for an empty cell
+	let key: HotkeyKey?
+	let keyColumnWidth: CGFloat
+	let onRecorded: (HotkeyKey?) -> Void
+
+	@StateObject private var recorder = KeyRecorder()
+
+	private static let teal = Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255)
+	private static let tealText = Color(red: 0x7A / 255, green: 0xC5 / 255, blue: 0xC5 / 255)
+
+	var body: some View {
+		let width = KeyCellMetrics.cellWidth(keyColumnWidth: keyColumnWidth)
+		ZStack {
+			if recorder.isRecording {
+				Text("Press keys…")
+					.font(.system(size: 11))
+					.foregroundColor(Self.tealText)
+			} else if let key {
+				HStack(spacing: 0) {
+					ForEach(KeyCellModifier.allCases, id: \.self) { modifier in
+						Text(modifier.symbol)
+							.opacity(key.modifiers.contains(modifier.flag) ? 1 : 0)
+							.frame(width: KeyCellMetrics.modifierWidth)
+					}
+					Text(key.keyName)
+						.lineLimit(1)
+						.minimumScaleFactor(0.6)
+						.frame(width: keyColumnWidth)
+				}
+				.font(.system(size: 13, weight: .semibold, design: .rounded))
+				.foregroundColor(Color(red: 0xFC / 255, green: 0xFC / 255, blue: 0xFA / 255))
+			} else {
+				Text("None")
+					.font(.system(size: 11))
+					.foregroundColor(Color.secondary)
+			}
+		}
+		.frame(width: width, height: KeyCellMetrics.height)
+		.background(background)
+		.overlay(border)
+		.contentShape(Rectangle())
+		.onTapGesture {
+			if recorder.isRecording {
+				recorder.stop()
+			} else {
+				recorder.start(onRecorded: onRecorded)
+			}
+		}
+	}
+
+	private var shape: RoundedRectangle {
+		RoundedRectangle(cornerRadius: 7, style: .continuous)
+	}
+
+	@ViewBuilder private var background: some View {
+		if recorder.isRecording {
+			shape.fill(Self.teal.opacity(0.12))
+		} else if key != nil {
+			shape.fill(Color.black.opacity(0.55))
+		} else {
+			Color.clear
+		}
+	}
+
+	@ViewBuilder private var border: some View {
+		if recorder.isRecording {
+			shape.strokeBorder(Self.teal, lineWidth: 1)
+		} else if key != nil {
+			shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+		} else {
+			shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
 		}
 	}
 }
 
-/// The NSView that receives key input
-class KeyRecorderNSView: NSView {
-	var currentKeys: [HotkeyKey] = []
-	var onRecorded: ((HotkeyKey) -> Void)?
+/// The modifier columns, in display order
+enum KeyCellModifier: CaseIterable {
+	case command, option, control, shift
 
-	/// Whether it's currently recording
-	var isRecording = false
+	var symbol: String {
+		switch self {
+		case .command: return "⌘"
+		case .option: return "⌥"
+		case .control: return "⌃"
+		case .shift: return "⇧"
+		}
+	}
 
-	/// The local event monitor
+	var flag: HotkeyModifiers {
+		switch self {
+		case .command: return .command
+		case .option: return .option
+		case .control: return .control
+		case .shift: return .shift
+		}
+	}
+}
+
+/// Listens for the next key press while a cell is recording
+final class KeyRecorder: ObservableObject {
+	@Published private(set) var isRecording = false
+	private var onRecorded: ((HotkeyKey?) -> Void)?
 	private var localMonitor: Any?
 	private var globalMonitor: Any?
 
-	/// The text field used for display
-	private let label: NSTextField = {
-		let field = NSTextField(labelWithString: "")
-		field.alignment = .center
-		field.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-		field.isEditable = false
-		field.isSelectable = false
-		field.isBordered = false
-		field.drawsBackground = false
-		return field
-	}()
-
-	/// The background box
-	private let backgroundBox: NSBox = {
-		let box = NSBox()
-		box.boxType = .custom
-		box.cornerRadius = 6
-		box.borderWidth = 1
-		box.borderColor = NSColor.separatorColor
-		box.fillColor = NSColor.controlBackgroundColor
-		return box
-	}()
-
-	override init(frame: NSRect) {
-		super.init(frame: frame)
-		setupViews()
-	}
-
-	required init?(coder: NSCoder) {
-		super.init(coder: coder)
-		setupViews()
-	}
-
-	private func setupViews() {
-		addSubview(backgroundBox)
-		addSubview(label)
-
-		backgroundBox.translatesAutoresizingMaskIntoConstraints = false
-		label.translatesAutoresizingMaskIntoConstraints = false
-
-		NSLayoutConstraint.activate([
-			backgroundBox.leadingAnchor.constraint(equalTo: leadingAnchor),
-			backgroundBox.trailingAnchor.constraint(equalTo: trailingAnchor),
-			backgroundBox.topAnchor.constraint(equalTo: topAnchor),
-			backgroundBox.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-			label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-			label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-			label.centerYAnchor.constraint(equalTo: centerYAnchor),
-		])
-	}
-
-	override var intrinsicContentSize: NSSize {
-		return NSSize(width: 160, height: 28)
-	}
-
-	// MARK: - Entering record mode via click
-
-	override func mouseDown(with event: NSEvent) {
-		if isRecording {
-			stopRecording()
-		} else {
-			startRecording()
-		}
-	}
-
-	// MARK: - Record mode
-
-	private func startRecording() {
+	func start(onRecorded: @escaping (HotkeyKey?) -> Void) {
+		self.onRecorded = onRecorded
 		isRecording = true
 		HotkeyManager.shared.isRecordingHotkey = true
 
-		label.stringValue = "Press a key..."
-		label.textColor = NSColor.systemOrange
-		backgroundBox.borderColor = NSColor.systemOrange
-		backgroundBox.fillColor = NSColor.systemOrange.withAlphaComponent(0.1)
-
-		// Receive key input through a local event monitor
 		localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-			self?.handleRecordedKey(event)
-			return nil // Consume the event
+			self?.handle(event)
+			return nil
 		}
-
-		// Also add a global event monitor (a fallback for when the app loses focus)
+		// Fallback for when the app loses focus
 		globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-			self?.handleRecordedKey(event)
+			self?.handle(event)
 		}
 	}
 
-	private func stopRecording() {
+	func stop() {
+		guard isRecording else { return }
 		isRecording = false
 		HotkeyManager.shared.isRecordingHotkey = false
-
-		if let monitor = localMonitor {
-			NSEvent.removeMonitor(monitor)
-			localMonitor = nil
-		}
-		if let monitor = globalMonitor {
-			NSEvent.removeMonitor(monitor)
-			globalMonitor = nil
-		}
-
-		updateDisplayText()
+		if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+		if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
+		localMonitor = nil
+		globalMonitor = nil
+		onRecorded = nil
 	}
 
-	private func handleRecordedKey(_ event: NSEvent) {
-		// Cancel with Escape
-		if event.keyCode == kVK_Escape {
-			stopRecording()
-			return
-		}
-
-		// Ignore input that's only a modifier key (a regular key is required)
-		let keyCode = Int(event.keyCode)
+	private func handle(_ event: NSEvent) {
 		let modifiers = HotkeyModifiers.from(event.modifierFlags)
-
-		// Record it as a key code
-		let key = HotkeyKey(keyCode: keyCode, modifiers: modifiers)
-		currentKeys = [key]
-
-		// Notify via the callback
-		onRecorded?(key)
-
-		stopRecording()
+		let callback = onRecorded
+		switch Int(event.keyCode) {
+		case kVK_Escape:
+			stop()
+		case kVK_Delete where modifiers.isEmpty:
+			stop()
+			callback?(nil)
+		default:
+			stop()
+			callback?(HotkeyKey(keyCode: Int(event.keyCode), modifiers: modifiers))
+		}
 	}
-
-	// MARK: - Display update
-
-	func updateDisplayText() {
-		label.stringValue = HotkeyBinding.displayString(of: currentKeys)
-		label.textColor = NSColor.labelColor
-		backgroundBox.borderColor = NSColor.separatorColor
-		backgroundBox.fillColor = NSColor.controlBackgroundColor
-	}
-
-	// MARK: - Cleanup
 
 	deinit {
 		if isRecording {
 			HotkeyManager.shared.isRecordingHotkey = false
 		}
-		if let monitor = localMonitor {
-			NSEvent.removeMonitor(monitor)
-		}
-		if let monitor = globalMonitor {
-			NSEvent.removeMonitor(monitor)
-		}
+		if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+		if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
 	}
 }

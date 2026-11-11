@@ -166,6 +166,11 @@ struct HotkeyKey: Hashable {
 		return "\(modStr)+\(keyStr)"
 	}
 
+	/// The key's own name without modifiers (e.g. J, Space, F12)
+	var keyName: String {
+		HotkeyBinding.keyCodeToDisplayName(keyCode)
+	}
+
 	/// The value hotkeys.json holds for a list of keys: "" for none, a string for one, a list for several
 	static func fileValue(_ keys: [HotkeyKey]) -> Any {
 		switch keys.count {
