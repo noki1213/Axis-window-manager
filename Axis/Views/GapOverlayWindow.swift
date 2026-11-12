@@ -78,13 +78,13 @@ class GapOverlayView: NSView {
 	}
 
 	private func setupLayer() {
-		candidateLayer.strokeColor = NSColor.white.withAlphaComponent(0.3).cgColor
+		candidateLayer.strokeColor = NSPalette.pureWhite.withAlphaComponent(0.3).cgColor
 		candidateLayer.fillColor = nil
 		candidateLayer.lineWidth = 4
 		candidateLayer.lineCap = .round
 		self.layer?.addSublayer(candidateLayer)
 
-		selectionLayer.strokeColor = NSColor.white.cgColor
+		selectionLayer.strokeColor = NSPalette.pureWhite.cgColor
 		selectionLayer.fillColor = nil
 		selectionLayer.lineWidth = 8
 		selectionLayer.lineCap = .round
@@ -169,7 +169,7 @@ class GapOverlayView: NSView {
 		}
 
 		// The edge being manipulated is always highlighted in white
-		selectionLayer.strokeColor = NSColor.white.cgColor
+		selectionLayer.strokeColor = NSPalette.pureWhite.cgColor
 
 		// Update the path with animation
 		let animation = CABasicAnimation(keyPath: "path")

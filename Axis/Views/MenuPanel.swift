@@ -53,11 +53,12 @@ struct MenuPanelView: View {
 
 	var body: some View {
 		MenuBarContentView(state: state, actions: actions)
+			.foregroundColor(Palette.text)
 			.fixedSize(horizontal: false, vertical: true)
 			.background(GlassBackground(shape: shape))
 			.clipShape(shape)
-			.overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-			.shadow(color: Color.black.opacity(0.35), radius: 20, x: 0, y: 10)
+			.overlay(shape.strokeBorder(Palette.line, lineWidth: 1))
+			.shadow(color: Palette.pureBlack.opacity(0.35), radius: 20, x: 0, y: 10)
 			.offset(y: reduceMotion ? 0 : (1 - state.materializeProgress) * -8)
 			.scaleEffect(reduceMotion ? 1 : 0.94 + 0.06 * state.materializeProgress,
 						 anchor: UnitPoint(x: state.materializeAnchorX, y: 0))
@@ -242,12 +243,6 @@ final class MenuPanelController {
 
 // MARK: - Content
 
-enum PanelPalette {
-	static let black = Color(.sRGB, red: 0x26 / 255, green: 0x24 / 255, blue: 0x27 / 255, opacity: 1)
-	static let selection = Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255).opacity(0.3)
-	static let selectedText = Color(red: 0xfc / 255, green: 0xfc / 255, blue: 0xfa / 255)
-}
-
 struct MenuBarContentView: View {
 	@ObservedObject var state: MenuPanelState
 	let actions: MenuPanelActions
@@ -264,20 +259,20 @@ struct MenuBarContentView: View {
 			if !problems.isEmpty {
 				VStack(alignment: .leading, spacing: 4) {
 					row(.fileProblems, title: "Problems in the settings files…",
-						symbol: "exclamationmark.triangle", symbolColor: .orange, shortcut: nil,
+						symbol: "exclamationmark.triangle", symbolColor: Palette.yellow, shortcut: nil,
 						action: actions.openFileProblems)
 					VStack(alignment: .leading, spacing: 2) {
 						ForEach(problems, id: \.self) { problem in
 							Text(problem)
 								.font(.caption)
-								.foregroundColor(.secondary)
+								.foregroundColor(Palette.secondaryText)
 								.fixedSize(horizontal: false, vertical: true)
 						}
 					}
 					.padding(.horizontal, 6)
 				}
 
-				Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+				Rectangle().fill(Palette.line).frame(height: 1)
 			}
 
 			VStack(alignment: .leading, spacing: 2) {
@@ -287,13 +282,13 @@ struct MenuBarContentView: View {
 					symbolColor: nil, shortcut: "⌃⌥,", action: actions.openSettings)
 			}
 
-			Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+			Rectangle().fill(Palette.line).frame(height: 1)
 
 			HStack {
 				TextButton(title: "Quit Axis", action: actions.quit)
 				Spacer()
 				Text("⌃⌥Q")
-					.foregroundColor(.secondary)
+					.foregroundColor(Palette.secondaryText)
 			}
 		}
 		.padding(12)
@@ -306,15 +301,15 @@ struct MenuBarContentView: View {
 		let isHovered = state.hoveredRow == id
 		return HStack(spacing: 6) {
 			Image(systemName: symbol)
-				.foregroundColor(symbolColor ?? (isHovered ? PanelPalette.selectedText : .secondary))
+				.foregroundColor(symbolColor ?? (isHovered ? Palette.text : Palette.secondaryText))
 				.frame(width: 16)
 			Text(title)
 				.lineLimit(1)
-				.foregroundColor(isHovered ? PanelPalette.selectedText : .primary)
+				.foregroundColor(Palette.text)
 			Spacer()
 			if let shortcut {
 				Text(shortcut)
-					.foregroundColor(.secondary)
+					.foregroundColor(Palette.secondaryText)
 			}
 		}
 		.padding(.horizontal, 6)
@@ -322,7 +317,7 @@ struct MenuBarContentView: View {
 		.background {
 			if isHovered {
 				RoundedRectangle(cornerRadius: 9, style: .continuous)
-					.fill(PanelPalette.selection)
+					.fill(Palette.selection)
 					.matchedGeometryEffect(id: "menuRowHighlight", in: rowNamespace)
 			}
 		}
@@ -370,12 +365,12 @@ struct GlassBackground<S: Shape>: View {
 			GlassEffectContainer {
 				shape
 					.fill(Color.clear)
-					.glassEffect(.regular.tint(PanelPalette.black.opacity(0.60)), in: shape)
+					.glassEffect(.regular.tint(Palette.glassTint), in: shape)
 			}
 		} else {
 			ZStack {
 				VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-				PanelPalette.black.opacity(0.60)
+				Palette.glassTint
 			}
 		}
 	}

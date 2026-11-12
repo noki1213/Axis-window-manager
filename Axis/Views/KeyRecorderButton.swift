@@ -39,16 +39,13 @@ struct KeyRecorderButton: View {
 
 	@StateObject private var recorder = KeyRecorder()
 
-	private static let teal = Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255)
-	private static let tealText = Color(red: 0x7A / 255, green: 0xC5 / 255, blue: 0xC5 / 255)
-
 	var body: some View {
 		let width = KeyCellMetrics.cellWidth(keyColumnWidth: keyColumnWidth)
 		ZStack {
 			if recorder.isRecording {
 				Text("Press keys…")
 					.font(.system(size: 11))
-					.foregroundColor(Self.tealText)
+					.foregroundColor(Palette.brightGreen)
 			} else if let key {
 				HStack(spacing: 0) {
 					ForEach(KeyCellModifier.allCases, id: \.self) { modifier in
@@ -62,11 +59,11 @@ struct KeyRecorderButton: View {
 						.frame(width: keyColumnWidth)
 				}
 				.font(.system(size: 13, weight: .semibold, design: .rounded))
-				.foregroundColor(Color(red: 0xFC / 255, green: 0xFC / 255, blue: 0xFA / 255))
+				.foregroundColor(Palette.text)
 			} else {
 				Text("None")
 					.font(.system(size: 11))
-					.foregroundColor(Color.secondary)
+					.foregroundColor(Palette.secondaryText)
 			}
 		}
 		.frame(width: width, height: KeyCellMetrics.height)
@@ -88,9 +85,9 @@ struct KeyRecorderButton: View {
 
 	@ViewBuilder private var background: some View {
 		if recorder.isRecording {
-			shape.fill(Self.teal.opacity(0.12))
+			shape.fill(Palette.green.opacity(0.12))
 		} else if key != nil {
-			shape.fill(Color.black.opacity(0.55))
+			shape.fill(Palette.pureBlack.opacity(0.55))
 		} else {
 			Color.clear
 		}
@@ -98,11 +95,11 @@ struct KeyRecorderButton: View {
 
 	@ViewBuilder private var border: some View {
 		if recorder.isRecording {
-			shape.strokeBorder(Self.teal, lineWidth: 1)
+			shape.strokeBorder(Palette.green, lineWidth: 1)
 		} else if key != nil {
-			shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+			shape.strokeBorder(Palette.pureWhite.opacity(0.10), lineWidth: 1)
 		} else {
-			shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+			shape.strokeBorder(Palette.pureWhite.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
 		}
 	}
 }

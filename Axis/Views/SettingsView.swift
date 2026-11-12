@@ -47,8 +47,6 @@ final class SettingsPanelController {
 	func hide() { popup.hide() }
 }
 
-private let accent = Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255)
-
 struct SettingsView: View {
 	@ObservedObject private var navigation = SettingsNavigation.shared
 	@ObservedObject private var hotkeys = HotkeyStore.shared
@@ -68,7 +66,7 @@ struct SettingsView: View {
 			.frame(width: 180)
 
 			Rectangle()
-				.fill(Color.white.opacity(0.12))
+				.fill(Palette.line)
 				.frame(width: 1)
 
 			VStack(spacing: 0) {
@@ -91,13 +89,13 @@ struct SettingsView: View {
 			Text(tab.rawValue)
 			Spacer()
 		}
-		.foregroundColor(selected ? PanelPalette.selectedText : .secondary)
+		.foregroundColor(selected ? Palette.text : Palette.secondaryText)
 		.padding(.horizontal, 10)
 		.frame(height: 30)
 		.background {
 			if selected {
 				RoundedRectangle(cornerRadius: 9, style: .continuous)
-					.fill(PanelPalette.selection)
+					.fill(Palette.selection)
 					.matchedGeometryEffect(id: "tabPill", in: tabNamespace)
 			}
 		}
@@ -127,7 +125,7 @@ private struct ProblemsBanner: View {
 	var body: some View {
 		HStack(alignment: .top, spacing: 8) {
 			Image(systemName: "exclamationmark.triangle.fill")
-				.foregroundColor(Color(red: 0xF4 / 255, green: 0xC9 / 255, blue: 0x80 / 255))
+				.foregroundColor(Palette.yellow)
 			VStack(alignment: .leading, spacing: 4) {
 				ForEach(problems, id: \.self) { problem in
 					Text(problem)
@@ -138,7 +136,7 @@ private struct ProblemsBanner: View {
 			Spacer(minLength: 0)
 		}
 		.padding(12)
-		.background(Color.white.opacity(0.06))
+		.background(Palette.pureWhite.opacity(0.06))
 	}
 }
 
@@ -152,7 +150,7 @@ struct SettingsGroup<Content: View>: View {
 			if let title {
 				Text(title)
 					.font(.headline)
-					.foregroundColor(PanelPalette.selectedText)
+					.foregroundColor(Palette.text)
 			}
 			content
 		}
@@ -176,9 +174,9 @@ struct GeneralSettingsView: View {
 					Spacer()
 					if accessibilityManager.isAccessibilityEnabled {
 						Text("Granted")
-							.foregroundColor(accent)
+							.foregroundColor(Palette.accent)
 					} else {
-						TextButton(title: "Grant Permission", tint: accent) {
+						TextButton(title: "Grant Permission", tint: Palette.accent) {
 							accessibilityManager.requestAccessibility()
 						}
 					}
@@ -208,14 +206,14 @@ struct GeneralSettingsView: View {
 				}
 				Text("Windows you only pass through while moving focus are skipped. Windows you jump from or to are always remembered.")
 					.font(.caption)
-					.foregroundColor(.secondary)
+					.foregroundColor(Palette.secondaryText)
 					.fixedSize(horizontal: false, vertical: true)
 			}
 
 			Spacer()
 		}
 		.padding(20)
-		.tint(accent)
+		.tint(Palette.accent)
 		.onAppear {
 			launchAtLogin = (SMAppService.mainApp.status == .enabled)
 		}
@@ -263,7 +261,7 @@ struct LayoutSettingsView: View {
 			Spacer()
 		}
 		.padding(20)
-		.tint(accent)
+		.tint(Palette.accent)
 	}
 
 	private func gapBinding(_ keyPath: ReferenceWritableKeyPath<TilingEngine, CGFloat>) -> Binding<Double> {
@@ -291,7 +289,7 @@ struct FloatingAppsView: View {
 		VStack(alignment: .leading, spacing: 12) {
 			Text("Windows of these apps are never tiled. Like System Settings, they float above the tiles and stay on screen when you switch workspaces.")
 				.font(.caption)
-				.foregroundColor(.secondary)
+				.foregroundColor(Palette.secondaryText)
 				.fixedSize(horizontal: false, vertical: true)
 
 			ScrollView {
@@ -308,12 +306,12 @@ struct FloatingAppsView: View {
 			.overlay {
 				if store.apps.isEmpty {
 					Text("No apps")
-						.foregroundColor(.secondary)
+						.foregroundColor(Palette.secondaryText)
 				}
 			}
 
 			HStack {
-				TextButton(title: "Add App…", tint: accent) {
+				TextButton(title: "Add App…", tint: Palette.accent) {
 					isPicking = true
 				}
 				Spacer()
@@ -335,7 +333,7 @@ private struct FloatingAppRow: View {
 	@State private var isHoveringRemove = false
 
 	/// The red of the color scheme
-	private static let removeHoverColor = Color(red: 0xfc / 255, green: 0x9c / 255, blue: 0x9c / 255)
+	private static let removeHoverColor = Palette.red
 
 	var body: some View {
 		HStack(spacing: 10) {
@@ -348,7 +346,7 @@ private struct FloatingAppRow: View {
 				Image(systemName: "minus.circle")
 			}
 			.buttonStyle(.plain)
-			.foregroundColor(isHoveringRemove ? Self.removeHoverColor : .secondary)
+			.foregroundColor(isHoveringRemove ? Self.removeHoverColor : Palette.secondaryText)
 			.onHover { isHoveringRemove = $0 }
 			.help("Remove")
 		}
@@ -384,16 +382,16 @@ private struct AppPickerView: View {
 			HStack {
 				Text("Choose apps whose windows always float.")
 					.font(.caption)
-					.foregroundColor(.secondary)
+					.foregroundColor(Palette.secondaryText)
 				Spacer()
-				TextButton(title: "Done", tint: accent) { isPicking = false }
+				TextButton(title: "Done", tint: Palette.accent) { isPicking = false }
 			}
 
 			TextField("Search", text: $query)
 				.textFieldStyle(.plain)
 				.padding(.horizontal, 10)
 				.frame(height: 28)
-				.background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.08)))
+				.background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Palette.pureWhite.opacity(0.08)))
 
 			ScrollView {
 				LazyVStack(spacing: 0) {
@@ -403,13 +401,13 @@ private struct AppPickerView: View {
 								.resizable()
 								.frame(width: 24, height: 24)
 							Text(app.name)
-								.foregroundColor(hovered == app.id ? PanelPalette.selectedText : .primary)
+								.foregroundColor(Palette.text)
 							Spacer()
 						}
 						.padding(.horizontal, 8)
 						.frame(height: 34)
 						.background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-							.fill(hovered == app.id ? PanelPalette.selection : .clear))
+							.fill(hovered == app.id ? Palette.selection : .clear))
 						.contentShape(Rectangle())
 						.onHover { inside in
 							if inside { hovered = app.id } else if hovered == app.id { hovered = nil }
@@ -451,23 +449,23 @@ struct AboutView: View {
 		VStack(spacing: 12) {
 			Image(systemName: "rectangle.split.3x1")
 				.font(.system(size: 56))
-				.foregroundColor(accent)
+				.foregroundColor(Palette.accent)
 
 			Text("Axis")
 				.font(.largeTitle)
 				.bold()
-				.foregroundColor(PanelPalette.selectedText)
+				.foregroundColor(Palette.text)
 
 			Text("Window Manager for macOS")
-				.foregroundColor(.secondary)
+				.foregroundColor(Palette.secondaryText)
 
 			Text("Version \(version)")
 				.font(.caption)
-				.foregroundColor(.secondary)
+				.foregroundColor(Palette.secondaryText)
 
 			Link("GitHub", destination: URL(string: "https://github.com/noki1213/Axis-window-manager")!)
 				.font(.caption)
-				.tint(accent)
+				.tint(Palette.accent)
 		}
 		.padding(20)
 		.frame(maxWidth: .infinity, maxHeight: .infinity)

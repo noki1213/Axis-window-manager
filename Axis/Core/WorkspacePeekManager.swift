@@ -277,10 +277,10 @@ private class WorkspacePeekView: NSView {
 
 	// MARK: Color scheme
 
-	/// Label text (white, #c4c4c4)
-	private static let labelColor = NSColor(srgbRed: 0xc4 / 255.0, green: 0xc4 / 255.0, blue: 0xc4 / 255.0, alpha: 1.0)
-	/// The direction arrow (cyan, #4AAEC8)
-	private static let arrowColor = NSColor(srgbRed: 0x4A / 255.0, green: 0xAE / 255.0, blue: 0xC8 / 255.0, alpha: 1.0)
+	/// Label text
+	private static let labelColor = NSPalette.secondaryText
+	/// The direction arrow
+	private static let arrowColor = NSPalette.cyan
 
 	private var leftCard: NSView?
 	private var rightCard: NSView?

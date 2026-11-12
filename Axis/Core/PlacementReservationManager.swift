@@ -253,12 +253,12 @@ private class PlacementPreviewView: NSView {
 		let cornerRadius: CGFloat = 12
 		let path = NSBezierPath(roundedRect: bounds.insetBy(dx: inset, dy: inset), xRadius: cornerRadius, yRadius: cornerRadius)
 
-		NSColor.white.withAlphaComponent(0.18).setFill()
+		NSPalette.pureWhite.withAlphaComponent(0.18).setFill()
 		path.fill()
 
 		path.lineWidth = 3
 		path.setLineDash([8, 6], count: 2, phase: 0)
-		NSColor.white.withAlphaComponent(0.9).setStroke()
+		NSPalette.pureWhite.withAlphaComponent(0.9).setStroke()
 		path.stroke()
 	}
 }
