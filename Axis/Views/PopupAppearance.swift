@@ -80,8 +80,11 @@ enum PopupAppearance {
 	/// Bring the window to the front with an appearance animation
 	/// - Parameters:
 	///   - window: the target window
+	///   - blurView: the view that blurs into focus (defaults to the whole content). Glass can't sample
+	///     what's behind it through a filtered ancestor and falls back to an opaque grey, so windows on
+	///     glass pass their content here and leave the glass out of the blur.
 	///   - orderFront: the actual bring-to-front action (passed in by the caller since panels and overlays call different methods)
-	static func show(_ window: NSWindow, orderFront: () -> Void) {
+	static func show(_ window: NSWindow, blurring blurView: NSView? = nil, orderFront: () -> Void) {
 		guard let contentView = window.contentView else {
 			orderFront()
 			window.alphaValue = 1.0
@@ -127,16 +130,23 @@ enum PopupAppearance {
 		window.alphaValue = 0.0
 		orderFront()
 
+		let blurLayer: CALayer? = {
+			guard let blurView else { return layer }
+			blurView.wantsLayer = true
+			return blurView.layer
+		}()
+
 		// Set up the blur as a named filter so it can be driven by progress
-		if let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: startBlurRadius]) {
+		if let blurLayer, let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: startBlurRadius]) {
+			blurLayer.removeAllAnimations()
 			blur.name = blurFilterName
-			layer.filters = [blur]
+			blurLayer.filters = [blur]
 		}
 
 		CATransaction.begin()
 		CATransaction.setCompletionBlock {
 			// Remove the blur once it's finished appearing (leaving it on keeps costing rendering time)
-			layer.filters = nil
+			blurLayer?.filters = nil
 		}
 
 		let scale = CASpringAnimation(perceptualDuration: appearDuration, bounce: 0)
@@ -145,13 +155,13 @@ enum PopupAppearance {
 		scale.toValue = 1.0
 		layer.add(scale, forKey: "axisPopupScale")
 
-		if layer.filters != nil {
+		if let blurLayer, blurLayer.filters != nil {
 			let blurAnimation = CASpringAnimation(perceptualDuration: appearDuration, bounce: 0)
 			blurAnimation.keyPath = "filters.\(blurFilterName).inputRadius"
 			blurAnimation.fromValue = startBlurRadius
 			blurAnimation.toValue = 0
-			layer.setValue(0, forKeyPath: "filters.\(blurFilterName).inputRadius")
-			layer.add(blurAnimation, forKey: "axisPopupBlur")
+			blurLayer.setValue(0, forKeyPath: "filters.\(blurFilterName).inputRadius")
+			blurLayer.add(blurAnimation, forKey: "axisPopupBlur")
 		}
 
 		CATransaction.commit()
