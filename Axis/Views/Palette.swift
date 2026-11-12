@@ -44,7 +44,7 @@ enum NSPalette {
 	/// The single selection highlight in lists
 	static let selection = green.withAlphaComponent(0.30)
 	/// The tint laid over the glass material, fixing the panel's brightness
-	static let glassTint = black.withAlphaComponent(0.60)
+	static let glassTint = pureBlack.withAlphaComponent(0.50)
 	/// The tint laid over the blur behind popups
 	static let popupTint = black.withAlphaComponent(0.55)
 
