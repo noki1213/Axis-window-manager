@@ -220,7 +220,7 @@ class WindowPalettePanel: NSPanel {
 		backgroundView.layoutSubtreeIfNeeded()
 		updateSelection(animated: false)
 
-		PopupAppearance.show(self) { [weak self] in
+		PopupAppearance.show(self, blurring: scrollView) { [weak self] in
 			self?.orderFrontRegardless()
 		}
 	}
