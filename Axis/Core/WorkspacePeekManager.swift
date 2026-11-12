@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import SwiftUI
 
 /// The class that manages the neighboring-workspace peek
 /// Holding Ctrl+Option (modifier keys alone), while there's a focused window,
@@ -231,6 +232,11 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 	override var canBecomeKey: Bool { return false }
 	override var canBecomeMain: Bool { return false }
 
+	/// AppKit asks the window for these two values when it decides how to draw glass; answering
+	/// the same in every focus state keeps the glass dense instead of washing out.
+	@objc func hasKeyAppearance() -> Bool { true }
+	@objc func hasMainAppearance() -> Bool { true }
+
 	/// Show the peek preview centered on the given monitor (with an appearance animation)
 	func show(on screen: NSScreen, leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem]) {
 		self.setFrame(screen.frame, display: true)
@@ -329,11 +335,15 @@ private class WorkspacePeekView: NSView {
 		let width = max(cardMinWidth, itemsWidth + cardPadding * 2)
 		let height = cardPadding * 2 + labelHeight + labelGap + itemHeight
 
-		let card = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: width, height: height))
-		card.material = .hudWindow
-		card.state = .active
-		card.blendingMode = .behindWindow
-		PopupAppearance.styleBackground(card)
+		let card = NSView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+		PopupAppearance.styleGlassBackground(card)
+		let glass = NSHostingView(
+			rootView: GlassBackground(shape: RoundedRectangle(cornerRadius: PopupAppearance.cornerRadius, style: .continuous))
+		)
+		glass.sizingOptions = []
+		glass.frame = card.bounds
+		glass.autoresizingMask = [.width, .height]
+		card.addSubview(glass)
 
 		// Label (left reads "‹ Space N", right reads "Space N ›").
 		// If some cards didn't fit, append "+N" at the end
