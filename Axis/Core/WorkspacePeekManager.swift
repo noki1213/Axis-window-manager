@@ -248,7 +248,7 @@ private class WorkspacePeekOverlayWindow: NSWindow {
 			screenSize: screen.frame.size
 		)
 
-		PopupAppearance.show(self) { [weak self] in
+		PopupAppearance.show(self, blurring: peekView.contentViews) { [weak self] in
 			self?.orderFront(nil)
 		}
 	}
@@ -291,11 +291,15 @@ private class WorkspacePeekView: NSView {
 	private var leftCard: NSView?
 	private var rightCard: NSView?
 
+	/// The views holding each card's label and windows, which blur in while the glass behind stays unfiltered
+	private(set) var contentViews: [NSView] = []
+
 	/// Update the display content and reposition it
 	func update(leftWorkspace: Int, leftItems: [WorkspacePeekManager.PeekItem], rightWorkspace: Int, rightItems: [WorkspacePeekManager.PeekItem], screenSize: CGSize) {
 		subviews.forEach { $0.removeFromSuperview() }
 		leftCard = nil
 		rightCard = nil
+		contentViews = []
 
 		// The width available on one side (half the screen, minus the center gap and the screen-edge margin)
 		let availableWidth = screenSize.width / 2 - Self.centerGap / 2 - Self.screenMargin
@@ -304,11 +308,13 @@ private class WorkspacePeekView: NSView {
 			let card = Self.makeCard(workspace: leftWorkspace, items: leftItems, isLeft: true, maxWidth: availableWidth)
 			addSubview(card)
 			leftCard = card
+			contentViews.append(card.subviews[1])
 		}
 		if !rightItems.isEmpty {
 			let card = Self.makeCard(workspace: rightWorkspace, items: rightItems, isLeft: false, maxWidth: availableWidth)
 			addSubview(card)
 			rightCard = card
+			contentViews.append(card.subviews[1])
 		}
 
 		layoutCards(screenSize: screenSize)
@@ -345,6 +351,11 @@ private class WorkspacePeekView: NSView {
 		glass.autoresizingMask = [.width, .height]
 		card.addSubview(glass)
 
+		// Everything but the glass lives in one container so the appear blur can skip the glass
+		let content = NSView(frame: card.bounds)
+		content.autoresizingMask = [.width, .height]
+		card.addSubview(content)
+
 		// Label (left reads "‹ Space N", right reads "Space N ›").
 		// If some cards didn't fit, append "+N" at the end
 		let hiddenCount = items.count - count
@@ -356,7 +367,7 @@ private class WorkspacePeekView: NSView {
 			height: labelHeight
 		)
 		label.alignment = isLeft ? .left : .right
-		card.addSubview(label)
+		content.addSubview(label)
 
 		// The row of window cards (centered within the panel)
 		let itemsStartX = (width - itemsWidth) / 2
@@ -364,7 +375,7 @@ private class WorkspacePeekView: NSView {
 			let x = itemsStartX + CGFloat(index) * (itemWidth + itemSpacing)
 			let itemView = WindowPaletteItemView(frame: CGRect(x: x, y: cardPadding, width: itemWidth, height: itemHeight))
 			itemView.configure(icon: item.icon, appName: item.appName, windowTitle: item.windowTitle)
-			card.addSubview(itemView)
+			content.addSubview(itemView)
 		}
 
 		return card
