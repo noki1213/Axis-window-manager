@@ -303,6 +303,8 @@ struct FloatingAppsView: View {
 					}
 				}
 			}
+			// The panel's border sits past the 20pt padding.
+			.edgeScrollIndicator(offset: 20)
 			.overlay {
 				if store.apps.isEmpty {
 					Text("No apps")
@@ -416,6 +418,7 @@ private struct AppPickerView: View {
 					}
 				}
 			}
+			.edgeScrollIndicator(offset: 20)
 		}
 		.padding(20)
 		.onAppear { installed = Self.scanInstalledApps() }

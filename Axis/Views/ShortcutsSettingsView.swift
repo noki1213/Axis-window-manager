@@ -41,6 +41,7 @@ struct ShortcutsSettingsView: View {
 				}
 				.padding()
 			}
+			.edgeScrollIndicator()
 
 			Rectangle()
 				.fill(Palette.line)
