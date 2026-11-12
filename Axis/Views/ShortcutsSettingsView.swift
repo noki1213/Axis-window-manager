@@ -49,7 +49,7 @@ struct ShortcutsSettingsView: View {
 			// Reset-to-default button
 			HStack {
 				Spacer()
-				TextButton(title: "Reset to Defaults") {
+				OutlineButton(title: "Reset to Defaults") {
 					store.resetToDefaults()
 				}
 				.padding(12)

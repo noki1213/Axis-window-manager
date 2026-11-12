@@ -285,7 +285,7 @@ struct MenuBarContentView: View {
 			Rectangle().fill(Palette.line).frame(height: 1)
 
 			HStack {
-				TextButton(title: "Quit Axis", action: actions.quit)
+				OutlineButton(title: "Quit Axis", action: actions.quit)
 				Spacer()
 				Text("⌃⌥Q")
 					.foregroundColor(Palette.secondaryText)
