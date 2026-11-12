@@ -20,7 +20,7 @@ struct ShortcutsSettingsView: View {
 		VStack(spacing: 0) {
 			if let conflictName {
 				Text("Key already used by \(conflictName).")
-					.foregroundColor(Color(red: 0xfc / 255, green: 0x9c / 255, blue: 0x9c / 255))
+					.foregroundColor(Palette.red)
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.padding(.horizontal, 20)
 					.padding(.top, 12)
@@ -43,7 +43,7 @@ struct ShortcutsSettingsView: View {
 			}
 
 			Rectangle()
-				.fill(Color.white.opacity(0.12))
+				.fill(Palette.line)
 				.frame(height: 1)
 
 			// Reset-to-default button
@@ -96,7 +96,7 @@ struct ShortcutSectionView: View {
 		VStack(alignment: .leading, spacing: 4) {
 			Text(section.rawValue)
 				.font(.headline)
-				.foregroundColor(PanelPalette.selectedText)
+				.foregroundColor(Palette.text)
 				.padding(.bottom, 4)
 
 			ForEach(bindings) { binding in

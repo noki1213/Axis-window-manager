@@ -368,11 +368,11 @@ class SelectionBorderView: NSView {
         didSet { self.setNeedsDisplay(bounds) }
     }
 
-    var borderColor: NSColor = .white {
+    var borderColor: NSColor = NSPalette.pureWhite {
         didSet { self.setNeedsDisplay(bounds) }
     }
 
-    var fillColor: NSColor = NSColor.white.withAlphaComponent(0.15) {
+    var fillColor: NSColor = NSPalette.pureWhite.withAlphaComponent(0.15) {
         didSet { self.setNeedsDisplay(bounds) }
     }
 

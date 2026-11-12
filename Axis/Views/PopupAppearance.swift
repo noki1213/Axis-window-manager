@@ -22,11 +22,11 @@ enum PopupAppearance {
 	/// The corner radius
 	static let cornerRadius: CGFloat = 22
 
-	/// The black overlay on the backing (#262427 at 55%)
-	static let backgroundColor = NSColor(srgbRed: 0x26 / 255.0, green: 0x24 / 255.0, blue: 0x27 / 255.0, alpha: 0.55)
+	/// The black tint over the blur behind the popup
+	static let backgroundColor = NSPalette.popupTint
 
 	/// Border (white at 12% opacity)
-	static let borderColor = NSColor.white.withAlphaComponent(0.12)
+	static let borderColor = NSPalette.line
 
 	// MARK: - Animation constants
 

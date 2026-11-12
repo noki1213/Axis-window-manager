@@ -52,7 +52,7 @@ class WindowPaletteItemView: NSView {
 
 	private static func configureAppNameLabel(_ label: NSTextField) {
 		label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-		label.textColor = .white
+		label.textColor = NSPalette.text
 		label.alignment = .center
 		label.lineBreakMode = .byTruncatingTail
 		label.maximumNumberOfLines = 1
@@ -60,7 +60,7 @@ class WindowPaletteItemView: NSView {
 
 	private static func configureTitleLabel(_ label: NSTextField) {
 		label.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-		label.textColor = NSColor.white.withAlphaComponent(0.6)
+		label.textColor = NSPalette.secondaryText
 		label.alignment = .center
 		// Wrap long titles over up to two lines, truncating only the last
 		label.lineBreakMode = .byWordWrapping

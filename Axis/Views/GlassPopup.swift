@@ -28,10 +28,11 @@ struct GlassPopupSheet<Content: View>: View {
 
 	var body: some View {
 		content
+			.foregroundColor(Palette.text)
 			.frame(width: size.width, height: size.height)
 			.background(GlassBackground(shape: shape))
 			.clipShape(shape)
-			.overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+			.overlay(shape.strokeBorder(Palette.line, lineWidth: 1))
 			.scaleEffect(reduceMotion ? 1 : 0.94 + 0.06 * state.progress)
 			.blur(radius: reduceMotion ? 0 : (1 - state.progress) * 12)
 			.opacity(Double(state.progress))
@@ -193,7 +194,7 @@ struct TextButton: View {
 	var body: some View {
 		Button(action: action) {
 			Text(title)
-				.foregroundColor(isHovered ? PanelPalette.selectedText : (tint ?? .secondary))
+				.foregroundColor(isHovered ? Palette.text : (tint ?? Palette.secondaryText))
 				.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
@@ -216,9 +217,9 @@ struct GlassDialogView: View {
 		VStack(alignment: .leading, spacing: 12) {
 			Text(title)
 				.font(.title3.weight(.semibold))
-				.foregroundColor(PanelPalette.selectedText)
+				.foregroundColor(Palette.text)
 			Text(message)
-				.foregroundColor(.secondary)
+				.foregroundColor(Palette.secondaryText)
 				.fixedSize(horizontal: false, vertical: true)
 			Spacer(minLength: 0)
 			HStack {
@@ -227,7 +228,7 @@ struct GlassDialogView: View {
 						.keyboardShortcut(.cancelAction)
 				}
 				Spacer()
-				TextButton(title: confirmTitle, tint: Color(red: 0x33 / 255, green: 0xA5 / 255, blue: 0xA5 / 255), action: onConfirm)
+				TextButton(title: confirmTitle, tint: Palette.green, action: onConfirm)
 					.keyboardShortcut(.defaultAction)
 			}
 		}

@@ -151,7 +151,7 @@ class WindowPalettePanel: NSPanel {
 		highlightView.wantsLayer = true
 		highlightView.layer?.cornerRadius = 9
 		highlightView.layer?.cornerCurve = .continuous
-		highlightView.layer?.backgroundColor = NSColor(srgbRed: 0x33 / 255.0, green: 0xA5 / 255.0, blue: 0xA5 / 255.0, alpha: 0.30).cgColor
+		highlightView.layer?.backgroundColor = NSPalette.selection.cgColor
 		highlightView.isHidden = true
 
 		// The main stack (stacked vertically: Display rows)
@@ -275,7 +275,7 @@ class WindowPalettePanel: NSPanel {
 			if !mainVerticalStack.arrangedSubviews.isEmpty {
 				let separator = NSView()
 				separator.wantsLayer = true
-				separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+				separator.layer?.backgroundColor = NSPalette.line.cgColor
 				separator.translatesAutoresizingMaskIntoConstraints = false
 				NSLayoutConstraint.activate([
 					separator.heightAnchor.constraint(equalToConstant: 1),
@@ -294,7 +294,7 @@ class WindowPalettePanel: NSPanel {
 			// Display title (top-left)
 			let displayTitle = NSTextField(labelWithString: "Display \(display.displayNumber)")
 			displayTitle.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-			displayTitle.textColor = NSColor.white.withAlphaComponent(0.7)
+			displayTitle.textColor = NSPalette.secondaryText
 			displayTitle.translatesAutoresizingMaskIntoConstraints = false
 			displayRow.addArrangedSubview(displayTitle)
 
@@ -318,7 +318,7 @@ class WindowPalettePanel: NSPanel {
 				// Space label
 				let spaceLabel = NSTextField(labelWithString: WindowPalettePanel.sectionLabel(for: space.kind))
 				spaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-				spaceLabel.textColor = NSColor.white.withAlphaComponent(0.4)
+				spaceLabel.textColor = NSPalette.secondaryText
 				spaceLabel.translatesAutoresizingMaskIntoConstraints = false
 
 				// A section with more windows than fit on one line wraps its cards over several rows
