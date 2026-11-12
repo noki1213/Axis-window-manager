@@ -166,11 +166,9 @@ class WindowPalettePanel: NSPanel {
 		documentView.addSubview(highlightView, positioned: .below, relativeTo: mainVerticalStack)
 
 		scrollView.drawsBackground = false
-		scrollView.hasVerticalScroller = true
-		scrollView.autohidesScrollers = true
-		scrollView.scrollerStyle = .overlay
 		scrollView.translatesAutoresizingMaskIntoConstraints = false
 		scrollView.documentView = documentView
+		EdgeScrollIndicatorView.attach(to: scrollView)
 
 		backgroundView.addSubview(scrollView)
 		backgroundView.translatesAutoresizingMaskIntoConstraints = false
