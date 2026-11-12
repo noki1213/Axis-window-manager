@@ -183,22 +183,30 @@ final class GlassPopupController<Content: View> {
 
 // MARK: - Text buttons
 
-/// A button that is only text: dim at rest, bright under the pointer. `tint` colors the verb of a dialog.
-struct TextButton: View {
+/// A button drawn as a thin outline that fills under the pointer. `isPrimary` marks the verb of a dialog in green.
+struct OutlineButton: View {
 	let title: String
-	var tint: Color?
+	var isPrimary = false
 	let action: () -> Void
 
 	@State private var isHovered = false
 
+	private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 8, style: .continuous) }
+
 	var body: some View {
 		Button(action: action) {
 			Text(title)
-				.foregroundColor(isHovered ? Palette.text : (tint ?? Palette.secondaryText))
-				.contentShape(Rectangle())
+				.foregroundColor(isHovered ? Palette.text : (isPrimary ? Palette.brightGreen : Palette.secondaryText))
+				.padding(.horizontal, 14)
+				.padding(.vertical, 5)
+				.background(shape.fill(isHovered ? (isPrimary ? Palette.green.opacity(0.40) : Palette.pureWhite.opacity(0.14)) : .clear))
+				.overlay(shape.strokeBorder(isHovered ? .clear : (isPrimary ? Palette.green.opacity(0.70) : Palette.pureWhite.opacity(0.18)), lineWidth: 1))
+				.contentShape(shape)
 		}
 		.buttonStyle(.plain)
-		.onHover { isHovered = $0 }
+		.onHover { hovering in
+			withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
+		}
 	}
 }
 
@@ -224,11 +232,11 @@ struct GlassDialogView: View {
 			Spacer(minLength: 0)
 			HStack {
 				if let cancelTitle {
-					TextButton(title: cancelTitle, action: onCancel)
+					OutlineButton(title: cancelTitle, action: onCancel)
 						.keyboardShortcut(.cancelAction)
 				}
 				Spacer()
-				TextButton(title: confirmTitle, tint: Palette.green, action: onConfirm)
+				OutlineButton(title: confirmTitle, isPrimary: true, action: onConfirm)
 					.keyboardShortcut(.defaultAction)
 			}
 		}

@@ -176,7 +176,7 @@ struct GeneralSettingsView: View {
 						Text("Granted")
 							.foregroundColor(Palette.accent)
 					} else {
-						TextButton(title: "Grant Permission", tint: Palette.accent) {
+						OutlineButton(title: "Grant Permission", isPrimary: true) {
 							accessibilityManager.requestAccessibility()
 						}
 					}
@@ -254,7 +254,7 @@ struct LayoutSettingsView: View {
 				}
 			}
 
-			TextButton(title: "Re-tile All Windows") {
+			OutlineButton(title: "Re-tile All Windows") {
 				tilingEngine.tileAllScreens()
 			}
 
@@ -311,7 +311,7 @@ struct FloatingAppsView: View {
 			}
 
 			HStack {
-				TextButton(title: "Add App…", tint: Palette.accent) {
+				OutlineButton(title: "Add App…", isPrimary: true) {
 					isPicking = true
 				}
 				Spacer()
@@ -384,7 +384,7 @@ private struct AppPickerView: View {
 					.font(.caption)
 					.foregroundColor(Palette.secondaryText)
 				Spacer()
-				TextButton(title: "Done", tint: Palette.accent) { isPicking = false }
+				OutlineButton(title: "Done", isPrimary: true) { isPicking = false }
 			}
 
 			TextField("Search", text: $query)
