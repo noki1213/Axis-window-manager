@@ -68,11 +68,11 @@ enum PopupAppearance {
 	/// Bring the window to the front with an appearance animation
 	/// - Parameters:
 	///   - window: the target window
-	///   - blurView: the view that blurs into focus (defaults to the whole content). Glass can't sample
-	///     what's behind it through a filtered ancestor and falls back to an opaque grey, so windows on
-	///     glass pass their content here and leave the glass out of the blur.
+	///   - blurViews: the views that blur into focus. Required, because glass can't sample what's behind
+	///     it through a filtered ancestor and falls back to an opaque grey: pass the content views and
+	///     leave every glass view (and its ancestors) out of the list.
 	///   - orderFront: the actual bring-to-front action (passed in by the caller since panels and overlays call different methods)
-	static func show(_ window: NSWindow, blurring blurView: NSView? = nil, orderFront: () -> Void) {
+	static func show(_ window: NSWindow, blurring blurViews: [NSView], orderFront: () -> Void) {
 		guard let contentView = window.contentView else {
 			orderFront()
 			window.alphaValue = 1.0
@@ -118,14 +118,14 @@ enum PopupAppearance {
 		window.alphaValue = 0.0
 		orderFront()
 
-		let blurLayer: CALayer? = {
-			guard let blurView else { return layer }
-			blurView.wantsLayer = true
-			return blurView.layer
-		}()
+		let blurLayers: [CALayer] = blurViews.compactMap { view in
+			view.wantsLayer = true
+			return view.layer
+		}
 
 		// Set up the blur as a named filter so it can be driven by progress
-		if let blurLayer, let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: startBlurRadius]) {
+		for blurLayer in blurLayers {
+			guard let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: startBlurRadius]) else { continue }
 			blurLayer.removeAllAnimations()
 			blur.name = blurFilterName
 			blurLayer.filters = [blur]
@@ -134,7 +134,7 @@ enum PopupAppearance {
 		CATransaction.begin()
 		CATransaction.setCompletionBlock {
 			// Remove the blur once it's finished appearing (leaving it on keeps costing rendering time)
-			blurLayer?.filters = nil
+			blurLayers.forEach { $0.filters = nil }
 		}
 
 		let scale = CASpringAnimation(perceptualDuration: appearDuration, bounce: 0)
@@ -143,7 +143,7 @@ enum PopupAppearance {
 		scale.toValue = 1.0
 		layer.add(scale, forKey: "axisPopupScale")
 
-		if let blurLayer, blurLayer.filters != nil {
+		for blurLayer in blurLayers where blurLayer.filters != nil {
 			let blurAnimation = CASpringAnimation(perceptualDuration: appearDuration, bounce: 0)
 			blurAnimation.keyPath = "filters.\(blurFilterName).inputRadius"
 			blurAnimation.fromValue = startBlurRadius
