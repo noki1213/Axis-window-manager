@@ -199,10 +199,17 @@ struct SettingsView: View {
 			}
 		}
 		.contentShape(Rectangle())
-		.onTapGesture {
-			withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .timingCurve(0.65, 0, 0.35, 1, duration: 0.4)) {
-				navigation.tab = tab
-			}
+		// Pointing at a section selects it, as clicking does.
+		.onHover { inside in
+			if inside { select(tab) }
+		}
+		.onTapGesture { select(tab) }
+	}
+
+	private func select(_ tab: SettingsNavigation.Tab) {
+		guard navigation.tab != tab else { return }
+		withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .timingCurve(0.65, 0, 0.35, 1, duration: 0.4)) {
+			navigation.tab = tab
 		}
 	}
 
