@@ -12,7 +12,7 @@ struct AxisApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        // A menu bar app has no window of its own; the settings are a popup (SettingsView)
+        // A menu bar app has no window of its own; the settings open in SettingsWindowController
         Settings {
             EmptyView()
         }
