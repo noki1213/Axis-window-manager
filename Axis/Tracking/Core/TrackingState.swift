@@ -19,8 +19,6 @@ nonisolated struct TrackingState: Equatable, Sendable {
 	// MARK: Configuration
 
 	var config: LayoutConfig
-	/// Axis's own process; its windows are never tracked.
-	var ownPID: PID
 	/// Bundle identifiers of the apps set to float: their windows are admitted unmanaged, never
 	/// tiled. `setFloatingApps(_:)` changes it along with the windows already tracked.
 	var floatingApps: Set<String>
@@ -80,9 +78,8 @@ nonisolated struct TrackingState: Equatable, Sendable {
 	var persistenceState = PersistenceState()
 
 	/// The coordinator starts with `barrier: [.starting]` until the first full scan.
-	init(config: LayoutConfig = LayoutConfig(), ownPID: PID = -1, floatingApps: Set<String> = [], barrier: Set<BarrierReason> = []) {
+	init(config: LayoutConfig = LayoutConfig(), floatingApps: Set<String> = [], barrier: Set<BarrierReason> = []) {
 		self.config = config
-		self.ownPID = ownPID
 		self.floatingApps = floatingApps
 		self.barrier = barrier
 	}

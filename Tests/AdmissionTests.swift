@@ -24,15 +24,9 @@ let admissionTests: [TestCase] = classifierTests
 // MARK: - Window classification
 
 private let classifierTests: [TestCase] = [
-	TestCase("own process id is ignored") {
-		let facts = WindowFacts(id: 1, pid: 999, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole)
-		let result = Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
-		expectEqual(result, .ignore)
-	},
-
 	TestCase("non window role element is ignored") {
 		let facts = WindowFacts(id: 1, pid: 100, role: "AXButton", subrole: AXNames.standardWindowSubrole)
-		let result = Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(facts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .ignore)
 	},
 
@@ -40,7 +34,7 @@ private let classifierTests: [TestCase] = [
 		let facts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: "AXUnknown",
 			frame: CGRect(x: 0, y: 0, width: 1, height: 1), hasCloseButton: false)
-		let result = Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(facts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .ignore)
 	},
 
@@ -48,7 +42,7 @@ private let classifierTests: [TestCase] = [
 		let facts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: "AXUnknown",
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600), hasCloseButton: true)
-		let result = Classifier.classify(facts, bundleID: "com.test.office", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(facts, bundleID: "com.test.office", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .tiled)
 	},
 
@@ -56,7 +50,7 @@ private let classifierTests: [TestCase] = [
 		let facts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600), hasCloseButton: true)
-		let result = Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(facts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .tiled)
 	},
 
@@ -64,7 +58,7 @@ private let classifierTests: [TestCase] = [
 		let facts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600), hasCloseButton: false)
-		let result = Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(facts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .tiled)
 	},
 
@@ -79,9 +73,9 @@ private let classifierTests: [TestCase] = [
 			id: 3, pid: 100, role: AXNames.windowRole, subrole: AXNames.floatingWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600))
 
-		expectEqual(Classifier.classify(dialogFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged)
-		expectEqual(Classifier.classify(systemDialogFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged)
-		expectEqual(Classifier.classify(floatingFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(dialogFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(systemDialogFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(floatingFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .unmanaged)
 	},
 
 	TestCase("windows of an app set to float are classified as unmanaged, others by their own facts") {
@@ -89,21 +83,21 @@ private let classifierTests: [TestCase] = [
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600))
 		let floatingApps: Set<String> = ["com.apple.systempreferences"]
-		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences", ownPID: 999,
+		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences",
 			floatingApps: floatingApps, relaunchTiled: []), .unmanaged)
-		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences", ownPID: 999,
+		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences",
 			floatingApps: [], relaunchTiled: []), .tiled, "taken off the list, it tiles like any app")
-		expectEqual(Classifier.classify(facts, bundleID: "com.test.app", ownPID: 999,
+		expectEqual(Classifier.classify(facts, bundleID: "com.test.app",
 			floatingApps: floatingApps, relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(facts, bundleID: nil, ownPID: 999,
+		expectEqual(Classifier.classify(facts, bundleID: nil,
 			floatingApps: floatingApps, relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences", ownPID: 999,
+		expectEqual(Classifier.classify(facts, bundleID: "com.apple.systempreferences",
 			floatingApps: floatingApps, relaunchTiled: [1]), .unmanaged, "tiled at the last quit")
 
 		let helper = WindowFacts(
 			id: 2, pid: 100, role: AXNames.windowRole, subrole: "AXUnknown",
 			frame: CGRect(x: 0, y: 0, width: 1, height: 1), hasCloseButton: false)
-		expectEqual(Classifier.classify(helper, bundleID: "com.apple.systempreferences", ownPID: 999,
+		expectEqual(Classifier.classify(helper, bundleID: "com.apple.systempreferences",
 			floatingApps: floatingApps, relaunchTiled: []), .ignore)
 	},
 
@@ -111,16 +105,16 @@ private let classifierTests: [TestCase] = [
 		var record = WindowRecord(
 			id: 1, pid: 100, bundleID: "com.test.app", placement: .unmanaged, workspace: nil,
 			observed: Observed(frame: CGRect(x: 100, y: 100, width: 800, height: 600)))
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: ["com.test.app"], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(record, floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(record, floatingApps: ["com.test.app"], relaunchTiled: []), .unmanaged)
 		record.subrole = AXNames.dialogSubrole
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(record, floatingApps: [], relaunchTiled: []), .unmanaged)
 		record.subrole = AXNames.standardWindowSubrole
 		record.observed.frame = CGRect(x: 100, y: 100, width: 300, height: 300)
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged)
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: [], relaunchTiled: [1]), .tiled)
+		expectEqual(Classifier.classify(record, floatingApps: [], relaunchTiled: []), .unmanaged)
+		expectEqual(Classifier.classify(record, floatingApps: [], relaunchTiled: [1]), .tiled)
 		record.observed.frame = nil
-		expectEqual(Classifier.classify(record, ownPID: 999, floatingApps: [], relaunchTiled: []), .unmanaged,
+		expectEqual(Classifier.classify(record, floatingApps: [], relaunchTiled: []), .unmanaged,
 			"no frame seen: as small as can be")
 	},
 
@@ -128,7 +122,7 @@ private let classifierTests: [TestCase] = [
 		let smallFacts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 499, height: 499))
-		let result = Classifier.classify(smallFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [])
+		let result = Classifier.classify(smallFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [])
 		expectEqual(result, .unmanaged)
 	},
 
@@ -136,7 +130,7 @@ private let classifierTests: [TestCase] = [
 		let smallFacts = WindowFacts(
 			id: 1, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 499, height: 499))
-		let result = Classifier.classify(smallFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: [1])
+		let result = Classifier.classify(smallFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: [1])
 		expectEqual(result, .tiled)
 	},
 
@@ -151,9 +145,9 @@ private let classifierTests: [TestCase] = [
 			id: 3, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 500, height: 500))
 
-		expectEqual(Classifier.classify(facts1, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(facts2, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(facts3, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(facts1, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(facts2, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(facts3, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .tiled)
 	},
 
 	TestCase("minimized or fullscreen flags at admission do not alter window classification") {
@@ -164,8 +158,8 @@ private let classifierTests: [TestCase] = [
 			id: 2, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
 			frame: CGRect(x: 100, y: 100, width: 800, height: 600), isFullscreen: true)
 
-		expectEqual(Classifier.classify(minimizedFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
-		expectEqual(Classifier.classify(fullscreenFacts, bundleID: "com.test.app", ownPID: 999, floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(minimizedFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .tiled)
+		expectEqual(Classifier.classify(fullscreenFacts, bundleID: "com.test.app", floatingApps: [], relaunchTiled: []), .tiled)
 	},
 
 	TestCase("tracked window classification is evaluated once at admission and never reclassified") {

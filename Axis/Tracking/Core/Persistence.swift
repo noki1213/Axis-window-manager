@@ -474,7 +474,7 @@ nonisolated extension TrackingState {
 		var seen = Set<WindowID>()
 		for facts in windows where !tombstones.contains(facts.id) && seen.insert(facts.id).inserted {
 			let windowClass = Classifier.classify(
-				facts, bundleID: appBundles[facts.pid], ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: [facts.id])
+				facts, bundleID: appBundles[facts.pid], floatingApps: floatingApps, relaunchTiled: [facts.id])
 			guard windowClass != .ignore else { continue }
 			candidates.append(facts)
 			if windowClass == .tiled {

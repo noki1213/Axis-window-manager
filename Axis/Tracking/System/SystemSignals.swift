@@ -5,7 +5,8 @@
 //  Workspace, session and input notifications the window tracking reacts to, delivered on the
 //  main thread as TrackingSignal values, plus the system states it checks on demand (screen lock,
 //  login window in front, left mouse button). Axis's own process and the login window are never
-//  reported as apps: neither has windows to manage.
+//  reported as apps: the login window has no windows to manage, and Axis's own laid-out windows
+//  report through OwnWindows.
 //
 
 import AppKit

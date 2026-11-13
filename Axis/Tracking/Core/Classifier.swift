@@ -35,9 +35,9 @@ nonisolated enum Classifier {
 	/// `relaunchTiled` holds windows that were tiled when Axis last quit: a stacked column may have
 	/// left them small enough to look like dialogs.
 	static func classify(
-		_ facts: WindowFacts, bundleID: String?, ownPID: PID, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
+		_ facts: WindowFacts, bundleID: String?, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
 	) -> WindowClass {
-		guard facts.pid != ownPID, facts.role == AXNames.windowRole else { return .ignore }
+		guard facts.role == AXNames.windowRole else { return .ignore }
 		let isStandard = facts.subrole == AXNames.standardWindowSubrole
 		let isUnmanagedKind = facts.subrole.map { unmanagedSubroles.contains($0) } ?? false
 		// Helper windows (invisible 1x1 windows, tooltips, internal panes) have neither the standard
@@ -59,11 +59,11 @@ nonisolated enum Classifier {
 
 	/// The class a tracked window would get if it were admitted now, at its last observed frame.
 	static func classify(
-		_ record: WindowRecord, ownPID: PID, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
+		_ record: WindowRecord, floatingApps: Set<String>, relaunchTiled: Set<WindowID>
 	) -> WindowClass {
 		let facts = WindowFacts(
 			id: record.id, pid: record.pid, role: record.role, subrole: record.subrole, title: record.title,
 			frame: record.observed.frame ?? .zero, hasCloseButton: record.hasCloseButton)
-		return classify(facts, bundleID: record.bundleID, ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
+		return classify(facts, bundleID: record.bundleID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
 	}
 }

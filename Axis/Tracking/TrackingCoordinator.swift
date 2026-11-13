@@ -129,7 +129,7 @@ final class TrackingCoordinator {
 	private static let watcherPausingBarriers: Set<BarrierReason> = [.starting, .locked, .asleep, .displayChanging]
 
 	private init() {
-		state = TrackingState(config: LayoutConfig(), ownPID: ProcessInfo.processInfo.processIdentifier)
+		state = TrackingState(config: LayoutConfig())
 	}
 
 	// MARK: - Lifecycle
@@ -142,7 +142,7 @@ final class TrackingCoordinator {
 		isRunning = true
 		runID += 1
 		let now = Self.uptime()
-		state = TrackingState(config: config, ownPID: ownPID, floatingApps: floatingApps)
+		state = TrackingState(config: config, floatingApps: floatingApps)
 		pending = PendingWork()
 		inFlight = nil
 		endingReasons = []
@@ -191,6 +191,9 @@ final class TrackingCoordinator {
 		systemSignals.start { [weak self] signal in
 			self?.receive(signal)
 		}
+		OwnWindows.shared.start { [weak self] signal in
+			self?.receive(signal)
+		}
 		watcher.sink = { [weak self] signal in
 			self?.receive(signal)
 		}
@@ -234,6 +237,7 @@ final class TrackingCoordinator {
 		watcher.onLog = nil
 		watcher.contextProvider = nil
 		systemSignals.stop()
+		OwnWindows.shared.stop()
 		axEventSource.stop()
 		ElementCache.shared.clear()
 	}
@@ -604,7 +608,7 @@ final class TrackingCoordinator {
 			return
 		}
 		if !pass.pids.isEmpty {
-			WindowEnumerator.scan(pids: pass.pids) { [weak self] results in
+			WindowEnumerator.scan(pids: pass.pids, ownWindows: OwnWindows.shared.ids) { [weak self] results in
 				gather.scans = results
 				self?.gatherAnswered(pass, gather)
 			}
@@ -764,8 +768,11 @@ final class TrackingCoordinator {
 			for app in NSWorkspace.shared.runningApplications where isTrackable(app) {
 				pids.insert(app.processIdentifier)
 			}
+			// Axis's own process while it has a window open, and until the last one closed is retired
+			if !OwnWindows.shared.ids.isEmpty || state.records.values.contains(where: { $0.pid == ownPID }) {
+				pids.insert(ownPID)
+			}
 		}
-		pids.remove(ownPID)
 		return pids.sorted()
 	}
 
@@ -1176,7 +1183,8 @@ final class TrackingCoordinator {
 
 	// MARK: - Helpers
 
-	/// Regular apps other than Axis and the login window: the apps whose windows are tracked.
+	/// Regular apps other than Axis and the login window: the apps whose windows are all tracked.
+	/// Of Axis's own windows only those in `OwnWindows` are.
 	private func isTrackable(_ app: NSRunningApplication) -> Bool {
 		app.activationPolicy == .regular && app.processIdentifier != ownPID
 			&& app.bundleIdentifier != SystemSignals.loginWindowBundleID && !app.isTerminated
@@ -1189,7 +1197,7 @@ final class TrackingCoordinator {
 
 	private func appFacts(for pids: [PID]) -> [AppFacts] {
 		pids.compactMap { pid in
-			guard pid != ownPID, let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
+			guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
 			return Self.appFacts(app)
 		}
 	}

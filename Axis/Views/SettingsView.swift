@@ -49,7 +49,7 @@ final class SettingsNavigation: ObservableObject {
 
 /// The settings window: a regular titled window on an opaque dark ground. Axis has no other
 /// window, so while it is open Axis becomes a regular app (Dock, app switcher, app menu), and it
-/// goes back to a menu bar app when the window closes.
+/// goes back to a menu bar app when the window closes. It is laid out like any app's window.
 final class SettingsWindowController: NSObject, NSWindowDelegate {
 	static let shared = SettingsWindowController()
 
@@ -69,6 +69,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 		NSApp.setActivationPolicy(.regular)
 		NSApp.activate(ignoringOtherApps: true)
 		window.makeKeyAndOrderFront(nil)
+		OwnWindows.shared.add(window)
 		installKeyMonitor()
 	}
 
@@ -102,6 +103,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 	func windowWillClose(_ notification: Notification) {
 		removeKeyMonitor()
+		if let window {
+			// Released so the window server lets go of it, and the layout closes the gap at once
+			DispatchQueue.main.async { [weak self] in
+				self?.window = nil
+			}
+			OwnWindows.shared.remove(window)
+		}
 		NSApp.setActivationPolicy(.accessory)
 		if let previousApp, !previousApp.isTerminated {
 			NSApp.yieldActivation(to: previousApp)

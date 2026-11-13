@@ -200,7 +200,7 @@ nonisolated extension TrackingState {
 	/// window server has them, else missed (retired at the second miss, the misses at least
 	/// `missSpacing` apart), and retired at once after a destroyed notification.
 	mutating func ingestScan(pid: PID, result: ScanResult, serverHas: Set<WindowID>, now: Time) {
-		guard barrier.isEmpty, pid != ownPID else { return }
+		guard barrier.isEmpty else { return }
 		admissionExpireLaunchAside(now: now)
 		if livenessState.liftPending {
 			livenessState.rescannedApps.insert(pid)
@@ -516,7 +516,7 @@ nonisolated extension TrackingState {
 nonisolated extension TrackingState {
 	/// App facts (hidden flag, names) for the apps they name; other apps are left as they are.
 	mutating func ingestApps(_ facts: [AppFacts], now: Time) {
-		for app in facts where app.pid != ownPID {
+		for app in facts {
 			var state = apps[app.pid] ?? AppState(pid: app.pid)
 			if let bundleID = app.bundleID {
 				state.bundleID = bundleID
@@ -540,7 +540,6 @@ nonisolated extension TrackingState {
 	/// An app launched: its windows count as created, and it is rescanned until it lists a window
 	/// (its observer may not be in place when its first window appears).
 	mutating func livenessNoteLaunched(_ app: AppFacts, now: Time) {
-		guard app.pid != ownPID else { return }
 		var state = apps[app.pid] ?? AppState(pid: app.pid)
 		if let bundleID = app.bundleID {
 			state.bundleID = bundleID
@@ -558,7 +557,6 @@ nonisolated extension TrackingState {
 
 	/// The app signalled a window creation: windows its next scans find are created ones.
 	mutating func livenessNoteCreated(pid: PID, now: Time) {
-		guard pid != ownPID else { return }
 		var state = apps[pid] ?? AppState(pid: pid)
 		state.createdSignalPending = true
 		apps[pid] = state

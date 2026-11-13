@@ -144,8 +144,8 @@ class FocusFollowsMouseManager: ObservableObject {
 			return
 		}
 
-		// Excludes Axis's own windows (border overlay, palette, settings screen)
-		guard window.app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+		// Excludes Axis's own windows (border overlay, palette) other than the laid-out ones (settings screen)
+		guard window.app.processIdentifier != OwnWindows.pid || OwnWindows.shared.ids.contains(window.id) else {
 			logSkipReason("Axis itself")
 			return
 		}
@@ -245,12 +245,13 @@ class FocusFollowsMouseManager: ObservableObject {
 				// This is the case for full-screen catch-all windows created by things like notification banners
 				if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
 
-				// Let Axis's own windows (border overlay, palette, settings screen) pass through.
+				// Let Axis's own windows (border overlay, palette) pass through; the laid-out ones
+				// (settings screen) are hit like any app's.
 				// The border overlay always sits in front of the focused window, so
 				// If we don't reject it here, every hit gets absorbed by the overlay and focus-follows-mouse stops working
 				// The menu bar panel sits at menu level above everything; the pointer on it is not
 				// on any window behind it, and focusing one would take the keyboard from the panel
-				if pid == ownPID {
+				if pid == ownPID && !OwnWindows.shared.ids.contains(windowID) {
 					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
 										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
 					if layer >= Int(CGWindowLevelForKey(.popUpMenuWindow)), bounds.contains(cgPoint) {
