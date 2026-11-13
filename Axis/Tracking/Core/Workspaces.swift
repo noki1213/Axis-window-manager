@@ -659,7 +659,7 @@ nonisolated extension TrackingState {
 				plannerState.minimized.remove(id)
 				log("floating apps: \(describe(record)) unmanaged")
 			} else if removed.contains(bundleID), record.placement == .unmanaged,
-				Classifier.classify(record, ownPID: ownPID, floatingApps: apps, relaunchTiled: relaunchTiled) == .tiled,
+				Classifier.classify(record, floatingApps: apps, relaunchTiled: relaunchTiled) == .tiled,
 				let frame = record.observed.frame, let monitor = monitorKey(for: frame),
 				let workspace = monitors[monitor]?.active {
 				record.placement = .tiled

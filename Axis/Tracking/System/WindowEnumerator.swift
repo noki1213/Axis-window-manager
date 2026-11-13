@@ -6,6 +6,8 @@
 //  job per app on a concurrent queue, each with a time budget, gathered by an awaiter that gives
 //  up on stragglers. A scan reports whether it saw every window of the app ("complete"), so the
 //  core never mistakes an app that could not answer for an app whose windows closed.
+//  Axis's own process answers on the thread that asks, so its jobs run on the main thread, where
+//  AppKit expects its windows to be touched, and list only the windows given as its own.
 //
 
 import Foundation
@@ -43,8 +45,9 @@ nonisolated enum WindowEnumerator {
 
 	/// Scans the window lists of `pids` concurrently. `completion` runs on the main thread no later
 	/// than `awaiterDeadline` after the call, with an entry for every pid; an app that has not
-	/// answered by then is reported as `.timedOut` and its late answer is dropped.
-	static func scan(pids: [PID], completion: @escaping @MainActor ([PID: ScanResult]) -> Void) {
+	/// answered by then is reported as `.timedOut` and its late answer is dropped. Of Axis's own
+	/// windows, only `ownWindows` are listed.
+	static func scan(pids: [PID], ownWindows: Set<WindowID>, completion: @escaping @MainActor ([PID: ScanResult]) -> Void) {
 		let unique = Set(pids)
 		guard !unique.isEmpty else {
 			DispatchQueue.main.async { MainActor.assumeIsolated { completion([:]) } }
@@ -58,8 +61,14 @@ nonisolated enum WindowEnumerator {
 				completion(outcomes.mapValues(\.result))
 			})
 		for pid in unique {
-			queue.async {
-				batch.deliver(pid, scanApp(pid: pid))
+			if pid == OwnWindows.pid {
+				DispatchQueue.main.async {
+					batch.deliver(pid, scanApp(pid: pid, only: ownWindows))
+				}
+			} else {
+				queue.async {
+					batch.deliver(pid, scanApp(pid: pid))
+				}
 			}
 		}
 		batch.expire(after: awaiterDeadline)
@@ -103,7 +112,7 @@ nonisolated enum WindowEnumerator {
 				completion(merged)
 			})
 		for (pid, group) in groups {
-			queue.async {
+			(pid == OwnWindows.pid ? DispatchQueue.main : queue).async {
 				batch.deliver(pid, readGroup(ids: group, pid: pid))
 			}
 		}
@@ -113,8 +122,9 @@ nonisolated enum WindowEnumerator {
 	// MARK: - Scan job
 
 	/// One app's scan: the window list, then one multi-attribute read per window. The elements
-	/// are fresh handles that no other thread has seen until they are stored in the cache.
-	private static func scanApp(pid: PID) -> ScanOutcome {
+	/// are fresh handles that no other thread has seen until they are stored in the cache. With
+	/// `only`, the other windows are left out as if the app did not list them.
+	private static func scanApp(pid: PID, only: Set<WindowID>? = nil) -> ScanOutcome {
 		let start = uptime()
 		let budgetEnd = start + appBudget
 		let token = ElementCache.shared.beginScan()
@@ -155,6 +165,9 @@ nonisolated enum WindowEnumerator {
 			AXUIElementSetMessagingTimeout(element, timeout)
 			switch readWindow(element, appElement: app, pid: pid, attributes: attributes) {
 			case .window(let window):
+				if let only, !only.contains(window.id) {
+					continue
+				}
 				if elements[window.id] == nil {
 					facts.append(window)
 					elements[window.id] = element
@@ -358,7 +371,7 @@ nonisolated private final class GatherBatch<Output: Sendable>: @unchecked Sendab
 		self.completion = completion
 	}
 
-	/// Called from a worker thread when one app is done.
+	/// Called from a worker thread (the main thread for Axis's own process) when one app is done.
 	func deliver(_ pid: PID, _ output: Output) {
 		let done: [PID: Output]? = lock.withLock {
 			guard !finished, pending.remove(pid) != nil else { return nil }

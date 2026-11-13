@@ -76,7 +76,7 @@ nonisolated extension TrackingState {
 	mutating func admit(_ facts: WindowFacts, app: AppFacts, source: AdmissionSource, now: Time) -> WindowID? {
 		guard records[facts.id] == nil, !tombstones.contains(facts.id), let fallbackMonitor = primaryMonitor else { return nil }
 		let windowClass = Classifier.classify(
-			facts, bundleID: app.bundleID, ownPID: ownPID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
+			facts, bundleID: app.bundleID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
 		guard windowClass != .ignore else { return nil }
 		admissionExpireLaunchAside(now: now)
 		admissionPruneRetired(now: now)

@@ -19,7 +19,8 @@ final class FocusFollower {
 	/// none), and the monitor of the last tracked window that had it.
 	private var focused: WindowID?
 	private var focusedMonitor: MonitorKey?
-	/// The last tracked window that had focus, kept while focus is elsewhere.
+	/// The last tracked window of another app that had focus, kept while focus is elsewhere: where
+	/// focus goes back when Axis's own last window closes.
 	private var lastFocused: WindowID?
 	/// The focus change waiting to settle before it is acted on.
 	private var pending: FollowContext?
@@ -110,7 +111,9 @@ final class FocusFollower {
 		let previousMonitor = focusedMonitor
 		focused = to
 		if let to, let record = state.record(to) {
-			lastFocused = to
+			if record.pid != OwnWindows.pid {
+				lastFocused = to
+			}
 			focusedMonitor = state.location(to)?.monitor ?? record.observed.frame.flatMap { state.monitorKey(for: $0) }
 			if record.workspace != nil {
 				FocusHistoryManager.shared.focusChanged(to: to)

@@ -24,7 +24,8 @@ nonisolated enum FocusReader {
 		let frontmost = NSWorkspace.shared.frontmostApplication
 		let pid = frontmost?.processIdentifier
 		let bundleID = frontmost?.bundleIdentifier
-		queue.async {
+		// Axis's own process answers on the asking thread: its windows are read on the main thread.
+		(pid == OwnWindows.pid ? DispatchQueue.main : queue).async {
 			let facts = readFocusedWindow(frontmostPID: pid, bundleID: bundleID)
 			DispatchQueue.main.async {
 				MainActor.assumeIsolated { completion(facts) }

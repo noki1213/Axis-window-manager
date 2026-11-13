@@ -116,6 +116,14 @@ struct WindowInfo: Identifiable, Equatable {
     /// - Returns: false when the app did not answer an AX call, so retrying would only wait for it again
     @discardableResult
     private func applyFocusOnce(useAppActivate: Bool) -> Bool {
+        // Axis's own window: AppKit does it directly, on the main thread it requires. A window
+        // that closed meanwhile is not brought back.
+        if app.processIdentifier == OwnWindows.pid {
+            guard let window = NSApp.window(withWindowNumber: Int(id)), window.isVisible else { return false }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return true
+        }
         // Normally this raises the process and designates the window at the same time.
         // If this succeeds, the app never gets a chance to pick a different window of its own
         if !useAppActivate, setFrontProcessWithThisWindow() {

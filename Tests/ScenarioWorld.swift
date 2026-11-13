@@ -25,12 +25,11 @@ struct ScenarioWorld {
 	init(
 		displays: [DisplayFacts] = [testDisplay("Main", primary: true)],
 		now: Time = 100.0,
-		ownPID: PID = 999,
 		barrier: Set<BarrierReason> = []
 	) {
 		self.displays = displays
 		self.currentTime = now
-		self.state = TrackingState(ownPID: ownPID, barrier: barrier)
+		self.state = TrackingState(barrier: barrier)
 		for display in displays {
 			self.state.addMonitor(display)
 		}
