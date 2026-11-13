@@ -40,7 +40,7 @@ enum NSPalette {
 	/// Secondary text on glass (hints, shortcuts, labels)
 	static let secondaryText = white
 	/// The 1px line around panels and between their sections
-	static let line = pureWhite.withAlphaComponent(0.12)
+	static let line = pureWhite.withAlphaComponent(0.20)
 	/// The single selection highlight in lists
 	static let selection = green.withAlphaComponent(0.30)
 	/// The tint laid over the glass material, fixing the panel's brightness

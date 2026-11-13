@@ -200,7 +200,7 @@ struct OutlineButton: View {
 				.padding(.horizontal, 14)
 				.padding(.vertical, 5)
 				.background(shape.fill(isHovered ? (isPrimary ? Palette.green.opacity(0.40) : Palette.pureWhite.opacity(0.14)) : .clear))
-				.overlay(shape.strokeBorder(isHovered ? .clear : (isPrimary ? Palette.green.opacity(0.70) : Palette.pureWhite.opacity(0.18)), lineWidth: 1))
+				.overlay(shape.strokeBorder(isHovered ? .clear : (isPrimary ? Palette.green.opacity(0.70) : Palette.line), lineWidth: 1))
 				.contentShape(shape)
 		}
 		.buttonStyle(.plain)

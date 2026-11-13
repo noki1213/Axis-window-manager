@@ -25,7 +25,7 @@ enum PopupAppearance {
 	/// The black tint over the blur behind the popup
 	static let backgroundColor = NSPalette.popupTint
 
-	/// Border (white at 12% opacity)
+	/// Border (white at 20% opacity)
 	static let borderColor = NSPalette.line
 
 	// MARK: - Animation constants
