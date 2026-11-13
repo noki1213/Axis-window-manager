@@ -57,7 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// axis://focus-back
     ///     jump back to the previously focused window
     /// axis://settings
-    ///     open the settings popup
+    ///     open the settings window
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let components = URLComponents(string: string)
@@ -220,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func openSettings() {
-        SettingsPanelController.shared.show()
+        SettingsWindowController.shared.show()
     }
     
     private func quitApp() {

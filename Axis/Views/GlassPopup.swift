@@ -2,8 +2,7 @@
 //  GlassPopup.swift
 //  Axis
 //
-//  A popup on a dark Liquid Glass sheet, centered on the screen with the mouse. Settings and
-//  dialogs use it. It takes the keyboard while open and hands the focus back to the app that was
+//  A popup on a dark Liquid Glass sheet, centered on the screen with the mouse. Dialogs use it. It takes the keyboard while open and hands the focus back to the app that was
 //  in front when it closes.
 //
 

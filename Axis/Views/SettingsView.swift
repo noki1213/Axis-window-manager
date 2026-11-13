@@ -2,7 +2,7 @@
 //  SettingsView.swift
 //  Axis
 //
-//  The settings popup: a list of sections on the left, the chosen section on the right. Every change
+//  The settings window: a list of sections on the left, the chosen section on the right. Every change
 //  is saved to settings.json (shortcuts to hotkeys.json) and takes effect at once.
 //
 
@@ -10,7 +10,7 @@ import SwiftUI
 import ServiceManagement
 import Combine
 
-/// The section on show, so other parts of the app can open the popup at a given section
+/// The section on show, so other parts of the app can open the window at a given section
 final class SettingsNavigation: ObservableObject {
 	static let shared = SettingsNavigation()
 
@@ -33,18 +33,117 @@ final class SettingsNavigation: ObservableObject {
 	}
 
 	@Published var tab: Tab = .general
+
+	/// Selects the section `offset` rows away, stopping at the ends.
+	func move(by offset: Int) {
+		let tabs = Tab.allCases
+		guard let index = tabs.firstIndex(of: tab) else { return }
+		let next = tabs[min(max(index + offset, 0), tabs.count - 1)]
+		guard next != tab else { return }
+		let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+		withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .timingCurve(0.65, 0, 0.35, 1, duration: 0.4)) {
+			tab = next
+		}
+	}
 }
 
-/// Opens and closes the settings popup.
-final class SettingsPanelController {
-	static let shared = SettingsPanelController()
+/// The settings window: a regular titled window on an opaque dark ground. Axis has no other
+/// window, so while it is open Axis becomes a regular app (Dock, app switcher, app menu), and it
+/// goes back to a menu bar app when the window closes.
+final class SettingsWindowController: NSObject, NSWindowDelegate {
+	static let shared = SettingsWindowController()
 
-	private lazy var popup = GlassPopupController(size: CGSize(width: 720, height: 520), closesOnDeactivate: true) { _ in
-		SettingsView()
+	private var window: NSWindow?
+	private var keyMonitor: Any?
+	/// The app that was in front before the window opened, given focus back when it closes.
+	private var previousApp: NSRunningApplication?
+
+	/// Opens the window, or brings the open one to the front.
+	func show() {
+		let front = NSWorkspace.shared.frontmostApplication
+		if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+			previousApp = front
+		}
+		let window = self.window ?? makeWindow()
+		self.window = window
+		NSApp.setActivationPolicy(.regular)
+		NSApp.activate(ignoringOtherApps: true)
+		window.makeKeyAndOrderFront(nil)
+		installKeyMonitor()
 	}
 
-	func show() { popup.show() }
-	func hide() { popup.hide() }
+	func hide() {
+		window?.performClose(nil)
+	}
+
+	private func makeWindow() -> NSWindow {
+		let hosting = NSHostingController(rootView: SettingsView().foregroundColor(Palette.text))
+		hosting.sizingOptions = []
+
+		let window = NSWindow(contentViewController: hosting)
+		window.title = "Axis Settings"
+		window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+		window.titlebarAppearsTransparent = true
+		window.titleVisibility = .hidden
+		window.isOpaque = true
+		window.backgroundColor = NSPalette.pureBlack
+		// The ground is always dark, so system controls take their dark-ground colours.
+		window.appearance = NSAppearance(named: .darkAqua)
+		window.minSize = NSSize(width: 640, height: 460)
+		window.isReleasedWhenClosed = false
+		window.delegate = self
+		window.setContentSize(NSSize(width: 720, height: 520))
+		if !window.setFrameUsingName("Settings") {
+			window.center()
+		}
+		window.setFrameAutosaveName("Settings")
+		return window
+	}
+
+	func windowWillClose(_ notification: Notification) {
+		removeKeyMonitor()
+		NSApp.setActivationPolicy(.accessory)
+		if let previousApp, !previousApp.isTerminated {
+			NSApp.yieldActivation(to: previousApp)
+			previousApp.activate()
+		}
+		previousApp = nil
+	}
+
+	// MARK: - Keys
+
+	/// Esc and ⌘W close the window; the up and down arrows move between sections.
+	private func installKeyMonitor() {
+		guard keyMonitor == nil else { return }
+		keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+			guard let self, let window = self.window, window.isKeyWindow else { return event }
+			// A shortcut being recorded takes every key, Esc included.
+			if HotkeyManager.shared.isRecordingHotkey { return event }
+			let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+			if event.keyCode == 53 && modifiers.isEmpty
+				|| modifiers == .command && event.charactersIgnoringModifiers == "w" {
+				window.performClose(nil)
+				return nil
+			}
+			// Arrows belong to the field being typed in
+			guard modifiers.isEmpty, !(window.firstResponder is NSText) else { return event }
+			switch event.keyCode {
+			case 126: // Up arrow
+				SettingsNavigation.shared.move(by: -1)
+				return nil
+			case 125: // Down arrow
+				SettingsNavigation.shared.move(by: 1)
+				return nil
+			default:
+				return event
+			}
+		}
+	}
+
+	private func removeKeyMonitor() {
+		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+		keyMonitor = nil
+	}
 }
 
 struct SettingsView: View {

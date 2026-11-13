@@ -23,7 +23,7 @@ https://note.com/elegant_hue/n/nc77a5d09e9a1
 - Workspace Peek: Hold Ctrl+Option to preview the adjacent workspaces as two cards in the middle of the screen.
 - Visual Feedback: Border highlights around the focused window. Menu bar icon changes based on current mode.
 - Smart Workspaces: Efficiently navigate and move windows between workspaces. Empty workspaces are automatically cleaned up.
-- Custom Keyboard Shortcuts: Remap all shortcuts from the Settings popup.
+- Custom Keyboard Shortcuts: Remap all shortcuts from the Settings window.
 - State Persistence: Workspaces and window positions are preserved across sleep and lock. After Axis is relaunched or updated, the workspaces, their order, the columns and the floating windows come back as they were; windows that no longer exist are skipped.
 - Safe Quit: When Axis exits, all windows are restored to visible positions on screen.
 
@@ -54,7 +54,7 @@ Shortcuts are stored in `~/Library/Application Support/Axis/hotkeys.json`, which
 - A list gives one action several keys; an empty string leaves it without a key
 - Edits are picked up within a couple of seconds while Axis is running
 - An entry Axis can't read is skipped and that action keeps its default; the rest of the file still applies. If the file as a whole can't be read, Axis keeps the shortcuts already in use (the defaults at launch) and doesn't save over the file until it is fixed
-- Problems are listed at the top of the Settings popup and in the menu bar panel, and pointed out once from the menu bar icon when they first appear
+- Problems are listed at the top of the Settings window and in the menu bar panel, and pointed out once from the menu bar icon when they first appear
 - Changes made in Settings are merged into the file: other entries, including ones Axis doesn't know, are kept
 - `hotkeys.json` may be a symlink (for example into a dotfiles repository); Axis reads and writes the file it points to
 - A file in the older list format is converted on launch, after a copy of it is saved as `hotkeys.json.bak-array` next to it
@@ -93,7 +93,7 @@ Actions and their default keys:
 
 ### The settings file
 
-All other settings are stored in `~/Library/Application Support/Axis/settings.json`, which can also be edited by hand. Settings changed in the Settings popup are written to it, and edits to the file take effect within a couple of seconds while Axis is running. It may be a symlink; Axis reads and writes the file it points to.
+All other settings are stored in `~/Library/Application Support/Axis/settings.json`, which can also be edited by hand. Settings changed in the Settings window are written to it, and edits to the file take effect within a couple of seconds while Axis is running. It may be a symlink; Axis reads and writes the file it points to.
 
 ```json
 {
@@ -117,7 +117,7 @@ All other settings are stored in `~/Library/Application Support/Axis/settings.js
 | `floatingApps` | Bundle identifiers of the apps whose windows always float | System Settings |
 | `perfLog` | Write timing measurements to `~/Library/Logs` | `true` |
 
-A value of the wrong type or out of range is skipped and that setting keeps its default; problems are listed at the top of the Settings popup and in the menu bar panel. Entries Axis doesn't know are kept when it saves. If the file can't be read as a whole, Axis keeps the settings in use and doesn't save over it until it is fixed. Launch at Login is the system's login item and is not part of the file.
+A value of the wrong type or out of range is skipped and that setting keeps its default; problems are listed at the top of the Settings window and in the menu bar panel. Entries Axis doesn't know are kept when it saves. If the file can't be read as a whole, Axis keeps the settings in use and doesn't save over it until it is fixed. Launch at Login is the system's login item and is not part of the file.
 
 ## Modes
 
@@ -197,7 +197,7 @@ Opens an app with its windows on an empty workspace of their own, past the last 
 | `open-aside /Applications/Some.app` | The `bin/open-aside` script; copy it to a folder on your `PATH` such as `~/.local/bin`. Opens the app normally when Axis is not running |
 | `axis://launch-aside?path=/Applications/Some.app` | URL scheme behind the command (the path is URL-encoded) |
 | `axis://focus-back` | Jump back to the previously focused window |
-| `axis://settings` | Open the Settings popup |
+| `axis://settings` | Open the Settings window |
 
 In a build script:
 
