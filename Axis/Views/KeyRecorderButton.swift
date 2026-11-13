@@ -97,7 +97,7 @@ struct KeyRecorderButton: View {
 		if recorder.isRecording {
 			shape.strokeBorder(Palette.green, lineWidth: 1)
 		} else if key != nil {
-			shape.strokeBorder(Palette.pureWhite.opacity(0.10), lineWidth: 1)
+			shape.strokeBorder(Palette.line, lineWidth: 1)
 		} else {
 			shape.strokeBorder(Palette.pureWhite.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
 		}
