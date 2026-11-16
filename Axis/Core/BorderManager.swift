@@ -96,7 +96,7 @@ class BorderManager: ObservableObject {
     
     // A reusable helper method for creating the window
     private func createBorderWindow(for frame: CGRect) -> (NSWindow, SelectionBorderView) {
-        let overlay = NSWindow(
+        let overlay = UnconstrainedOverlayWindow(
             contentRect: frame,
             styleMask: .borderless,
             backing: .buffered,
@@ -362,6 +362,15 @@ class BorderManager: ObservableObject {
 // MARK: - Selection Border View
 
 /// The view that draws the border around the focused window
+/// AppKit moves a window that sticks out above the top of a screen down below the menu bar when it is
+/// ordered front. The border has to follow windows that touch or cross the top edge exactly, so it keeps
+/// the frame it is given.
+private class UnconstrainedOverlayWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+}
+
 class SelectionBorderView: NSView {
 
     var showsFill: Bool = true {
