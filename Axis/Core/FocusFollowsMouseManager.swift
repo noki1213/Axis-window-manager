@@ -139,7 +139,10 @@ class FocusFollowsMouseManager: ObservableObject {
 		// --- Identify the window directly under the mouse ---
 
 		let mouseLocation = NSEvent.mouseLocation
-		guard let window = topmostWindowAt(mouseLocation) else {
+		let focusedID = PerfLog.measure("FFM.getFocusedWindowID", threshold: 0.005) {
+			AccessibilityManager.shared.getFocusedWindowID()
+		}
+		guard let window = topmostWindowAt(mouseLocation, focusedID: focusedID) else {
 			logSkipReason(hitTestSkipReason ?? "no hit")
 			return
 		}
@@ -158,10 +161,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		}
 
 		// Do nothing if the window is already focused
-		let focused = PerfLog.measure("FFM.getFocusedWindow", threshold: 0.005) {
-			AccessibilityManager.shared.getFocusedWindow()
-		}
-		if let focused, focused.id == window.id {
+		if focusedID == window.id {
 			logSkipReason("already focused")
 			return
 		}
@@ -221,7 +221,12 @@ class FocusFollowsMouseManager: ObservableObject {
 	/// If only the normal layer is considered, hits pass straight through that panel and land on the tile behind it, and
 	/// Focus jumps to the tile underneath even while touching the panel. So a negative layer
 	/// Everything except things like the desktop is subject to hit testing.
-	private func topmostWindowAt(_ point: CGPoint) -> WindowInfo? {
+	///
+	/// Reaching the focused window under the point before any hit means the pointer is on it,
+	/// so the result is nil whatever layer it sits on. A panel above menu-bar level that holds
+	/// the keyboard would otherwise be skipped by the layer bound, and the window behind it
+	/// would take focus every time the pointer moves on the panel.
+	private func topmostWindowAt(_ point: CGPoint, focusedID: CGWindowID?) -> WindowInfo? {
 		hitTestSkipReason = nil
 		return PerfLog.measure("FFM.topmostWindowAt", threshold: 0.005) {
 			// CGWindowList uses a top-left origin, so convert it
@@ -236,10 +241,20 @@ class FocusFollowsMouseManager: ObservableObject {
 			// Hit-test from front to back
 			for entry in windowList {
 				guard let layer = entry[kCGWindowLayer as String] as? Int,
-					  layer >= 0, layer < Self.maxHitTestLayer,
 					  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat],
 					  let windowID = entry[kCGWindowNumber as String] as? CGWindowID,
 					  let pid = entry[kCGWindowOwnerPID as String] as? pid_t else { continue }
+
+				if windowID == focusedID {
+					let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
+										width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
+					if bounds.contains(cgPoint) {
+						hitTestSkipReason = "pointer on the focused window"
+						return nil
+					}
+				}
+
+				guard layer >= 0, layer < Self.maxHitTestLayer else { continue }
 
 				// A fully transparent window is "invisible", so let it pass through.
 				// This is the case for full-screen catch-all windows created by things like notification banners
