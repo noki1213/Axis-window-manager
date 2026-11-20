@@ -204,6 +204,8 @@ struct SettingsView: View {
 				RoundedRectangle(cornerRadius: 9, style: .continuous)
 					.fill(Palette.selection)
 					.matchedGeometryEffect(id: "tabPill", in: tabNamespace)
+					// The sliding highlight passes over other tabs; it takes no pointer so it cannot catch their hover.
+					.allowsHitTesting(false)
 			}
 		}
 		.contentShape(Rectangle())

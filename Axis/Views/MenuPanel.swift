@@ -319,6 +319,8 @@ struct MenuBarContentView: View {
 				RoundedRectangle(cornerRadius: 9, style: .continuous)
 					.fill(Palette.selection)
 					.matchedGeometryEffect(id: "menuRowHighlight", in: rowNamespace)
+					// The sliding highlight passes over other rows; it takes no pointer so it cannot catch their hover.
+					.allowsHitTesting(false)
 			}
 		}
 		.contentShape(Rectangle())
