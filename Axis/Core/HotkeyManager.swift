@@ -139,7 +139,7 @@ class HotkeyManager: ObservableObject {
 				return nil // Consume the event
 			}
 
-			return Unmanaged.passRetained(event)
+			return Unmanaged.passUnretained(event)
 		}
 
 		// Create the event tap
