@@ -13,7 +13,13 @@ if [ $# -ne 1 ]; then
 	exit 2
 fi
 
-app="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+# Resolved in its own assignment: joined with the basename in one, a failed cd would go unnoticed
+dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd)" || dir=""
+app="$dir/$(basename "$1")"
+if [ -z "$dir" ] || [ ! -d "$app" ]; then
+	echo "open-aside: no such app: $1" >&2
+	exit 1
+fi
 
 if pgrep -xq Axis; then
 	encoded="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$app")"
