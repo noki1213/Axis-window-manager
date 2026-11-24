@@ -36,6 +36,9 @@ final class LaunchAsideManager {
 		   front.bundleIdentifier != bundleID,
 		   front.bundleIdentifier != Bundle.main.bundleIdentifier {
 			previousApp = front
+		} else {
+			// No app to hand focus back to; the one remembered from an earlier launch isn't it
+			previousApp = nil
 		}
 		let now = ProcessInfo.processInfo.systemUptime
 		coordinator.note { state in
