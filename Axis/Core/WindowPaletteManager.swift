@@ -447,7 +447,7 @@ class WindowPaletteManager {
 	private func switchToWindowWorkspace(_ item: WindowPaletteItem) {
 		// System section windows don't belong to a workspace, so they aren't switched
 		if let workspace = item.workspace, !coordinator.state.isActive(workspace) {
-			workspaceManager.switchWorkspace(to: workspace, endingPalette: true)
+			workspaceManager.switchWorkspace(to: workspace, focusWindowID: item.windowID, endingPalette: true)
 		}
 
 		// Focus the target window
