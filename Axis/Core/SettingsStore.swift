@@ -117,6 +117,11 @@ final class SettingsStore: ObservableObject {
 
 	/// Save one key, leaving every other entry in the file as it is
 	func set(_ key: String, _ value: Any) {
+		// An edit made to the file since the last check is read first, so this save doesn't undo it
+		if reloadIfChangedOnDisk() {
+			// Sent after the save, when the store holds both the edit and the new value
+			DispatchQueue.main.async { [self] in externalChange.send() }
+		}
 		if let old = values[key] as? NSObject, old.isEqual(value) { return }
 		values[key] = value
 		saveToDisk()
@@ -188,13 +193,19 @@ final class SettingsStore: ObservableObject {
 	private func startWatching() {
 		watchTimer = Timer.scheduledTimer(withTimeInterval: Self.watchInterval, repeats: true) { [weak self] _ in
 			guard let self else { return }
-			// Resolved on every check, so pointing the link somewhere else is picked up too
-			guard FileStamp(of: self.fileURL) != self.lastSeenStamp else { return }
-			self.loadFromDisk()
-			if !self.fileIsUnreadable {
+			if self.reloadIfChangedOnDisk() {
 				self.externalChange.send()
 			}
 		}
+	}
+
+	/// Reads the file again when something other than Axis changed it. Returns whether the settings
+	/// in use were replaced.
+	private func reloadIfChangedOnDisk() -> Bool {
+		// Resolved on every check, so pointing the link somewhere else is picked up too
+		guard FileStamp(of: fileURL) != lastSeenStamp else { return false }
+		loadFromDisk()
+		return !fileIsUnreadable
 	}
 
 	/// The path, modification date and size of the file; nil when it doesn't exist
