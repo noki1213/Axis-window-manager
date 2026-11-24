@@ -309,8 +309,13 @@ struct WindowInfo: Identifiable, Equatable {
     }
 
     /// Update (re-fetch) the current frame
-    mutating func refreshFrame() {
-        self.frame = Self.getFrame(from: axElement) ?? .zero
+    /// Reads the frame again. Returns false when it could not be read (the window closed or its
+    /// app did not answer); the frame is then zero.
+    @discardableResult
+    mutating func refreshFrame() -> Bool {
+        let current = Self.getFrame(from: axElement)
+        self.frame = current ?? .zero
+        return current != nil
     }
     
     // MARK: - Private Helpers

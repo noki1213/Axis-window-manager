@@ -435,7 +435,8 @@ class TilingEngine: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             // Get the window's current position
             var windowCopy = window
-            windowCopy.refreshFrame()
+            // A window that closed meanwhile has no place to move the cursor to
+            guard windowCopy.refreshFrame() else { return }
 
             let centerX = windowCopy.frame.midX
             let centerY = windowCopy.frame.midY

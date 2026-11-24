@@ -457,8 +457,9 @@ class WindowPaletteManager {
 
 			// Move the mouse cursor to the center of the window, where the switch put it
 			var current = window
-			current.refreshFrame()
-			CGWarpMouseCursorPosition(CGPoint(x: current.frame.midX, y: current.frame.midY))
+			if current.refreshFrame() {
+				CGWarpMouseCursorPosition(CGPoint(x: current.frame.midX, y: current.frame.midY))
+			}
 
 			// Update the border
 			DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
