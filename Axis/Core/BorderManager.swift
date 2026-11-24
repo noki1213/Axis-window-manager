@@ -250,7 +250,11 @@ class BorderManager: ObservableObject {
             } else {
                 // Mission Control ends → show the border again
                 PerfLog.event("border: re-shown (mission control ended)")
-                borderWindow?.orderFront(nil)
+                // Only a border that was on a window comes back; one hidden before (an empty
+                // workspace, gap mode) would show where no window is
+                if currentWindow != nil {
+                    borderWindow?.orderFront(nil)
+                }
             }
         }
 
