@@ -132,9 +132,18 @@ final class KeyRecorder: ObservableObject {
 	@Published private(set) var isRecording = false
 	private var onRecorded: ((HotkeyKey?) -> Void)?
 	private var localMonitor: Any?
-	private var globalMonitor: Any?
+	private var resignObserver: NSObjectProtocol?
+
+	/// The recorder listening now. Starting another ends it, so a key press goes to one cell only
+	private static weak var active: KeyRecorder?
 
 	func start(onRecorded: @escaping (HotkeyKey?) -> Void) {
+		if Self.active !== self {
+			Self.active?.stop()
+		}
+		Self.active = self
+		removeListeners()
+
 		self.onRecorded = onRecorded
 		isRecording = true
 		HotkeyManager.shared.isRecordingHotkey = true
@@ -143,9 +152,12 @@ final class KeyRecorder: ObservableObject {
 			self?.handle(event)
 			return nil
 		}
-		// Fallback for when the app loses focus
-		globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-			self?.handle(event)
+		// Recording ends when the window is left: keys typed anywhere else aren't meant for the
+		// cell, and the shortcuts are off for as long as it listens
+		resignObserver = NotificationCenter.default.addObserver(
+			forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
+		) { [weak self] _ in
+			self?.stop()
 		}
 	}
 
@@ -153,11 +165,15 @@ final class KeyRecorder: ObservableObject {
 		guard isRecording else { return }
 		isRecording = false
 		HotkeyManager.shared.isRecordingHotkey = false
-		if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
-		if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
-		localMonitor = nil
-		globalMonitor = nil
+		removeListeners()
 		onRecorded = nil
+	}
+
+	private func removeListeners() {
+		if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
+		if let observer = resignObserver { NotificationCenter.default.removeObserver(observer) }
+		localMonitor = nil
+		resignObserver = nil
 	}
 
 	private func handle(_ event: NSEvent) {
@@ -180,6 +196,6 @@ final class KeyRecorder: ObservableObject {
 			HotkeyManager.shared.isRecordingHotkey = false
 		}
 		if let monitor = localMonitor { NSEvent.removeMonitor(monitor) }
-		if let monitor = globalMonitor { NSEvent.removeMonitor(monitor) }
+		if let observer = resignObserver { NotificationCenter.default.removeObserver(observer) }
 	}
 }
