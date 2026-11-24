@@ -19,12 +19,17 @@ final class LaunchAsideManager {
 
 	/// Launch the app at `url`, its windows bound for an empty workspace on `screen`.
 	func launch(appAt url: URL, on screen: NSScreen?) {
-		guard let bundleID = Bundle(url: url)?.bundleIdentifier,
-		      let screen = screen ?? NSScreen.main,
+		// The URL scheme can be called by any app or web page, so nothing but an app is opened:
+		// any other path would run a script or open a document with its default handler
+		guard url.pathExtension == "app", let bundleID = Bundle(url: url)?.bundleIdentifier else {
+			PerfLog.event("launch-aside: not an app, ignored")
+			return
+		}
+		guard let screen = screen ?? NSScreen.main,
 		      let monitor = WorkspaceManager.shared.monitorKey(for: screen),
 		      coordinator.isRunning
 		else {
-			NSWorkspace.shared.open(url)
+			NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 			return
 		}
 		if let front = NSWorkspace.shared.frontmostApplication,
