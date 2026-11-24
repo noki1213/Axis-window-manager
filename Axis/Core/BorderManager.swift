@@ -40,6 +40,11 @@ class BorderManager: ObservableObject {
     /// Acts as a fallback for cases where the didActivateApplicationNotification notification doesn't fire or is delayed
     private var lastFrontmostPID: pid_t?
 
+    /// The frame of the bordered window isn't read before this time (system uptime). Set when its
+    /// app did not answer a read
+    private var frameCheckPausedUntil: TimeInterval = 0
+    private static let busyAppRecheckInterval: TimeInterval = 2
+
     /// Whether to draw the border dashed. Since the border window is recreated on every focus move,
     /// State is held here and reflected in the view both at creation and on switches
     private var isDashed = false
@@ -194,6 +199,7 @@ class BorderManager: ObservableObject {
         // The focused window changed = it left the empty monitor
         if windowChanged {
             TilingEngine.shared.cursorMonitor = nil
+            frameCheckPausedUntil = 0
         }
 
         if let existingWindow = borderWindow, existingWindow.isVisible {
@@ -278,6 +284,7 @@ class BorderManager: ObservableObject {
         guard let currentWindow = currentWindow,
               let borderWindow = borderWindow,
               borderWindow.isVisible else { return }
+        guard ProcessInfo.processInfo.systemUptime >= frameCheckPausedUntil else { return }
 
         var positionRef: CFTypeRef?
         var sizeRef: CFTypeRef?
@@ -285,7 +292,17 @@ class BorderManager: ObservableObject {
         let axElement = currentWindow.axElement
 
         let posResult = AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &positionRef)
+        // The app is busy, not gone: the border stays where it is. Each read of such an app makes the
+        // main thread wait out the timeout, so the next one is a while away
+        if posResult == .cannotComplete {
+            frameCheckPausedUntil = ProcessInfo.processInfo.systemUptime + Self.busyAppRecheckInterval
+            return
+        }
         let sizeResult = AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
+        if sizeResult == .cannotComplete {
+            frameCheckPausedUntil = ProcessInfo.processInfo.systemUptime + Self.busyAppRecheckInterval
+            return
+        }
 
         // Extract the value from an AXValue (it can't be cast directly; a value of another type counts
         // as unreadable).
