@@ -107,8 +107,13 @@ struct WindowInfo: Identifiable, Equatable {
 
         // If this focus change came from a key press, pick up that record to measure end-to-end time
         let claimedKeyPress = PerfLog.claimKeyPress()
-        verifyFocus(attempt: 0, focusStart: perfOverallStart, claimedKeyPress: claimedKeyPress)
+        Self.focusGeneration &+= 1
+        verifyFocus(attempt: 0, generation: Self.focusGeneration, focusStart: perfOverallStart, claimedKeyPress: claimedKeyPress)
     }
+
+    /// Counts the calls to focus(). The checks of an earlier call stop once a later one started:
+    /// they would see the later window focused and take focus back from it
+    private static var focusGeneration = 0
 
     /// The actual implementation of setting focus (a single attempt)
     /// - Parameter useAppActivate: whether to focus via the conventional activate() instead of the private API.
@@ -251,7 +256,7 @@ struct WindowInfo: Identifiable, Equatable {
     /// Confirm whether focus actually moved, and retry if it didn't
     /// Stops at the end of the time budget, and right away once the app does not answer
     /// - Parameter focusStart: The time of the first focus() call. Also the start of the time budget
-    private func verifyFocus(attempt: Int, focusStart: CFAbsoluteTime, claimedKeyPress: (label: String, start: CFAbsoluteTime)?) {
+    private func verifyFocus(attempt: Int, generation: Int, focusStart: CFAbsoluteTime, claimedKeyPress: (label: String, start: CFAbsoluteTime)?) {
         func giveUp(_ reason: String) {
             if PerfLog.enabled {
                 let elapsed = CFAbsoluteTimeGetCurrent() - focusStart
@@ -266,6 +271,11 @@ struct WindowInfo: Identifiable, Equatable {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.focusRetryDelays[attempt]) {
+            guard generation == Self.focusGeneration else {
+                giveUp("stopped, another window was focused since")
+                return
+            }
+
             // A read may not wait longer than what is left of the budget
             let remaining = Self.focusVerifyBudget - (CFAbsoluteTimeGetCurrent() - focusStart)
             guard remaining > Self.minimumReadBudget else {
@@ -294,7 +304,7 @@ struct WindowInfo: Identifiable, Equatable {
                 giveUp("gave up, the app did not answer")
                 return
             }
-            self.verifyFocus(attempt: attempt + 1, focusStart: focusStart, claimedKeyPress: claimedKeyPress)
+            self.verifyFocus(attempt: attempt + 1, generation: generation, focusStart: focusStart, claimedKeyPress: claimedKeyPress)
         }
     }
 
