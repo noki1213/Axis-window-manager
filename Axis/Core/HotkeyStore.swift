@@ -33,7 +33,7 @@ class HotkeyStore: ObservableObject {
 
 	/// The file actually read and written: the symlink's destination when hotkeys.json is a link
 	private var fileURL: URL {
-		return saveURL.resolvingSymlinksInPath()
+		return ConfigFile.resolved(saveURL)
 	}
 
 	/// Set while the file exists but can't be read as a JSON object. Saving would wipe what the user wrote, so it's held back.

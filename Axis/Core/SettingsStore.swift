@@ -31,7 +31,7 @@ final class SettingsStore: ObservableObject {
 	}()
 
 	/// The file actually read and written: the symlink's destination when settings.json is a link
-	private var fileURL: URL { saveURL.resolvingSymlinksInPath() }
+	private var fileURL: URL { ConfigFile.resolved(saveURL) }
 
 	/// Read from any thread (the measurement log asks from background queues), so access goes through the lock
 	private let lock = NSLock()
