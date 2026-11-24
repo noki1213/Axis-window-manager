@@ -33,6 +33,9 @@ class WindowPaletteManager {
 	/// Data per Display
 	private var displays: [WindowPaletteDisplay] = []
 
+	/// Whether the palette is on screen
+	var isShowing: Bool { !displays.isEmpty }
+
 	/// The currently selected Display (monitor row)
 	private var selectedDisplayIndex: Int = 0
 

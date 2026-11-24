@@ -434,18 +434,23 @@ class HotkeyManager: ObservableObject {
 		// MARK: Mode switching
 		case .gapSelectMode:
 			DispatchQueue.main.async { [weak self] in
-				guard !ZenModeManager.shared.isActive else { return }
-				self?.currentMode = .gapSelect
-				self?.gapSelectManager.startGapSelectMode()
-				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+				guard let self, !ZenModeManager.shared.isActive else { return }
+				self.gapSelectManager.startGapSelectMode()
+				// With no gap to move (a single window) the mode would take every key and show nothing
+				guard self.gapSelectManager.isActive else { return }
+				self.currentMode = .gapSelect
+				NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
 			}
 
 		case .windowPaletteMode:
 			DispatchQueue.main.async { [weak self] in
 				// The palette takes every window out of sight, so Zen mode ends with it
-				self?.currentMode = .windowPalette
-				self?.windowPaletteManager.startPalette()
-				NotificationCenter.default.post(name: .modeChanged, object: self?.currentMode)
+				guard let self else { return }
+				self.windowPaletteManager.startPalette()
+				// With no display to list the mode would take every key and show nothing
+				guard self.windowPaletteManager.isShowing else { return }
+				self.currentMode = .windowPalette
+				NotificationCenter.default.post(name: .modeChanged, object: self.currentMode)
 			}
 
 		// MARK: Layout
