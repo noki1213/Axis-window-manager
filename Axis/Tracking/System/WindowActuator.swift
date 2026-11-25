@@ -320,20 +320,10 @@ enum WindowActuator {
 				let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
 				let screenBottomInAX = mainScreenHeight - visibleFrame.minY
 
-				var newX = window.frame.origin.x
-				var newY = window.frame.origin.y
-
-				if newX + window.frame.width <= visibleFrame.minX {
-					newX = visibleFrame.minX
-				} else if newX >= visibleFrame.maxX {
-					newX = visibleFrame.maxX - window.frame.width
-				}
-
-				if newY + window.frame.height <= screenTopInAX {
-					newY = screenTopInAX
-				} else if newY >= screenBottomInAX {
-					newY = screenBottomInAX - window.frame.height
-				}
+				// Clamped fully inside the visible area: a window left parked keeps a sliver on
+				// screen, so it does not lie fully outside and still needs moving.
+				let newX = max(visibleFrame.minX, min(window.frame.origin.x, visibleFrame.maxX - window.frame.width))
+				let newY = max(screenTopInAX, min(window.frame.origin.y, screenBottomInAX - window.frame.height))
 
 				let target = CGRect(origin: CGPoint(x: newX, y: newY), size: window.frame.size)
 				let action = PlanAction(window: window.id, pid: window.app.processIdentifier, kind: .setFrame(target),
