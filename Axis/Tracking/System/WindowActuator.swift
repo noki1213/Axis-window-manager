@@ -20,6 +20,12 @@ enum WindowActuator {
 	private static let messagingTimeout: Float = 0.3
 	private static var cachedMinSizes: [WindowID: CGSize] = [:]
 
+	/// Drops what is cached for a window that is gone, so the cache does not grow with every
+	/// window ever seen and a reused id does not inherit another window's minimum size.
+	static func forget(window id: WindowID) {
+		cachedMinSizes[id] = nil
+	}
+
 	// MARK: - Plan Execution
 
 	/// Executes the actions of a plan on the main thread, running the show phase before the hide phase.

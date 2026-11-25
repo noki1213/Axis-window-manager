@@ -835,6 +835,7 @@ final class TrackingCoordinator {
 				axEventSource.unwatchWindow(id)
 				watchedWindows.remove(id)
 				ElementCache.shared.remove(window: id)
+				WindowActuator.forget(window: id)
 				scheduleRetireCheck(id, reason: reason)
 			}
 			for handler in eventHandlers {
