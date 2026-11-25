@@ -546,7 +546,8 @@ nonisolated extension TrackingState {
 	/// Moves a tiled or floating window into the active workspace of another monitor: a tiled one
 	/// as a new column at that end of the drawable view, a floating one at the same offset in the
 	/// new monitor's visible area. The empty workspace left behind stays until the next switch
-	/// there, so the monitor it left does not jump to another workspace.
+	/// there, so the monitor it left does not jump to another workspace. Zen ends when its focus
+	/// leaves, and when a tiled window joins the Zen workspace, as on admission.
 	@discardableResult
 	mutating func moveWindowToMonitor(_ id: WindowID, to monitor: MonitorKey, edge: ColumnEdge) -> Bool {
 		guard var record = records[id], record.placement != .unmanaged,
@@ -569,6 +570,11 @@ nonisolated extension TrackingState {
 				}
 			}
 		}
+		// The Zen frame belongs to the monitor Zen started on, so its focus leaving ends it.
+		if zen?.focus == id {
+			zenExit(reason: .focusMoved)
+		}
+		zenNoteAdmission(record)
 		if let sourceHost, sourceHost != monitor {
 			compact(sourceHost, keepingActive: true)
 		}

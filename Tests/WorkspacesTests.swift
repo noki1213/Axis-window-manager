@@ -684,6 +684,59 @@ private let membershipTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
+	TestCase("moving the Zen focus to another monitor ends Zen") {
+		var state = testState([testDisplay("Main", primary: true), testDisplay("Right", x: 1440, displayID: 2)])
+		let right = testKey("Right")
+		let home = state.testActive()
+		state.testSetColumns(home, [[2], [1]], visibility: [2: .zenHidden])
+		state.zen = ZenSession(monitor: main, workspace: home, focus: 1)
+		expectInvariants(state)
+
+		expectEqual(state.moveWindow(1, .right), .movedToMonitor(right))
+		expectEqual(state.records[1]?.workspace, state.testActive("Right"))
+		expectEqual(state.zen, nil)
+		expect(state.events.contains(.zenEnded(.focusMoved)))
+		state.normalize(now: 1)
+		expectEqual(state.records[2]?.visibility, .visible, "the window Zen parked comes back")
+		expectEqual(state.testColumns(home), [[2]])
+		expectInvariants(state)
+	},
+
+	TestCase("a tiled window moved into the Zen workspace of another monitor ends Zen") {
+		var state = testState([testDisplay("Main", primary: true), testDisplay("Right", x: 1440, displayID: 2)])
+		let right = testKey("Right")
+		let rightHome = state.testActive("Right")
+		state.testSetColumns(state.testActive(), [[1]])
+		state.testSetColumns(rightHome, [[3], [4]], visibility: [4: .zenHidden])
+		state.zen = ZenSession(monitor: right, workspace: rightHome, focus: 3)
+		expectInvariants(state)
+
+		expectEqual(state.moveWindow(1, .right), .movedToMonitor(right))
+		expectEqual(state.zen, nil)
+		expect(state.events.contains(.zenEnded(.tiledAdmitted)))
+		state.normalize(now: 1)
+		expectEqual(state.records[1]?.visibility, .visible)
+		expectEqual(state.records[4]?.visibility, .visible)
+		expectEqual(state.testColumns(rightHome), [[1], [3], [4]])
+		expectInvariants(state)
+	},
+
+	TestCase("a floating window moved into the Zen workspace of another monitor keeps Zen") {
+		var state = testState([testDisplay("Main", primary: true), testDisplay("Right", x: 1440, displayID: 2)])
+		let right = testKey("Right")
+		let rightHome = state.testActive("Right")
+		state.testAddWindow(1, placement: .floating, workspace: state.testActive())
+		state.records[1]!.floatingFrame = RelativeFrame(monitor: main, offset: CGPoint(x: 50, y: 60), size: CGSize(width: 300, height: 200))
+		state.testSetColumns(rightHome, [[3]])
+		state.zen = ZenSession(monitor: right, workspace: rightHome, focus: 3)
+
+		expect(state.moveWindowToMonitor(1, to: right, edge: .left))
+		expectEqual(state.zen, ZenSession(monitor: right, workspace: rightHome, focus: 3))
+		state.normalize(now: 1)
+		expectEqual(state.records[1]?.visibility, .zenHidden, "like a floating window admitted there")
+		expectInvariants(state)
+	},
+
 	TestCase("setting an app to float takes its tiled windows out of the columns and their workspaces") {
 		var state = testState()
 		let row = state.testSetRow(nonNegatives: 2, active: 0)

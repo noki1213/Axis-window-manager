@@ -405,6 +405,7 @@ nonisolated enum WorkspaceTarget: Hashable, Sendable {
 nonisolated enum ZenExitReason: Hashable, Sendable {
 	case user
 	case focusClosed
+	case focusMoved
 	case hiddenClosed
 	case tiledAdmitted
 	case monitorGone
@@ -416,6 +417,7 @@ nonisolated enum ZenExitReason: Hashable, Sendable {
 		switch self {
 		case .user: return "user"
 		case .focusClosed: return "focus window closed"
+		case .focusMoved: return "focus window moved to another monitor"
 		case .hiddenClosed: return "hidden window closed"
 		case .tiledAdmitted: return "tiled window admitted"
 		case .monitorGone: return "monitor gone"
