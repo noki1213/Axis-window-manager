@@ -764,6 +764,26 @@ let persistenceTests: [TestCase] = [
 		expect(twiceListed.validationProblem() != nil, "a monitor listed twice")
 	},
 
+	TestCase("workspace ids that would overflow on restore are reported") {
+		var state = testState([testDisplay("Main", primary: true)])
+		state.testSetColumns(state.testActive(), [[10]])
+		let good = state.snapshot()
+		expectEqual(good.validationProblem(), nil)
+
+		let huge = WorkspaceID(raw: Int.max)
+		var hugeWorkspace = good
+		hugeWorkspace.monitors[0].order = [huge]
+		hugeWorkspace.monitors[0].active = huge
+		hugeWorkspace.monitors[0].workspaces[0].id = huge
+		expect(hugeWorkspace.validationProblem() != nil, "a workspace id of Int.max")
+
+		var hugeMemory = good
+		hugeMemory.memory = [
+			PersistedMemory(key: good.monitors[0].key, name: "Gone", order: [huge], negativeCount: 0, active: huge)
+		]
+		expect(hugeMemory.validationProblem() != nil, "a remembered workspace id of Int.max")
+	},
+
 	TestCase("damaged data does not decode") {
 		var state = testState()
 		state.testSetColumns(state.testActive(), [[10], [11]])

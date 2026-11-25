@@ -277,6 +277,9 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 		monitors.reduce(0) { $0 + $1.workspaces.count }
 	}
 
+	/// Restore adds 1 to the highest saved workspace id, so ids must stay clear of Int overflow.
+	private static let workspaceRawRange = 0...Int(Int32.max)
+
 	/// What makes the snapshot unusable, nil when it is consistent. The JSON decoder only checks the
 	/// shape: a damaged or hand-edited file can still decode into rows that list a workspace twice
 	/// or put a window in two columns, and that must never reach the state.
@@ -285,6 +288,10 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 		var workspaceIDs = Set<WorkspaceID>()
 		var columnWindows = Set<WindowID>()
 		for monitor in monitors {
+			let ids = monitor.order + [monitor.active] + monitor.workspaces.map(\.id)
+			if let id = ids.first(where: { !Self.workspaceRawRange.contains($0.raw) }) {
+				return "workspace \(id) has an id out of range"
+			}
 			guard monitorKeys.insert(monitor.key).inserted else {
 				return "monitor \(monitor.key) is listed twice"
 			}
@@ -315,6 +322,12 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 						}
 					}
 				}
+			}
+		}
+		for entry in memory {
+			let ids = entry.order + [entry.active]
+			if let id = ids.first(where: { !Self.workspaceRawRange.contains($0.raw) }) {
+				return "workspace \(id) has an id out of range"
 			}
 		}
 		var windowIDs = Set<WindowID>()
