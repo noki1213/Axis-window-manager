@@ -21,4 +21,20 @@ enum ConfigFile {
 		}
 		return current.resolvingSymlinksInPath()
 	}
+
+	/// The path, modification date and size of the file; nil when it doesn't exist
+	struct Stamp: Equatable {
+		let path: String
+		let modified: Date
+		let size: Int
+
+		init?(of url: URL) {
+			guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+			      let modified = attributes[.modificationDate] as? Date
+			else { return nil }
+			self.path = url.path
+			self.modified = modified
+			self.size = (attributes[.size] as? Int) ?? 0
+		}
+	}
 }

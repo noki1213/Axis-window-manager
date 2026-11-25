@@ -44,7 +44,7 @@ final class SettingsStore: ObservableObject {
 	/// Set while the file exists but can't be read as a JSON object. Saving would wipe what the user wrote.
 	private var fileIsUnreadable = false
 
-	private var lastSeenStamp: FileStamp?
+	private var lastSeenStamp: ConfigFile.Stamp?
 	private var watchTimer: Timer?
 	private static let watchInterval: TimeInterval = 2.0
 
@@ -144,14 +144,14 @@ final class SettingsStore: ObservableObject {
 		data.append(Data("\n".utf8))
 		try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try data.write(to: url, options: .atomic)
-		lastSeenStamp = FileStamp(of: url)
+		lastSeenStamp = ConfigFile.Stamp(of: url)
 	}
 
 	// MARK: - Loading
 
 	private func loadFromDisk() {
 		let url = fileURL
-		lastSeenStamp = FileStamp(of: url)
+		lastSeenStamp = ConfigFile.Stamp(of: url)
 		problems = []
 
 		guard FileManager.default.fileExists(atPath: url.path) else {
@@ -203,24 +203,8 @@ final class SettingsStore: ObservableObject {
 	/// in use were replaced.
 	private func reloadIfChangedOnDisk() -> Bool {
 		// Resolved on every check, so pointing the link somewhere else is picked up too
-		guard FileStamp(of: fileURL) != lastSeenStamp else { return false }
+		guard ConfigFile.Stamp(of: fileURL) != lastSeenStamp else { return false }
 		loadFromDisk()
 		return !fileIsUnreadable
-	}
-
-	/// The path, modification date and size of the file; nil when it doesn't exist
-	private struct FileStamp: Equatable {
-		let path: String
-		let modified: Date
-		let size: Int
-
-		init?(of url: URL) {
-			guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-			      let modified = attributes[.modificationDate] as? Date
-			else { return nil }
-			self.path = url.path
-			self.modified = modified
-			self.size = (attributes[.size] as? Int) ?? 0
-		}
 	}
 }

@@ -40,7 +40,7 @@ class HotkeyStore: ObservableObject {
 	private var fileIsUnreadable = false
 
 	/// The file's state when Axis last read or wrote it. A different state on the next check means someone else edited it.
-	private var lastSeenStamp: FileStamp?
+	private var lastSeenStamp: ConfigFile.Stamp?
 
 	/// How often the file is checked for edits
 	private static let watchInterval: TimeInterval = 2.0
@@ -63,7 +63,7 @@ class HotkeyStore: ObservableObject {
 	/// A file that can't be read at all leaves the defaults at launch, and the keys in use when it breaks later.
 	private func loadFromDisk(atLaunch: Bool) {
 		let url = fileURL
-		lastSeenStamp = FileStamp(of: url)
+		lastSeenStamp = ConfigFile.Stamp(of: url)
 
 		guard FileManager.default.fileExists(atPath: url.path) else {
 			fileIsUnreadable = false
@@ -184,25 +184,9 @@ class HotkeyStore: ObservableObject {
 		watchTimer = Timer.scheduledTimer(withTimeInterval: Self.watchInterval, repeats: true) { [weak self] _ in
 			guard let self else { return }
 			// Resolved on every check, so pointing the link somewhere else is picked up too
-			if FileStamp(of: self.fileURL) != self.lastSeenStamp {
+			if ConfigFile.Stamp(of: self.fileURL) != self.lastSeenStamp {
 				self.loadFromDisk(atLaunch: false)
 			}
-		}
-	}
-
-	/// The path, modification date and size of the file; nil when it doesn't exist
-	private struct FileStamp: Equatable {
-		let path: String
-		let modified: Date
-		let size: Int
-
-		init?(of url: URL) {
-			guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-			      let modified = attributes[.modificationDate] as? Date
-			else { return nil }
-			self.path = url.path
-			self.modified = modified
-			self.size = (attributes[.size] as? Int) ?? 0
 		}
 	}
 
@@ -260,7 +244,7 @@ class HotkeyStore: ObservableObject {
 		data.append(Data("\n".utf8))
 		try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try data.write(to: url, options: .atomic)
-		lastSeenStamp = FileStamp(of: url)
+		lastSeenStamp = ConfigFile.Stamp(of: url)
 	}
 
 	// MARK: - Reset to defaults
