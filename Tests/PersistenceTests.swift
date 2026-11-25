@@ -285,6 +285,31 @@ let persistenceTests: [TestCase] = [
 		expectInvariants(newState)
 	},
 
+	TestCase("a window hidden before a relaunch comes back from the Dock when it is unhidden") {
+		var state = testState([testDisplay("Main", primary: true)])
+		let home = state.testActive("Main")
+		state.testSetColumns(home, [[10]])
+		state.testAddWindow(11, placement: .tiled, workspace: home, visibility: .axisMinimized)
+		state.hiddenStack = [HiddenEntry(window: 11, minimizeConfirmed: true)]
+		let snapshot = state.snapshot()
+
+		var newState = testState([testDisplay("Main", primary: true)])
+		let facts = [
+			WindowFacts(id: 10, pid: 100, title: "W10"),
+			WindowFacts(id: 11, pid: 100, title: "W11", isMinimized: true)
+		]
+		newState.applyPersistence(snapshot, windows: facts, apps: [], now: 60.0)
+
+		expectEqual(newState.unhideLast(), 11)
+		newState.normalize(now: 61)
+		let server = ServerSnapshot(
+			[ServerWindow(id: 10, pid: 100, bounds: CGRect(x: 12, y: 37, width: 1416, height: 851))], takenAt: 61)
+		let plan = newState.plan(snapshot: server, options: PlanOptions(isCommand: true), now: 61)
+		expect(plan.actions.contains { $0.window == 11 && $0.kind == .unminimize },
+			"the window minimized by the hide command before the relaunch is unminimized")
+		expectInvariants(newState)
+	},
+
 	TestCase("saved workspace ids that equal the ids of this run's empty workspaces keep their monitors") {
 		// First run: the external display was connected first, so it got the lower workspace id.
 		var state = testState([testDisplay("Ext", x: 1440), testDisplay("Main", primary: true)])

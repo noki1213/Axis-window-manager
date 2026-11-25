@@ -679,6 +679,9 @@ nonisolated extension TrackingState {
 			if records[targetID] != nil {
 				hiddenStack.append(HiddenEntry(window: targetID, minimizeConfirmed: entry.minimizeConfirmed))
 				records[targetID]?.visibility = .axisMinimized
+				// The planner unminimizes a window leaving the hide stack only when it minimized it,
+				// which the run before this one did
+				plannerState.minimized.insert(targetID)
 			}
 		}
 
