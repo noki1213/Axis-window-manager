@@ -291,45 +291,13 @@ class HotkeyManager: ObservableObject {
 		switch action {
 		// MARK: Focus movement
 		case .focusLeft:
-			PerfLog.markKeyPressStart("focusLeft")
-			DispatchQueue.main.async { [weak self] in
-				PerfLog.reportKeyPressHandlerStart()
-				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .left) }) {
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-						BorderManager.shared.updateBorderExpecting(windowID: targetID)
-					}
-				}
-			}
+			moveFocus(.left, label: "focusLeft")
 		case .focusRight:
-			PerfLog.markKeyPressStart("focusRight")
-			DispatchQueue.main.async { [weak self] in
-				PerfLog.reportKeyPressHandlerStart()
-				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .right) }) {
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-						BorderManager.shared.updateBorderExpecting(windowID: targetID)
-					}
-				}
-			}
+			moveFocus(.right, label: "focusRight")
 		case .focusUp:
-			PerfLog.markKeyPressStart("focusUp")
-			DispatchQueue.main.async { [weak self] in
-				PerfLog.reportKeyPressHandlerStart()
-				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .up) }) {
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-						BorderManager.shared.updateBorderExpecting(windowID: targetID)
-					}
-				}
-			}
+			moveFocus(.up, label: "focusUp")
 		case .focusDown:
-			PerfLog.markKeyPressStart("focusDown")
-			DispatchQueue.main.async { [weak self] in
-				PerfLog.reportKeyPressHandlerStart()
-				if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: .down) }) {
-					DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-						BorderManager.shared.updateBorderExpecting(windowID: targetID)
-					}
-				}
-			}
+			moveFocus(.down, label: "focusDown")
 		case .focusBack:
 			DispatchQueue.main.async {
 				FocusHistoryManager.shared.jumpBack()
@@ -337,37 +305,19 @@ class HotkeyManager: ObservableObject {
 
 		// MARK: Window movement
 		case .moveWindowLeft:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveWindow(direction: .left)
-				BorderManager.shared.updateBorder()
-			}
+			moveWindow(.left)
 		case .moveWindowRight:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveWindow(direction: .right)
-				BorderManager.shared.updateBorder()
-			}
+			moveWindow(.right)
 		case .moveWindowUp:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveWindow(direction: .up)
-				BorderManager.shared.updateBorder()
-			}
+			moveWindow(.up)
 		case .moveWindowDown:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.moveWindow(direction: .down)
-				BorderManager.shared.updateBorder()
-			}
+			moveWindow(.down)
 
 		// MARK: Merge/split (step move)
 		case .stepMoveLeft:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.stepMoveWindow(direction: .left)
-				BorderManager.shared.updateBorder()
-			}
+			stepMoveWindow(.left)
 		case .stepMoveRight:
-			DispatchQueue.main.async { [weak self] in
-				self?.tilingEngine.stepMoveWindow(direction: .right)
-				BorderManager.shared.updateBorder()
-			}
+			stepMoveWindow(.right)
 
 		// MARK: Float (floating)
 		case .floatToggle:
@@ -522,6 +472,35 @@ class HotkeyManager: ObservableObject {
 					PlacementReservationManager.shared.beginAwaiting()
 				}
 			}
+		}
+	}
+
+	/// Move focus one window in a direction on the next main-queue turn, then refresh the border once the focus has settled
+	private func moveFocus(_ direction: Direction, label: String) {
+		PerfLog.markKeyPressStart(label)
+		DispatchQueue.main.async { [weak self] in
+			PerfLog.reportKeyPressHandlerStart()
+			if let targetID = PerfLog.measure("moveFocus", { self?.tilingEngine.moveFocus(direction: direction) }) {
+				DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+					BorderManager.shared.updateBorderExpecting(windowID: targetID)
+				}
+			}
+		}
+	}
+
+	/// Move the focused window one step in a direction on the next main-queue turn, then refresh the border
+	private func moveWindow(_ direction: Direction) {
+		DispatchQueue.main.async { [weak self] in
+			self?.tilingEngine.moveWindow(direction: direction)
+			BorderManager.shared.updateBorder()
+		}
+	}
+
+	/// Step-move the focused window in a direction (merging into or splitting from a column) on the next main-queue turn, then refresh the border
+	private func stepMoveWindow(_ direction: Direction) {
+		DispatchQueue.main.async { [weak self] in
+			self?.tilingEngine.stepMoveWindow(direction: direction)
+			BorderManager.shared.updateBorder()
 		}
 	}
 
