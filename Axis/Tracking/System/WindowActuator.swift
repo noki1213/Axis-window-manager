@@ -53,6 +53,18 @@ enum WindowActuator {
 
 	// MARK: - Application Group Execution
 
+	/// Apps whose enhanced user interface was turned off for a group and could not be turned back
+	/// on because the app stopped answering. Their next group turns it back on, so the app does not
+	/// keep it off until it relaunches; the restore waits for that group because a call to a hung
+	/// app would wait out the timeout.
+	private static var enhancedUIToRestore: Set<PID> = []
+
+	/// Drops what is kept for a process that quit, so a later process reusing its pid does not get
+	/// its enhanced user interface turned on.
+	static func forget(pid: PID) {
+		enhancedUIToRestore.remove(pid)
+	}
+
 	/// Executes all actions for a single application group while temporarily disabling animations.
 	private static func executeGroup(
 		_ group: PlanGroup,
@@ -74,7 +86,7 @@ enum WindowActuator {
 			return
 		}
 
-		let wasEnabledBool = (wasEnabled as? Bool) ?? false
+		let wasEnabledBool = ((wasEnabled as? Bool) ?? false) || enhancedUIToRestore.contains(pid)
 		if wasEnabledBool {
 			let setErr = AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
 			if setErr == .cannotComplete {
@@ -84,8 +96,14 @@ enum WindowActuator {
 		}
 
 		defer {
-			if wasEnabledBool && !unresponsivePIDs.contains(pid) {
-				AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+			if wasEnabledBool {
+				if unresponsivePIDs.contains(pid) {
+					enhancedUIToRestore.insert(pid)
+				} else if AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .cannotComplete {
+					enhancedUIToRestore.insert(pid)
+				} else {
+					enhancedUIToRestore.remove(pid)
+				}
 			}
 		}
 

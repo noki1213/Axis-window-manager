@@ -370,6 +370,7 @@ final class TrackingCoordinator {
 		axEventSource.unregister(pid: pid)
 		ElementCache.shared.remove(pid: pid)
 		runningApps[pid] = nil
+		WindowActuator.forget(pid: pid)
 		pending.scans[pid] = nil
 		observerGaveUpLogged.remove(pid)
 		state.ingestTerminated(pid: pid, now: now)
