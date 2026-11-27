@@ -320,23 +320,22 @@ enum WindowActuator {
 	/// with the same writes (animations off per app, read-back) and log lines as a plan. A minimized
 	/// or fullscreen window has no frame to rescue, so the caller leaves those out.
 	static func rescueOffScreenWindows(windows: [WindowInfo]) {
-		guard let mainScreenHeight = NSScreen.screens.first?.frame.height else { return }
+		guard let mainScreenHeight = ScreenFlip.primaryHeight else { return }
 
 		var groups: [PlanGroup] = []
 		for window in windows {
 			guard window.frame.width > 0 && window.frame.height > 0 else { continue }
 
-			let centerX = window.frame.midX
-			let centerY = mainScreenHeight - window.frame.midY
-			let centerInNS = CGPoint(x: centerX, y: centerY)
+			let centerInNS = ScreenFlip.point(CGPoint(x: window.frame.midX, y: window.frame.midY), primaryHeight: mainScreenHeight)
 
 			let isOnScreen = NSScreen.screens.contains { $0.frame.contains(centerInNS) }
 			if !isOnScreen {
 				guard let targetScreen = closestScreen(to: centerInNS) else { continue }
 				let visibleFrame = targetScreen.visibleFrame
 
-				let screenTopInAX = mainScreenHeight - (visibleFrame.minY + visibleFrame.height)
-				let screenBottomInAX = mainScreenHeight - visibleFrame.minY
+				let visibleInAX = ScreenFlip.rect(visibleFrame, primaryHeight: mainScreenHeight)
+				let screenTopInAX = visibleInAX.minY
+				let screenBottomInAX = visibleInAX.maxY
 
 				// Clamped fully inside the visible area: a window left parked keeps a sliver on
 				// screen, so it does not lie fully outside and still needs moving.

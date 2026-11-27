@@ -82,8 +82,8 @@ enum DisplayReader {
 				key: MonitorKey(raw: keys[index]),
 				displayID: entry.displayID,
 				name: entry.screen.localizedName,
-				frame: flipped(entry.screen.frame, primaryHeight: primaryHeight),
-				visibleFrame: flipped(entry.screen.visibleFrame, primaryHeight: primaryHeight),
+				frame: ScreenFlip.rect(entry.screen.frame, primaryHeight: primaryHeight),
+				visibleFrame: ScreenFlip.rect(entry.screen.visibleFrame, primaryHeight: primaryHeight),
 				isPrimary: CGDisplayIsMain(entry.displayID) != 0)
 			return Entry(screen: entry.screen, facts: facts)
 		}
@@ -109,9 +109,5 @@ enum DisplayReader {
 			return string
 		}
 		return "display-\(displayID)"
-	}
-
-	private static func flipped(_ rect: CGRect, primaryHeight: CGFloat) -> CGRect {
-		CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
 	}
 }

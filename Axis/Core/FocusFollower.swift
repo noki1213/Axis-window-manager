@@ -196,11 +196,11 @@ final class FocusFollower {
 
 	/// The tracked window under the mouse pointer, the frontmost one where windows overlap.
 	private func windowUnderMouse() -> WindowID? {
-		guard let primaryHeight = NSScreen.screens.first?.frame.height,
+		guard let primaryHeight = ScreenFlip.primaryHeight,
 		      let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
 		else { return nil }
 		let mouse = NSEvent.mouseLocation
-		let point = CGPoint(x: mouse.x, y: primaryHeight - mouse.y)
+		let point = ScreenFlip.point(mouse, primaryHeight: primaryHeight)
 		let state = coordinator.state
 		for entry in list {
 			guard let id = entry[kCGWindowNumber as String] as? CGWindowID, state.isTracked(id),

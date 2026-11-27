@@ -230,8 +230,7 @@ class FocusFollowsMouseManager: ObservableObject {
 		hitTestSkipReason = nil
 		return PerfLog.measure("FFM.topmostWindowAt", threshold: 0.005) {
 			// CGWindowList uses a top-left origin, so convert it
-			let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-			let cgPoint = CGPoint(x: point.x, y: mainScreenHeight - point.y)
+			let cgPoint = ScreenFlip.point(point)
 
 			let windowList = PerfLog.measure("FFM.topmostWindowAt/CGWindowListCopyWindowInfo", threshold: 0.005) {
 				CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []

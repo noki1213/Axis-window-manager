@@ -344,14 +344,13 @@ class BorderManager: ObservableObject {
     
     private func calculateBorderRect(for windowFrame: CGRect) -> CGRect {
         // Convert Accessibility coordinates (top-left origin) to Cocoa coordinates (bottom-left origin)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let nsWindowY = mainScreenHeight - windowFrame.origin.y - windowFrame.height
+        let cocoaFrame = ScreenFlip.rect(windowFrame)
         
         return CGRect(
-            x: windowFrame.origin.x - padding,
-            y: nsWindowY - padding,
-            width: windowFrame.width + (padding * 2),
-            height: windowFrame.height + (padding * 2)
+            x: cocoaFrame.origin.x - padding,
+            y: cocoaFrame.origin.y - padding,
+            width: cocoaFrame.width + (padding * 2),
+            height: cocoaFrame.height + (padding * 2)
         )
     }
     

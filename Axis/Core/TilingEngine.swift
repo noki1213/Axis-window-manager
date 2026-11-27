@@ -113,9 +113,6 @@ class TilingEngine: ObservableObject {
     func raiseFloatingWindows(on screen: NSScreen, allowActivation: Bool = false) {
         let state = coordinator.state
 
-        // For converting AX coordinates (top-left origin) to NSScreen coordinates (bottom-left origin)
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-
         // Front-to-back list of the normal-layer windows on this screen (CGWindowList is ordered front first)
         var stackingOrder: [(id: CGWindowID, bounds: CGRect)] = []
         PerfLog.measure("TilingEngine.raiseFloatingWindows/windowList", threshold: 0.005) {
@@ -126,8 +123,8 @@ class TilingEngine: ObservableObject {
                       let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
                 let bounds = CGRect(x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
                                     width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0)
-                // Only the ones on this screen (judged by window center)
-                let center = CGPoint(x: bounds.midX, y: mainScreenHeight - bounds.midY)
+                // Only the ones on this screen (judged by window center, flipped to NSScreen coordinates)
+                let center = ScreenFlip.point(CGPoint(x: bounds.midX, y: bounds.midY))
                 if screen.frame.contains(center) {
                     stackingOrder.append((id: id, bounds: bounds))
                 }
@@ -392,9 +389,7 @@ class TilingEngine: ObservableObject {
         let centerX = adjacentScreen.frame.midX
         let centerY = adjacentScreen.frame.midY
         // Convert since CGWarpMouseCursorPosition uses a top-left origin
-        let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-        let warpY = mainScreenHeight - centerY
-        CGWarpMouseCursorPosition(CGPoint(x: centerX, y: warpY))
+        CGWarpMouseCursorPosition(ScreenFlip.point(CGPoint(x: centerX, y: centerY)))
         // Hide the border since focus is leaving
         BorderManager.shared.hideBorder()
     }

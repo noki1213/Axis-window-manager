@@ -214,7 +214,7 @@ class GapSelectManager: ObservableObject {
 		}
 
 		let gapWidth = tilingEngine.windowGap
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+		let mainScreenHeight = ScreenFlip.primaryHeight ?? 0
 
 		// The gap between columns (vertical line)
 		for colIndex in 0..<(columns.count - 1) {
@@ -235,14 +235,9 @@ class GapSelectManager: ObservableObject {
 			let gapHeight = max(leftMaxY, rightMaxY) - gapY
 
 			// Convert to NSScreen coordinates (bottom-left origin)
-			let gapYInNSScreen = mainScreenHeight - gapY - gapHeight
-
-			let gapFrame = CGRect(
-				x: gapX,
-				y: gapYInNSScreen,
-				width: gapWidth,
-				height: gapHeight
-			)
+			let gapFrame = ScreenFlip.rect(
+				CGRect(x: gapX, y: gapY, width: gapWidth, height: gapHeight),
+				primaryHeight: mainScreenHeight)
 
 			gaps.append(GapInfo(
 				type: .vertical,
@@ -265,14 +260,9 @@ class GapSelectManager: ObservableObject {
 				let gapWidth = upperWindow.frame.width
 
 				// Convert to NSScreen coordinates
-				let gapYInNSScreen = mainScreenHeight - gapY - tilingEngine.windowGap
-
-				let gapFrame = CGRect(
-					x: gapX,
-					y: gapYInNSScreen,
-					width: gapWidth,
-					height: tilingEngine.windowGap
-				)
+				let gapFrame = ScreenFlip.rect(
+					CGRect(x: gapX, y: gapY, width: gapWidth, height: tilingEngine.windowGap),
+					primaryHeight: mainScreenHeight)
 
 				gaps.append(GapInfo(
 					type: .horizontal,

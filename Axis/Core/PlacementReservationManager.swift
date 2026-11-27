@@ -147,8 +147,7 @@ class PlacementReservationManager {
 	private static func captureFocusSnapshot() -> FocusSnapshot? {
 		guard let focused = AccessibilityManager.shared.getFocusedWindow() else { return nil }
 
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let center = CGPoint(x: focused.frame.midX, y: mainScreenHeight - focused.frame.midY)
+		let center = ScreenFlip.point(CGPoint(x: focused.frame.midX, y: focused.frame.midY))
 		guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }),
 			  let monitor = WorkspaceManager.shared.monitorKey(for: screen) else { return nil }
 
@@ -197,9 +196,7 @@ class PlacementReservationManager {
 
 	/// Convert a rect in Accessibility coordinates (top-left origin) to NSWindow coordinates (bottom-left origin)
 	private static func toScreenRect(_ axFrame: CGRect) -> CGRect {
-		let mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
-		let y = mainScreenHeight - axFrame.origin.y - axFrame.height
-		return CGRect(x: axFrame.origin.x, y: y, width: axFrame.width, height: axFrame.height)
+		ScreenFlip.rect(axFrame)
 	}
 
 }

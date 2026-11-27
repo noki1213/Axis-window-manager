@@ -404,8 +404,7 @@ extension WindowInfo {
     /// Accessibility, with the origin at the top-left of the primary display;
     /// NSScreen frames put it at the bottom-left.
     var centerInScreenCoordinates: CGPoint {
-        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        return CGPoint(x: frame.midX, y: primaryHeight - frame.midY)
+        ScreenFlip.point(CGPoint(x: frame.midX, y: frame.midY))
     }
 
     /// The screen holding the window's center, or nil when the center is off

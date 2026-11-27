@@ -33,6 +33,7 @@ exit(runTests([
 	TestSuite("Admission", admissionTests),
 	TestSuite("Visibility", visibilityTests),
 	TestSuite("Layout", layoutTests),
+	TestSuite("ScreenFlip", screenFlipTests),
 	TestSuite("Planner", plannerTests),
 	TestSuite("Topology", topologyTests),
 	TestSuite("Scenario", scenarioTests),
