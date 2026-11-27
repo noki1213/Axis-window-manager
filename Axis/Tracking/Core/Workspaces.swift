@@ -357,10 +357,40 @@ nonisolated extension TrackingState {
 		let original = stored.columns
 		let drawable = drawableIDs(in: original)
 		var view = ColumnView.drawable(original, keeping: drawable)
+		let before = view
 		let result = body(&view, &stored)
 		stored.columns = ColumnView.merge(original: original, edited: view, drawable: drawable)
 		workspaces[workspace] = stored
+		rekeyRowRatios(of: workspace, from: before)
 		return result
+	}
+
+	/// Moves the stored row ratios with their columns after the drawable view changed from
+	/// `before` to the current one. Row ratios are keyed by column index, so a column inserted or
+	/// removed further left would otherwise leave them on a neighbour. A column takes the ratios of
+	/// the `before` column that held its first window known there; a split-off column therefore
+	/// leaves them with the first of the resulting columns. Keys past the old end stay, as the
+	/// layout keeps them on purpose, unless a column now uses the key. Whether the counts still
+	/// match is left to the layout.
+	mutating func rekeyRowRatios(of workspace: WorkspaceID, from before: [[WindowID]]) {
+		guard let old = workspaces[workspace]?.rowRatios, !old.isEmpty else { return }
+		let after = layoutColumns(workspace)
+		guard after != before else { return }
+		var columnOf: [WindowID: Int] = [:]
+		for (index, column) in before.enumerated() {
+			for id in column {
+				columnOf[id] = index
+			}
+		}
+		var rekeyed = old.filter { $0.key >= before.count }
+		var taken = Set<Int>()
+		for (index, column) in after.enumerated() {
+			guard let source = column.lazy.compactMap({ columnOf[$0] }).first, taken.insert(source).inserted,
+				let ratios = old[source]
+			else { continue }
+			rekeyed[index] = ratios
+		}
+		workspaces[workspace]?.rowRatios = rekeyed
 	}
 }
 
@@ -380,8 +410,10 @@ nonisolated extension TrackingState {
 			guard var stored = workspaces[workspaceID],
 				let memory = ColumnView.slotMemory(of: id, in: stored.columns, workspace: workspaceID)
 			else { continue }
+			let before = layoutColumns(workspaceID)
 			stored.columns = ColumnView.removing(id, from: stored.columns)
 			workspaces[workspaceID] = stored
+			rekeyRowRatios(of: workspaceID, from: before)
 			return memory
 		}
 		return nil
@@ -397,7 +429,9 @@ nonisolated extension TrackingState {
 		else { return false }
 		removeFromColumns(id)
 		guard let current = workspaces[workspace]?.columns else { return false }
+		let before = layoutColumns(workspace)
 		workspaces[workspace]?.columns = ColumnView.inserting(id, insertion, into: current)
+		rekeyRowRatios(of: workspace, from: before)
 		return true
 	}
 
@@ -467,9 +501,6 @@ nonisolated extension TrackingState {
 					ratios.swapAt(column, other)
 					stored.widthRatios = ratios
 				}
-				let rows = stored.rowRatios[column]
-				stored.rowRatios[column] = stored.rowRatios[other]
-				stored.rowRatios[other] = rows
 			case .up, .down:
 				let other = direction == .up ? row - 1 : row + 1
 				guard columns[column].indices.contains(other) else { return .atEdge }
@@ -521,8 +552,10 @@ nonisolated extension TrackingState {
 		if zen != nil {
 			zenExit(reason: .layoutReset)
 		}
-		editLayoutColumns(of: workspace) { columns, _ in
+		editLayoutColumns(of: workspace) { columns, stored in
 			columns = columns.joined().map { [$0] }
+			// Every column ends with one window, so no saved row split applies.
+			stored.rowRatios = [:]
 		}
 	}
 
