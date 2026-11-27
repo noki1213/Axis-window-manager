@@ -5,7 +5,9 @@
 //  The saved layout file in Application Support: read once at launch, written in one step on a
 //  background queue while Axis runs and synchronously when it quits. A file that cannot be used
 //  comes back with its reason instead of an error, so a damaged file costs the restore and
-//  nothing else.
+//  nothing else. Whenever a read finds anything wrong with the file (it cannot be decoded, it is
+//  inconsistent, or parts of it were left out), the file is first copied to `<name>.bad`, so the
+//  next save never destroys the only copy of what was there.
 //
 
 import Foundation
@@ -14,9 +16,12 @@ nonisolated enum PersistenceStore {
 	/// What the file at launch gave.
 	nonisolated enum Loaded {
 		case missing
-		case snapshot(PersistenceSnapshot)
-		/// The file exists but cannot be used; the reason is one line for the log.
-		case ignored(reason: String)
+		/// The usable part of the file, one note per part left out, and whether the original was
+		/// copied aside.
+		case snapshot(PersistenceSnapshot, dropped: [String], copiedAside: Bool)
+		/// The file exists but cannot be used; the reason is one line for the log. `copiedAside`
+		/// tells whether the original was kept as `.bad`.
+		case ignored(reason: String, copiedAside: Bool)
 	}
 
 	/// Next to the file of the keyboard shortcuts.
@@ -39,18 +44,50 @@ nonisolated enum PersistenceStore {
 		do {
 			data = try Data(contentsOf: url)
 		} catch {
-			return .ignored(reason: "unreadable: \(oneLine(error))")
+			let copy = copyAside(url)
+			return .ignored(reason: "unreadable: \(oneLine(error))" + copy.reasonSuffix, copiedAside: copy.failure == nil)
 		}
-		let snapshot: PersistenceSnapshot
+		var snapshot: PersistenceSnapshot
+		var dropped: [String]
 		do {
-			snapshot = try PersistenceSnapshot.decode(from: data)
+			(snapshot, dropped) = try PersistenceSnapshot.decodeReporting(from: data)
 		} catch {
-			return .ignored(reason: "damaged: \(oneLine(error))")
+			let copy = copyAside(url)
+			return .ignored(reason: "damaged: \(oneLine(error))" + copy.reasonSuffix, copiedAside: copy.failure == nil)
 		}
+		dropped += snapshot.sanitize()
 		if let problem = snapshot.validationProblem() {
-			return .ignored(reason: "inconsistent: \(problem)")
+			let copy = copyAside(url)
+			return .ignored(reason: "inconsistent: \(problem)" + copy.reasonSuffix, copiedAside: copy.failure == nil)
 		}
-		return .snapshot(snapshot)
+		guard !dropped.isEmpty else { return .snapshot(snapshot, dropped: [], copiedAside: false) }
+		let copy = copyAside(url)
+		if copy.failure != nil {
+			dropped.append("(copy to .bad failed: \(copy.failure ?? ""))")
+		}
+		return .snapshot(snapshot, dropped: dropped, copiedAside: copy.failure == nil)
+	}
+
+	/// The place the original goes when a read finds a problem.
+	static func badURL(for url: URL) -> URL {
+		url.appendingPathExtension("bad")
+	}
+
+	/// Copies the file to `.bad`, replacing an older copy. A failed copy never changes what the
+	/// read returns; it only adds its one-line failure.
+	private static func copyAside(_ url: URL) -> (failure: String?, reasonSuffix: String) {
+		let bad = badURL(for: url)
+		let manager = FileManager.default
+		do {
+			if manager.fileExists(atPath: bad.path) {
+				try manager.removeItem(at: bad)
+			}
+			try manager.copyItem(at: url, to: bad)
+			return (nil, "")
+		} catch {
+			let line = oneLine(error)
+			return (line, " (copy to .bad failed: \(line))")
+		}
 	}
 
 	// MARK: - Writing

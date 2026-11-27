@@ -797,7 +797,7 @@ let persistenceTests: [TestCase] = [
 			"not json": Data("not json".utf8),
 			"truncated": data.prefix(data.count / 2),
 			"wrong shape": Data("{\"monitors\": 3}".utf8),
-			"missing keys": Data("{\"monitors\": [], \"windows\": []}".utf8)
+			"missing keys": Data("{\"monitors\": []}".utf8)
 		]
 		for (name, bytes) in damaged {
 			var decoded: PersistenceSnapshot?

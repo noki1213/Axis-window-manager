@@ -121,6 +121,87 @@ extension HiddenEntry: Codable {
 	}
 }
 
+// MARK: - Lenient decoding
+
+/// Collects one short note per part of a saved file that was dropped while decoding. It travels
+/// through `decoder.userInfo`, so the nested decoders can report without changing their results.
+nonisolated final class PersistenceDecodeNotes: @unchecked Sendable {
+	private(set) var notes: [String] = []
+
+	func add(_ note: String) {
+		notes.append(note)
+	}
+
+	static let userInfoKey = CodingUserInfoKey(rawValue: "com.noki.Axis.persistenceDecodeNotes")!
+}
+
+extension Decoder {
+	fileprivate nonisolated func noteDropped(_ note: String) {
+		(userInfo[PersistenceDecodeNotes.userInfoKey] as? PersistenceDecodeNotes)?.add(note)
+	}
+}
+
+/// Decodes to nil instead of throwing, so an unkeyed container still advances past a bad element.
+private nonisolated struct Lossy<T: Decodable>: Decodable {
+	let value: T?
+
+	init(from decoder: Decoder) throws {
+		value = try? T(from: decoder)
+	}
+}
+
+extension KeyedDecodingContainer {
+	/// The value under `key`, nil when it is missing or has the wrong type. A wrong type is noted.
+	fileprivate nonisolated func lenient<T: Decodable>(
+		_ type: T.Type, forKey key: Key, decoder: Decoder, note: @autoclosure () -> String
+	) -> T? {
+		guard contains(key) else { return nil }
+		do {
+			return try decodeIfPresent(type, forKey: key)
+		} catch {
+			decoder.noteDropped(note())
+			return nil
+		}
+	}
+
+	/// The elements under `key` that decode; a missing or wrong-typed array gives []. One note per
+	/// element that is skipped, and one for the missing array: every save writes it, so its
+	/// absence means the file was cut or edited.
+	fileprivate nonisolated func lossyArray<T: Decodable>(
+		_ type: T.Type, forKey key: Key, decoder: Decoder, label: String
+	) -> [T] {
+		guard contains(key) else {
+			decoder.noteDropped("\(label) list missing")
+			return []
+		}
+		guard var list = try? nestedUnkeyedContainer(forKey: key) else {
+			decoder.noteDropped("\(label) list unreadable")
+			return []
+		}
+		return Self.drain(&list, decoder: decoder, label: label)
+	}
+
+	fileprivate nonisolated static func drain<T: Decodable>(
+		_ list: inout UnkeyedDecodingContainer, decoder: Decoder, label: String
+	) -> [T] {
+		var result: [T] = []
+		var position = 0
+		while !list.isAtEnd {
+			position += 1
+			guard let element = try? list.decode(Lossy<T>.self) else {
+				decoder.noteDropped("\(label) \(position) unreadable")
+				break
+			}
+			if let value = element.value {
+				result.append(value)
+			} else {
+				decoder.noteDropped("\(label) \(position) unreadable")
+			}
+		}
+		return result
+	}
+}
+
 // MARK: - Persisted Data Transfer Types
 
 /// A saved workspace, including column window IDs and sizing ratios.
@@ -143,6 +224,18 @@ nonisolated struct PersistedWorkspace: Codable, Equatable, Sendable {
 		self.columns = columns
 		self.widthRatios = widthRatios
 		self.rowRatios = rowRatios
+	}
+
+	/// The columns decide the layout; sizing ratios that cannot be read fall back to equal sizes.
+	nonisolated init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		id = try container.decode(WorkspaceID.self, forKey: .id)
+		side = try container.decode(Side.self, forKey: .side)
+		columns = try container.decode([[WindowID]].self, forKey: .columns)
+		widthRatios = container.lenient(
+			[CGFloat].self, forKey: .widthRatios, decoder: decoder, note: "width ratios of workspace \(id) unreadable")
+		rowRatios = container.lenient(
+			[Int: [CGFloat]].self, forKey: .rowRatios, decoder: decoder, note: "row ratios of workspace \(id) unreadable") ?? [:]
 	}
 }
 
@@ -203,6 +296,23 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 		self.observedFrame = observedFrame
 	}
 
+	/// Only the identity is required; a field that cannot be read takes its default.
+	nonisolated init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		let id = try container.decode(WindowID.self, forKey: .id)
+		self.id = id
+		pid = try container.decode(PID.self, forKey: .pid)
+		func field<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? {
+			container.lenient(type, forKey: key, decoder: decoder, note: "\(key.stringValue) of window #\(id) unreadable")
+		}
+		bundleID = field(String.self, .bundleID)
+		title = field(String.self, .title) ?? ""
+		isFloating = field(Bool.self, .isFloating) ?? false
+		workspace = field(WorkspaceID.self, .workspace)
+		floatingFrame = field(RelativeFrame.self, .floatingFrame)
+		observedFrame = field(CGRect.self, .observedFrame)
+	}
+
 	/// The same window in the same place: everything but the title and the observed frame.
 	func hasSamePlacement(as other: PersistedWindow) -> Bool {
 		id == other.id && pid == other.pid && bundleID == other.bundleID && isFloating == other.isFloating
@@ -256,6 +366,17 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 		self.memory = memory
 	}
 
+	/// Monitors and windows must be present (a monitor that cannot be read rejects the file);
+	/// everything else that cannot be read is left out.
+	nonisolated init(from decoder: Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		monitors = try container.decode([PersistedMonitor].self, forKey: .monitors)
+		var list = try container.nestedUnkeyedContainer(forKey: .windows)
+		windows = KeyedDecodingContainer<CodingKeys>.drain(&list, decoder: decoder, label: "window record")
+		hiddenStack = container.lossyArray(HiddenEntry.self, forKey: .hiddenStack, decoder: decoder, label: "hidden entry")
+		memory = container.lossyArray(PersistedMemory.self, forKey: .memory, decoder: decoder, label: "remembered monitor")
+	}
+
 	/// Serializes the snapshot to JSON data.
 	func encode() throws -> Data {
 		let encoder = JSONEncoder()
@@ -265,8 +386,85 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 
 	/// Deserializes a snapshot from JSON data.
 	static func decode(from data: Data) throws -> PersistenceSnapshot {
+		try decodeReporting(from: data).snapshot
+	}
+
+	/// Deserializes a snapshot and lists what could not be read and was left out.
+	static func decodeReporting(from data: Data) throws -> (snapshot: PersistenceSnapshot, dropped: [String]) {
+		let notes = PersistenceDecodeNotes()
 		let decoder = JSONDecoder()
-		return try decoder.decode(PersistenceSnapshot.self, from: data)
+		decoder.userInfo[PersistenceDecodeNotes.userInfoKey] = notes
+		let snapshot = try decoder.decode(PersistenceSnapshot.self, from: data)
+		return (snapshot, notes.notes)
+	}
+
+	/// Removes what a restore cannot use but that does not make the rest unreliable; returns one
+	/// note per removal. Structure (monitors, workspaces, columns) is left to `validationProblem`.
+	/// Ratios whose counts no longer fit the columns are not touched: a running state saves them
+	/// that way between layouts, and both the restore and the layout skip them.
+	mutating func sanitize() -> [String] {
+		var notes: [String] = []
+		func usable(_ ratios: [CGFloat]) -> Bool {
+			ratios.allSatisfy { $0.isFinite && $0 > 0 }
+		}
+		for m in monitors.indices {
+			for w in monitors[m].workspaces.indices {
+				let id = monitors[m].workspaces[w].id
+				if let ratios = monitors[m].workspaces[w].widthRatios, !usable(ratios) {
+					monitors[m].workspaces[w].widthRatios = nil
+					notes.append("width ratios of workspace \(id) are not positive numbers")
+				}
+				for (column, ratios) in monitors[m].workspaces[w].rowRatios.sorted(by: { $0.key < $1.key }) where !usable(ratios) {
+					monitors[m].workspaces[w].rowRatios[column] = nil
+					notes.append("row ratios of column \(column) of workspace \(id) are not positive numbers")
+				}
+			}
+		}
+
+		var windowIDs = Set<WindowID>()
+		windows = windows.filter { window in
+			guard windowIDs.insert(window.id).inserted else {
+				notes.append("window #\(window.id) is saved twice")
+				return false
+			}
+			return true
+		}
+
+		var hidden = Set<WindowID>()
+		hiddenStack = hiddenStack.filter { entry in
+			guard windowIDs.contains(entry.window) else {
+				notes.append("hidden window #\(entry.window) has no record")
+				return false
+			}
+			guard hidden.insert(entry.window).inserted else {
+				notes.append("hidden window #\(entry.window) is listed twice")
+				return false
+			}
+			return true
+		}
+
+		var remembered = Set<MonitorKey>()
+		memory = memory.filter { entry in
+			let problem: String?
+			if entry.order.isEmpty {
+				problem = "has no workspace"
+			} else if !entry.order.contains(entry.active) {
+				problem = "is active on a workspace it does not list"
+			} else if entry.negativeCount < 0 || entry.negativeCount >= entry.order.count {
+				problem = "has a negative count that leaves no home workspace"
+			} else if (entry.order + [entry.active]).contains(where: { !Self.workspaceRawRange.contains($0.raw) }) {
+				problem = "has a workspace id out of range"
+			} else if !remembered.insert(entry.key).inserted {
+				problem = "is remembered twice"
+			} else {
+				problem = nil
+			}
+			if let problem {
+				notes.append("remembered monitor \(entry.key) \(problem)")
+			}
+			return problem == nil
+		}
+		return notes
 	}
 
 	var windowCount: Int {
@@ -353,9 +551,12 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 /// State kept for persistence bookkeeping.
 nonisolated struct PersistenceState: Equatable, Sendable {
 	var lastSnapshot: PersistenceSnapshot?
+	/// The problem of the last snapshot that was refused, so each distinct problem is logged once.
+	var refusedProblem: String?
 
-	init(lastSnapshot: PersistenceSnapshot? = nil) {
+	init(lastSnapshot: PersistenceSnapshot? = nil, refusedProblem: String? = nil) {
 		self.lastSnapshot = lastSnapshot
+		self.refusedProblem = refusedProblem
 	}
 }
 
@@ -432,12 +633,33 @@ nonisolated extension TrackingState {
 
 	/// The snapshot to write now, nil when its layout is the one last written or loaded.
 	mutating func persistenceTakeSnapshot() -> PersistenceSnapshot? {
-		let current = snapshot()
+		guard let current = persistenceCheckedSnapshot() else { return nil }
 		if let last = persistenceState.lastSnapshot, last.hasSameLayout(as: current) {
 			return nil
 		}
 		persistenceState.lastSnapshot = current
 		return current
+	}
+
+	/// The snapshot of the state now for a save at quit, whether or not it changed; nil when it
+	/// fails validation.
+	mutating func persistenceSnapshotForQuit() -> PersistenceSnapshot? {
+		persistenceCheckedSnapshot()
+	}
+
+	/// The snapshot of the state, nil when it fails validation: a file that restores must never
+	/// be replaced by one that does not. The problem is logged once until it changes.
+	private mutating func persistenceCheckedSnapshot() -> PersistenceSnapshot? {
+		let current = snapshot()
+		guard let problem = current.validationProblem() else {
+			persistenceState.refusedProblem = nil
+			return current
+		}
+		if persistenceState.refusedProblem != problem {
+			persistenceState.refusedProblem = problem
+			log("persist: not saved (\(problem))")
+		}
+		return nil
 	}
 
 	/// The write of the snapshot last taken failed: the next take offers the layout again.

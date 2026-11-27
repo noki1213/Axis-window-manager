@@ -876,17 +876,27 @@ final class TrackingCoordinator {
 
 	// MARK: - Persistence
 
-	/// Reads the saved layout; the pass that lifts the starting barrier puts it back. A file that
-	/// cannot be used is left as it is and logged once: the first save replaces it.
+	/// Reads the saved layout; the pass that lifts the starting barrier puts it back. A file with
+	/// anything wrong in it is kept as `workspaces.json.bad` before the first save replaces it, and
+	/// what was left out is logged.
 	private func loadSavedLayout() {
 		pendingRestore = nil
 		switch PersistenceStore.load() {
 		case .missing:
 			event("persist: ignored (no saved layout)")
-		case .snapshot(let snapshot):
+		case .snapshot(let snapshot, let dropped, let copiedAside):
 			pendingRestore = snapshot
-		case .ignored(let reason):
+			for note in dropped {
+				event("persist: dropped \(note)")
+			}
+			if copiedAside {
+				event("persist: kept the original as workspaces.json.bad")
+			}
+		case .ignored(let reason, let copiedAside):
 			event("persist: ignored (\(reason))")
+			if copiedAside {
+				event("persist: kept the original as workspaces.json.bad")
+			}
 		}
 	}
 
@@ -904,9 +914,10 @@ final class TrackingCoordinator {
 	/// step that ends the barrier schedules the next save.
 	private func persistTimerFired() {
 		isPersistArmed = false
-		guard isRunning, hasStarted, state.barrier.isEmpty, !state.livenessState.liftPending,
-			let snapshot = state.persistenceTakeSnapshot()
-		else { return }
+		guard isRunning, hasStarted, state.barrier.isEmpty, !state.livenessState.liftPending else { return }
+		let taken = state.persistenceTakeSnapshot()
+		drainLog()
+		guard let snapshot = taken else { return }
 		PersistenceStore.save(snapshot) { [weak self] error in
 			self?.persistFinished(snapshot, error: error)
 		}
@@ -934,7 +945,9 @@ final class TrackingCoordinator {
 	/// layout of the last run with nothing.
 	private func saveForQuit() {
 		guard hasStarted else { return }
-		let snapshot = state.snapshot()
+		let taken = state.persistenceSnapshotForQuit()
+		drainLog()
+		guard let snapshot = taken else { return }
 		do {
 			try PersistenceStore.saveNow(snapshot)
 			event("persist: saved (\(snapshot.windowCount) windows, \(snapshot.workspaceCount) workspaces) at quit")
