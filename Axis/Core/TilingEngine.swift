@@ -230,16 +230,7 @@ class TilingEngine: ObservableObject {
         // cursorMonitor being set means the mouse is on an empty monitor
         // Use its screen as the reference for finding the destination, instead of the focused window
         if let cursorScr = cursorScreen {
-            if let target = getWindowOnScreen(cursorScr, direction: direction) {
-                cursorMonitor = nil
-                target.focus()
-                moveCursorToWindow(target)
-                return target.id
-            } else {
-                // If it's still not found, move the cursor to the next monitor over
-                moveCursorToAdjacentScreen(from: cursorScr, direction: direction)
-            }
-            return nil
+            return focusWindowFromCursorScreen(cursorScr, direction: direction)
         }
 
         guard let focusedWindow = accessibilityManager.getFocusedWindow() else {
@@ -252,14 +243,7 @@ class TilingEngine: ObservableObject {
             // Fall back to the monitor the mouse cursor is on and try moving there
             let mouseLocation = NSEvent.mouseLocation
             if let cursorScr = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
-                if let target = getWindowOnScreen(cursorScr, direction: direction) {
-                    cursorMonitor = nil
-                    target.focus()
-                    moveCursorToWindow(target)
-                    return target.id
-                } else {
-                    moveCursorToAdjacentScreen(from: cursorScr, direction: direction)
-                }
+                return focusWindowFromCursorScreen(cursorScr, direction: direction)
             }
             return nil
         }
@@ -300,51 +284,40 @@ class TilingEngine: ObservableObject {
 
         var targetWindow: WindowInfo?
 
+        let atEdge: Bool
         switch direction {
         case .left:
-            if columnIndex > 0 {
+            atEdge = columnIndex <= 0
+            if !atEdge {
                 // The same row (or the last row) of the column to the left
                 targetWindow = window(atRow: rowIndex, orLastOf: columns[columnIndex - 1])
-            } else {
-                // If at the left edge, go to the monitor on the left
-                targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .left)
-                // Move the cursor if there's a monitor, even with no windows
-                if targetWindow == nil {
-                    moveCursorToAdjacentScreen(from: screen, direction: .left)
-                }
             }
         case .right:
-            if columnIndex < columns.count - 1 {
+            atEdge = columnIndex >= columns.count - 1
+            if !atEdge {
                 // The same row (or the last row) of the column to the right
                 targetWindow = window(atRow: rowIndex, orLastOf: columns[columnIndex + 1])
-            } else {
-                // If at the right edge, go to the monitor on the right
-                targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .right)
-                if targetWindow == nil {
-                    moveCursorToAdjacentScreen(from: screen, direction: .right)
-                }
             }
         case .up:
-            if rowIndex > 0 {
+            atEdge = rowIndex <= 0
+            if !atEdge {
                 // The window above in the same column
                 targetWindow = columns[columnIndex][rowIndex - 1]
-            } else {
-                // If at the top of the column, go to the monitor above
-                targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .up)
-                if targetWindow == nil {
-                    moveCursorToAdjacentScreen(from: screen, direction: .up)
-                }
             }
         case .down:
-            if rowIndex < columns[columnIndex].count - 1 {
+            atEdge = rowIndex >= columns[columnIndex].count - 1
+            if !atEdge {
                 // The window below in the same column
                 targetWindow = columns[columnIndex][rowIndex + 1]
-            } else {
-                // If at the bottom of the column, go to the monitor below
-                targetWindow = getWindowOnAdjacentScreen(from: focusedWindow, direction: .down)
-                if targetWindow == nil {
-                    moveCursorToAdjacentScreen(from: screen, direction: .down)
-                }
+            }
+        }
+
+        if atEdge {
+            // At the edge of the layout, go to the monitor in that direction
+            targetWindow = windowOnAdjacentScreen(from: screen, direction: direction, nearestToX: focusedWindow.frame.midX)
+            // Move the cursor if there's a monitor, even with no windows
+            if targetWindow == nil {
+                moveCursorToAdjacentScreen(from: screen, direction: direction)
             }
         }
 
@@ -401,27 +374,45 @@ class TilingEngine: ObservableObject {
 
         // If the screen itself has windows, pick from among them
         if !localColumns.isEmpty {
-            switch direction {
-            case .right: return localColumns.first?.first
-            case .left:  return localColumns.last?.first
-            case .up, .down: return localColumns.first?.first
-            }
+            return entryWindow(in: localColumns, direction: direction)
         }
 
         // If the screen is empty, go to the neighboring screen
-        return getWindowOnAdjacentScreen(from: screen, direction: direction)
+        return windowOnAdjacentScreen(from: screen, direction: direction)
     }
 
-    /// Get the windows on the screen neighboring the given screen (NSScreen version)
-    private func getWindowOnAdjacentScreen(from screen: NSScreen, direction: Direction) -> WindowInfo? {
+    /// Focus the window on the cursor's screen (or the screen next to it) in the given direction
+    private func focusWindowFromCursorScreen(_ screen: NSScreen, direction: Direction) -> CGWindowID? {
+        if let target = getWindowOnScreen(screen, direction: direction) {
+            cursorMonitor = nil
+            target.focus()
+            moveCursorToWindow(target)
+            return target.id
+        } else {
+            // If it's still not found, move the cursor to the next monitor over
+            moveCursorToAdjacentScreen(from: screen, direction: direction)
+        }
+        return nil
+    }
+
+    /// The window reached first when entering a screen's columns moving in the given direction
+    /// Moving left enters from the rightmost column, any other direction from the leftmost
+    private func entryWindow(in columns: [[WindowInfo]], direction: Direction) -> WindowInfo? {
+        direction == .left ? columns.last?.first : columns.first?.first
+    }
+
+    /// Get the window on the screen neighboring the given screen
+    /// Moving up or down with a reference X picks the window whose center X is closest to it
+    private func windowOnAdjacentScreen(from screen: NSScreen, direction: Direction, nearestToX referenceX: CGFloat? = nil) -> WindowInfo? {
         guard let targetScreen = getAdjacentScreen(from: screen, direction: direction) else { return nil }
         let columns = columnsOutsideZen(on: targetScreen)
         guard !columns.isEmpty else { return nil }
-        switch direction {
-        case .left:  return columns.last?.first
-        case .right: return columns.first?.first
-        case .up, .down: return columns.first?.first
+        if let referenceX, direction == .up || direction == .down {
+            return columns.flatMap { $0 }.min { w1, w2 in
+                abs(w1.frame.midX - referenceX) < abs(w2.frame.midX - referenceX)
+            }
         }
+        return entryWindow(in: columns, direction: direction)
     }
 
     /// Move the mouse cursor to the window's center
@@ -517,32 +508,6 @@ class TilingEngine: ObservableObject {
     /// Get the screen the window belongs to
     private func getScreen(for window: WindowInfo) -> NSScreen? {
         window.screen
-    }
-    
-    /// Get the windows on the neighboring screen
-    private func getWindowOnAdjacentScreen(from window: WindowInfo, direction: Direction) -> WindowInfo? {
-        guard let currentScreen = getScreen(for: window) else { return nil }
-
-        let adjacentScreen = getAdjacentScreen(from: currentScreen, direction: direction)
-        guard let targetScreen = adjacentScreen else { return nil }
-        let columns = columnsOutsideZen(on: targetScreen)
-        guard !columns.isEmpty else { return nil }
-
-        switch direction {
-        case .left:
-            // For the monitor on the left, the first window of the rightmost column
-            return columns.last?.first
-        case .right:
-            // For the monitor on the right, the first window of the leftmost column
-            return columns.first?.first
-        case .up, .down:
-            // For a monitor above or below, the window with the closest X coordinate
-            let windowCenterX = window.frame.midX
-            let allWindows = columns.flatMap { $0 }
-            return allWindows.min { w1, w2 in
-                abs(w1.frame.midX - windowCenterX) < abs(w2.frame.midX - windowCenterX)
-            }
-        }
     }
     
     /// Get the neighboring screen
