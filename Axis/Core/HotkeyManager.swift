@@ -96,17 +96,25 @@ class HotkeyManager: ObservableObject {
 				if let tap = hotkeyManager.eventTap {
 					CGEvent.tapEnable(tap: tap, enable: true)
 				}
+				// Modifier changes that happened while the tap was off were never delivered
+				hotkeyManager.resyncPeekModifiers()
+				return Unmanaged.passUnretained(event)
+			}
+
+			// Modifier key change (for the adjacent-space peek). Never consume it, just pass it through.
+			// While a key is being recorded only a release is forwarded: the card must come down,
+			// but holding the modifiers of the shortcut being recorded must not bring one up.
+			if type == .flagsChanged {
+				if hotkeyManager.isRecordingHotkey {
+					hotkeyManager.forwardPeekRelease(flags: event.flags)
+				} else {
+					hotkeyManager.handleFlagsChanged(event)
+				}
 				return Unmanaged.passUnretained(event)
 			}
 
 			// Pass events through while recording a key (typing a key in the settings screen)
 			if hotkeyManager.isRecordingHotkey {
-				return Unmanaged.passUnretained(event)
-			}
-
-			// Modifier key change (for the adjacent-space peek). Never consume it, just pass it through
-			if type == .flagsChanged {
-				hotkeyManager.handleFlagsChanged(event)
 				return Unmanaged.passUnretained(event)
 			}
 
@@ -187,6 +195,11 @@ class HotkeyManager: ObservableObject {
 	}
 
 	private func checkEventTapHealth() {
+		// Heals a modifier release the tap missed; skipped while the peek is idle
+		if WorkspacePeekManager.shared.needsModifierResync {
+			resyncPeekModifiers()
+		}
+
 		guard let tap = eventTap else {
 			// Recreate it if nil
 			setupEventTap()
@@ -215,6 +228,21 @@ class HotkeyManager: ObservableObject {
 		let isExactlyCtrlOption = modifiers == [.control, .option]
 		DispatchQueue.main.async {
 			WorkspacePeekManager.shared.handleModifiersChanged(isExactlyCtrlOption: isExactlyCtrlOption)
+		}
+	}
+
+	/// Re-reads the live modifier state and feeds a release to the peek.
+	private func resyncPeekModifiers() {
+		forwardPeekRelease(flags: CGEventSource.flagsState(.combinedSessionState))
+	}
+
+	/// Tells the peek that Ctrl+Option is no longer held, when `flags` say so and the peek still
+	/// believes otherwise. Only releases are forwarded: a press must not start the delayed card.
+	private func forwardPeekRelease(flags: CGEventFlags) {
+		guard HotkeyModifiers.from(flags) != [.control, .option] else { return }
+		DispatchQueue.main.async {
+			guard WorkspacePeekManager.shared.needsModifierResync else { return }
+			WorkspacePeekManager.shared.handleModifiersChanged(isExactlyCtrlOption: false)
 		}
 	}
 

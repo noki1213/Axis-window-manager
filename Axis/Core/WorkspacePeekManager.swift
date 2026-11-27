@@ -65,6 +65,12 @@ class WorkspacePeekManager {
 		}
 	}
 
+	/// Whether the peek believes Ctrl+Option is held or a card is on screen. Read-only; lets a
+	/// periodic resync skip all work while idle.
+	var needsModifierResync: Bool {
+		return isModifierHeld || (overlayWindow?.isVisible ?? false)
+	}
+
 	// MARK: - Input from flagsChanged
 
 	/// Called from a flagsChanged event. Passes whether exactly Ctrl+Option is held
