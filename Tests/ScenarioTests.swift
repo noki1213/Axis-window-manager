@@ -942,7 +942,7 @@ let scenarioTests: [TestCase] = [
 	TestCase("relaunchStacked") {
 		var world = ScenarioWorld()
 		world.addApp(pid: 100, bundleID: "com.test.app", name: "App")
-		world.state.relaunchTiled.insert(1)
+		world.state.relaunchTiled[1] = RelaunchSlot(pid: 100, memory: nil)
 
 		// Small window that would normally classify as unmanaged.
 		world.addWindow(id: 1, pid: 100, frame: CGRect(x: 100, y: 100, width: 300, height: 200))

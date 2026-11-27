@@ -901,7 +901,7 @@ private let retireTests: [TestCase] = [
 		state.hiddenStack = [HiddenEntry(window: 3, minimizeConfirmed: true)]
 		state.ledger[2] = LastWrite(target: .zero, kind: .frame, at: 1)
 		state.focus.current = 2
-		state.relaunchTiled = [2]
+		state.relaunchTiled = [2: RelaunchSlot(pid: 1, memory: nil)]
 		expectInvariants(state, "before")
 
 		let retired = state.retire(2, reason: .destroyed, now: 5)
@@ -910,7 +910,7 @@ private let retireTests: [TestCase] = [
 		expectEqual(state.ledger[2], nil)
 		expect(state.tombstones.contains(2))
 		expectEqual(state.focus.current, nil)
-		expectEqual(state.relaunchTiled, [])
+		expectEqual(state.relaunchTiled, [:])
 		expectEqual(retired?.record.slotMemory, SlotMemory(leftRep: 1, workspace: row[1]))
 		expectEqual(retired?.at, 5)
 		expectEqual(retired?.monitor, main)

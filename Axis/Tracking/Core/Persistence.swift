@@ -587,7 +587,10 @@ nonisolated extension TrackingState {
 			)
 		}
 
-		let hiddenIDs = Set(snapshot.hiddenStack.map { rekeyed[$0.window] ?? $0.window })
+		// Only entries whose saved window matched a live one count: an unmatched saved id may equal
+		// the id of a live window that belongs to another saved window.
+		let hiddenIDs = Set(
+			snapshot.hiddenStack.filter { matchedPersistedIDs.contains($0.window) }.map { rekeyed[$0.window] ?? $0.window })
 
 		// Restore connected monitors and workspaces.
 		for m in snapshot.monitors where connected.contains(m.key) {
@@ -687,7 +690,7 @@ nonisolated extension TrackingState {
 		}
 
 		// Restore hidden stack entries.
-		for entry in snapshot.hiddenStack {
+		for entry in snapshot.hiddenStack where matchedPersistedIDs.contains(entry.window) {
 			let targetID = rekeyed[entry.window] ?? entry.window
 			if records[targetID] != nil {
 				hiddenStack.append(HiddenEntry(window: targetID, minimizeConfirmed: entry.minimizeConfirmed))
@@ -713,9 +716,28 @@ nonisolated extension TrackingState {
 		}
 
 		// Tiled windows no scan listed (their app was busy) are tiled when they show up, however
-		// small a stacked column left them.
-		for saved in snapshot.windows where !saved.isFloating && saved.workspace != nil {
-			relaunchTiled.insert(rekeyed[saved.id] ?? saved.id)
+		// small a stacked column left them, and go back to their saved place.
+		let runningPIDs = Set(apps.map(\.pid))
+		let candidatePID = Dictionary(candidates.map { ($0.id, $0.pid) }, uniquingKeysWith: { first, _ in first })
+		var savedColumns: [WorkspaceID: [[WindowID]]] = [:]
+		for monitor in snapshot.monitors where connected.contains(monitor.key) {
+			for workspace in monitor.workspaces {
+				savedColumns[workspace.id] = workspace.columns.map { $0.map { rekeyed[$0] ?? $0 } }
+			}
+		}
+		for saved in snapshot.windows where !saved.isFloating {
+			guard let savedWorkspace = saved.workspace else { continue }
+			if matchedPersistedIDs.contains(saved.id) {
+				let key = rekeyed[saved.id] ?? saved.id
+				if let pid = candidatePID[key] {
+					relaunchTiled[key] = RelaunchSlot(pid: pid, memory: nil)
+				}
+			} else if runningPIDs.contains(saved.pid) {
+				let memory = savedColumns[savedWorkspace].flatMap {
+					ColumnView.slotMemory(of: saved.id, in: $0, workspace: savedWorkspace)
+				}
+				relaunchTiled[saved.id] = RelaunchSlot(pid: saved.pid, memory: memory)
+			}
 		}
 
 		// Workspaces whose windows are all gone go too, like at the end of a run.

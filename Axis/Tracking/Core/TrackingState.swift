@@ -54,9 +54,15 @@ nonisolated struct TrackingState: Equatable, Sendable {
 	/// Destroyed and terminated signals that arrived during a barrier.
 	var pendingDuringBarrier: [PendingSignal] = []
 	var tombstones = TombstoneSet()
-	/// Windows the saved layout had tiled, so they are tiled again even when a stacked column left
-	/// them small enough to look like dialogs.
-	var relaunchTiled: Set<WindowID> = []
+	/// Windows the saved layout had tiled, with the process that owned them and, for those not yet
+	/// seen, their place in the saved columns. A stacked column leaves a tiled window small enough
+	/// to look like a dialog; the process check keeps a recycled id of another process out.
+	var relaunchTiled: [WindowID: RelaunchSlot] = [:]
+
+	/// `id` when the saved layout had it tiled under the process `pid`, else nothing.
+	func relaunchTiledIDs(id: WindowID, pid: PID) -> Set<WindowID> {
+		relaunchTiled[id]?.pid == pid ? [id] : []
+	}
 
 	// MARK: Enforcement
 
@@ -320,7 +326,7 @@ nonisolated extension TrackingState {
 		hiddenStack.removeAll { $0.window == id }
 		records[id] = nil
 		ledger[id] = nil
-		relaunchTiled.remove(id)
+		relaunchTiled[id] = nil
 		tombstones.insert(id)
 		if focus.current == id {
 			focus.current = nil

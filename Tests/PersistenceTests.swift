@@ -416,13 +416,16 @@ let persistenceTests: [TestCase] = [
 	TestCase("saved tiled windows that no scan listed are tiled when they appear small") {
 		var state = testState()
 		let home = state.testActive()
+		state.testAddWindow(20, workspace: home, pid: 200)
 		state.testSetColumns(home, [[10], [20]])
 		expectInvariants(state)
 		let snapshot = state.snapshot()
 
 		// The app of window 20 is busy at relaunch: its windows are not listed yet.
 		var relaunched = testState()
-		relaunched.applyPersistence(snapshot, windows: [WindowFacts(id: 10, pid: 100, title: "W10")], apps: [], now: 10)
+		relaunched.applyPersistence(
+			snapshot, windows: [WindowFacts(id: 10, pid: 100, title: "W10")],
+			apps: [AppFacts(pid: 100, bundleID: nil, name: "App"), AppFacts(pid: 200, bundleID: "com.busy.app", name: "Busy")], now: 10)
 		expectEqual(relaunched.records[20], nil)
 
 		// It answers later; a stacked column left the window smaller than a dialog.
@@ -921,5 +924,163 @@ let persistenceTests: [TestCase] = [
 			expectInvariants(third, "round \(round) third run")
 			expect(third.snapshot().hasSameLayout(as: next), "round \(round): the restored layout differs from the saved one")
 		}
+	},
+
+	// A saved layout of two workspaces; the second one (not active) holds `columns`, the first a filler.
+	TestCase("a late window goes back into its saved column, next to its saved neighbour") {
+		func relaunch(_ columns: [[WindowID]], late: WindowID) -> (TrackingState, [WorkspaceID]) {
+			var state = testState()
+			let row = state.testSetRow(nonNegatives: 2, active: 0)
+			state.testAddWindow(1, workspace: row[0], pid: 100)
+			state.testSetColumns(row[0], [[1]])
+			for id in columns.joined() {
+				state.testAddWindow(id, workspace: row[1], pid: id == late ? 200 : 100)
+			}
+			state.testSetColumns(row[1], columns)
+			let snapshot = state.snapshot()
+
+			var relaunched = testState()
+			let scans: [PID: ScanResult] = [
+				100: .complete(([1] + columns.joined().filter { $0 != late }).map { WindowFacts(id: $0, pid: 100, title: "W\($0)") }),
+				200: .timedOut
+			]
+			let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A"), AppFacts(pid: 200, bundleID: "com.b", name: "B")]
+			relaunched.applyPersistence(snapshot, scans: scans, apps: apps, now: 10)
+			let late = WindowFacts(id: late, pid: 200, title: "W\(late)", frame: CGRect(x: 1500, y: 0, width: 800, height: 600))
+			relaunched.admit(late, app: apps[1], source: .discovered, now: 20)
+			return (relaunched, row)
+		}
+
+		var (left, row) = relaunch([[20], [30]], late: 20)
+		expectEqual(left.records[20]?.workspace, row[1])
+		expectEqual(left.testColumns(row[1]), [[20], [30]])
+		expectEqual(left.testActive(), row[0])
+		expectInvariants(left)
+
+		(left, row) = relaunch([[10], [20]], late: 20)
+		expectEqual(left.testColumns(row[1]), [[10], [20]])
+		expectInvariants(left)
+
+		(left, row) = relaunch([[10, 20], [30]], late: 20)
+		expectEqual(left.testColumns(row[1]), [[10, 20], [30]])
+		expectInvariants(left)
+
+		(left, row) = relaunch([[10, 20], [30]], late: 10)
+		expectEqual(left.testColumns(row[1]), [[10, 20], [30]])
+		expectInvariants(left)
+	},
+
+	TestCase("a late window whose saved workspace is gone is admitted by position") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 2, active: 0)
+		state.testAddWindow(1, workspace: row[0], pid: 100)
+		state.testSetColumns(row[0], [[1]])
+		state.testAddWindow(20, workspace: row[1], pid: 200)
+		state.testSetColumns(row[1], [[20]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A"), AppFacts(pid: 200, bundleID: "com.b", name: "B")]
+		relaunched.applyPersistence(
+			snapshot, scans: [100: .complete([WindowFacts(id: 1, pid: 100, title: "W1")]), 200: .timedOut], apps: apps, now: 10)
+		expectEqual(relaunched.workspaces[row[1]], nil)
+
+		let late = WindowFacts(id: 20, pid: 200, title: "W20", frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+		relaunched.admit(late, app: apps[1], source: .discovered, now: 20)
+		expectEqual(relaunched.records[20]?.placement, .tiled)
+		expectEqual(relaunched.records[20]?.workspace, relaunched.testActive())
+		expectInvariants(relaunched)
+	},
+
+	TestCase("a small late window is tiled only for the process that owned it") {
+		var state = testState()
+		let home = state.testActive()
+		state.testAddWindow(10, workspace: home, pid: 100)
+		state.testAddWindow(20, workspace: home, pid: 200)
+		state.testSetColumns(home, [[10], [20]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A"), AppFacts(pid: 200, bundleID: "com.b", name: "B")]
+		relaunched.applyPersistence(
+			snapshot, scans: [100: .complete([WindowFacts(id: 10, pid: 100, title: "W10")]), 200: .timedOut], apps: apps, now: 10)
+		expectEqual(relaunched.relaunchTiled[20]?.pid, 200)
+
+		let small = CGRect(x: 100, y: 100, width: 300, height: 200)
+		var other = relaunched
+		let stranger = AppFacts(pid: 300, bundleID: "com.c", name: "C")
+		other.admit(WindowFacts(id: 20, pid: 300, title: "Dialog", frame: small), app: stranger, source: .discovered, now: 20)
+		expectEqual(other.records[20]?.placement, .unmanaged)
+		expectEqual(other.records[20]?.workspace, nil)
+
+		relaunched.admit(WindowFacts(id: 20, pid: 200, title: "W20", frame: small), app: apps[1], source: .discovered, now: 20)
+		expectEqual(relaunched.records[20]?.placement, .tiled)
+		expectEqual(relaunched.testColumns(home), [[10], [20]])
+		expectInvariants(relaunched)
+	},
+
+	TestCase("a saved window of a process that no longer runs leaves no relaunch entry") {
+		var state = testState()
+		let home = state.testActive()
+		state.testAddWindow(10, workspace: home, pid: 100)
+		state.testAddWindow(20, workspace: home, pid: 200)
+		state.testSetColumns(home, [[10], [20]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		relaunched.applyPersistence(
+			snapshot, scans: [100: .complete([WindowFacts(id: 10, pid: 100, title: "W10")])],
+			apps: [AppFacts(pid: 100, bundleID: "com.a", name: "A")], now: 10)
+		expectEqual(relaunched.relaunchTiled[10], RelaunchSlot(pid: 100, memory: nil))
+		expectEqual(relaunched.relaunchTiled[20], nil)
+	},
+
+	TestCase("the saved place of a late window is used once") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 2, active: 0)
+		state.testAddWindow(1, workspace: row[0], pid: 100)
+		state.testSetColumns(row[0], [[1]])
+		state.testAddWindow(10, workspace: row[1], pid: 100)
+		state.testAddWindow(20, workspace: row[1], pid: 200)
+		state.testSetColumns(row[1], [[10], [20]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A"), AppFacts(pid: 200, bundleID: "com.b", name: "B")]
+		let listed = [WindowFacts(id: 1, pid: 100, title: "W1"), WindowFacts(id: 10, pid: 100, title: "W10")]
+		relaunched.applyPersistence(snapshot, scans: [100: .complete(listed), 200: .timedOut], apps: apps, now: 10)
+		expect(relaunched.relaunchTiled[20]?.memory != nil)
+
+		relaunched.admit(WindowFacts(id: 20, pid: 200, title: "W20"), app: apps[1], source: .discovered, now: 20)
+		expectEqual(relaunched.records[20]?.workspace, row[1])
+		expectEqual(relaunched.relaunchTiled[20], RelaunchSlot(pid: 200, memory: nil))
+
+		_ = relaunched.retire(20, reason: .destroyed, now: 30)
+		expectEqual(relaunched.relaunchTiled[20], nil)
+		expectInvariants(relaunched)
+	},
+
+	TestCase("a saved hidden id no window matched does not hide a live window with the same id") {
+		var state = testState()
+		let home = state.testActive()
+		state.testAddWindow(10, workspace: home, pid: 100, title: "Same")
+		state.records[10]?.bundleID = "com.a"
+		state.testAddWindow(20, workspace: home, pid: 100, title: "Other")
+		state.records[20]?.bundleID = "com.a"
+		state.testSetColumns(home, [[10], [20]])
+		state.testAddWindow(30, workspace: home, visibility: .axisMinimized, pid: 300)
+		state.hiddenStack = [HiddenEntry(window: 30, minimizeConfirmed: true)]
+		let snapshot = state.snapshot()
+
+		// After a restart the window titled "Same" got id 30, which the saved hidden window (of
+		// another process) used to have.
+		var relaunched = testState()
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A")]
+		let live = [WindowFacts(id: 30, pid: 100, title: "Same"), WindowFacts(id: 20, pid: 100, title: "Other")]
+		relaunched.applyPersistence(snapshot, windows: live, apps: apps, now: 10)
+		expectEqual(relaunched.records[30]?.visibility, .visible)
+		expectEqual(relaunched.hiddenStack, [])
+		expectEqual(relaunched.testColumns(home), [[30], [20]])
+		expectInvariants(relaunched)
 	}
 ]

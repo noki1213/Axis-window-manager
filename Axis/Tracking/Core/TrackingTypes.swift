@@ -546,6 +546,13 @@ nonisolated struct RelativeFrame: Equatable, Sendable {
 	}
 }
 
+/// A window the saved layout had tiled: the process that owned it, and for a window not seen yet
+/// its place in the saved columns.
+nonisolated struct RelaunchSlot: Equatable, Sendable {
+	var pid: PID
+	var memory: SlotMemory?
+}
+
 /// Where a tiled window sat when it left the columns (minimized, fullscreen, hidden app, or
 /// retired), so it can come back next to the same neighbours.
 nonisolated struct SlotMemory: Equatable, Sendable {

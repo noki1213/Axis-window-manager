@@ -65,7 +65,8 @@ nonisolated extension TrackingState {
 	///
 	/// The first rule that applies places it: the place of a window of the same app and title
 	/// retired shortly before; a launch-aside claim for its app (tiled, or floating for the
-	/// unmanaged class); no workspace for the unmanaged class; a placement reservation (created
+	/// unmanaged class); no workspace for the unmanaged class; the saved layout's place for a tiled
+	/// window it had not seen at launch; a placement reservation (created
 	/// windows, and discovered ones: a new window of an app that posts no creation notification is
 	/// first seen that way; the startup scan's windows existed before the reservation was made); the
 	/// active workspace of the monitor of the last focused tracked window (created windows); the
@@ -76,7 +77,8 @@ nonisolated extension TrackingState {
 	mutating func admit(_ facts: WindowFacts, app: AppFacts, source: AdmissionSource, now: Time) -> WindowID? {
 		guard records[facts.id] == nil, !tombstones.contains(facts.id), let fallbackMonitor = primaryMonitor else { return nil }
 		let windowClass = Classifier.classify(
-			facts, bundleID: app.bundleID, floatingApps: floatingApps, relaunchTiled: relaunchTiled)
+			facts, bundleID: app.bundleID, floatingApps: floatingApps,
+			relaunchTiled: relaunchTiledIDs(id: facts.id, pid: facts.pid))
 		guard windowClass != .ignore else { return nil }
 		admissionExpireLaunchAside(now: now)
 		admissionPruneRetired(now: now)
@@ -114,6 +116,12 @@ nonisolated extension TrackingState {
 		} else if windowClass == .unmanaged {
 			draft.floatingFrame = admissionFloatingFrame(frame, for: monitorKey(for: frame) ?? fallbackMonitor)
 			via = "unmanaged class"
+		} else if windowClass == .tiled, let memory = relaunchTiled[facts.id].flatMap({ $0.pid == facts.pid ? $0.memory : nil }),
+			let host = workspaces[memory.workspace]?.host, monitors[host] != nil {
+			draft.workspace = memory.workspace
+			insertion = .slot(memory, fallbackMidX: frame.midX)
+			relaunchTiled[facts.id]?.memory = nil
+			via = "saved layout"
 		} else if source == .created || source == .discovered, let reservation,
 			let target = monitors[reservation.monitor]?.active {
 			self.reservation = nil
