@@ -877,25 +877,25 @@ final class TrackingCoordinator {
 	// MARK: - Persistence
 
 	/// Reads the saved layout; the pass that lifts the starting barrier puts it back. A file with
-	/// anything wrong in it is kept as `workspaces.json.bad` before the first save replaces it, and
-	/// what was left out is logged.
+	/// anything wrong in it is kept as a dated `workspaces.json.bad-<time>` copy before the first save
+	/// replaces it, and what was left out is logged.
 	private func loadSavedLayout() {
 		pendingRestore = nil
 		switch PersistenceStore.load() {
 		case .missing:
 			event("persist: ignored (no saved layout)")
-		case .snapshot(let snapshot, let dropped, let copiedAside):
+		case .snapshot(let snapshot, let dropped, let copiedAs):
 			pendingRestore = snapshot
 			for note in dropped {
 				event("persist: dropped \(note)")
 			}
-			if copiedAside {
-				event("persist: kept the original as workspaces.json.bad")
+			if let copiedAs {
+				event("persist: kept the original as \(copiedAs)")
 			}
-		case .ignored(let reason, let copiedAside):
+		case .ignored(let reason, let copiedAs):
 			event("persist: ignored (\(reason))")
-			if copiedAside {
-				event("persist: kept the original as workspaces.json.bad")
+			if let copiedAs {
+				event("persist: kept the original as \(copiedAs)")
 			}
 		}
 	}

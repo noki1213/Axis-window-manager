@@ -3,7 +3,7 @@
 //  Axis core tests
 //
 //  The saved layout file: lenient decoding, sanitizing, the copy kept aside when a read finds
-//  a problem, and the refusal to save a state that would not restore.
+//  a problem (dated, capped copies), and the refusal to save a state that would not restore.
 //
 
 import Foundation
@@ -54,6 +54,19 @@ private func editWorkspace(_ object: inout [String: Any], _ edit: (inout [String
 
 private func exists(_ url: URL) -> Bool {
 	FileManager.default.fileExists(atPath: url.path)
+}
+
+/// A date in the current time zone and calendar.
+private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int, _ second: Int) -> Date {
+	let components = DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second)
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.timeZone = TimeZone.current
+	return calendar.date(from: components)!
+}
+
+/// The expected `YYYYMMDD-HHMMSS` stamp for the same fields.
+private func stamp(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int, _ second: Int) -> String {
+	String(format: "%04d%02d%02d-%02d%02d%02d", year, month, day, hour, minute, second)
 }
 
 let persistenceFileTests: [TestCase] = [
@@ -223,20 +236,32 @@ let persistenceFileTests: [TestCase] = [
 		expect(twice.validationProblem() != nil, "a window in two columns stays a problem")
 	},
 
-	TestCase("load of a damaged file is ignored and kept as an identical bad copy") {
+	TestCase("load of a damaged file is ignored and kept as one identical dated copy") {
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
 			let bytes = Data("{\"monitors\": 3}".utf8)
 			try bytes.write(to: url)
-			guard case .ignored(let reason, let copied) = PersistenceStore.load(from: url) else {
+			let now = date(2026, 11, 28, 14, 5, 2)
+			guard case .ignored(let reason, let copiedAs) = PersistenceStore.load(from: url, now: now) else {
 				fail("expected .ignored")
 				return
 			}
 			expect(reason.hasPrefix("damaged"), reason)
-			expect(copied, "the copy is reported")
-			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url)), bytes)
-			expectEqual(PersistenceStore.badURL(for: url).lastPathComponent, "workspaces.json.bad")
+			let copies = PersistenceStore.badCopies(of: url)
+			expectEqual(copies.count, 1)
+			expectEqual(copiedAs, copies.first?.lastPathComponent)
+			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url, at: now)), bytes)
+			expectEqual(copies.first, PersistenceStore.badURL(for: url, at: now))
 		}
+	},
+
+	TestCase("the bad copy name carries the local time in fixed digits") {
+		let url = URL(fileURLWithPath: "/tmp/x/workspaces.json")
+		expectEqual(PersistenceStore.badURL(for: url, at: date(2026, 11, 28, 14, 5, 2)).lastPathComponent,
+			"workspaces.json.bad-20261128-140502")
+		expectEqual(PersistenceStore.badURL(for: url, at: date(2027, 1, 3, 0, 0, 9)).lastPathComponent,
+			"workspaces.json.bad-20270103-000009")
+		expectEqual(PersistenceStore.badURL(for: url, at: date(2026, 11, 28, 14, 5, 2)).deletingLastPathComponent().path, "/tmp/x")
 	},
 
 	TestCase("load of an inconsistent file is ignored and kept") {
@@ -246,16 +271,18 @@ let persistenceFileTests: [TestCase] = [
 			snapshot.monitors[0].workspaces[0].columns = [[]]
 			let bytes = try snapshot.encode()
 			try bytes.write(to: url)
-			guard case .ignored(let reason, _) = PersistenceStore.load(from: url) else {
+			let now = date(2026, 11, 28, 14, 5, 2)
+			guard case .ignored(let reason, let copiedAs) = PersistenceStore.load(from: url, now: now) else {
 				fail("expected .ignored")
 				return
 			}
 			expect(reason.hasPrefix("inconsistent"), reason)
-			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url)), bytes)
+			expect(copiedAs != nil, "the copy is reported")
+			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url, at: now)), bytes)
 		}
 	},
 
-	TestCase("load of a file with one bad record keeps the rest and a bad copy") {
+	TestCase("load of a file with one bad record keeps the rest and a dated copy") {
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
 			let snapshot = richSnapshot()
@@ -265,30 +292,31 @@ let persistenceFileTests: [TestCase] = [
 				object["windows"] = windows
 			}
 			try bytes.write(to: url)
-			guard case .snapshot(let loaded, let dropped, let copied) = PersistenceStore.load(from: url) else {
+			let now = date(2026, 11, 28, 14, 5, 2)
+			guard case .snapshot(let loaded, let dropped, let copiedAs) = PersistenceStore.load(from: url, now: now) else {
 				fail("expected .snapshot")
 				return
 			}
 			expectEqual(loaded.windows.count, snapshot.windows.count - 1)
 			expectEqual(dropped, ["window record 1 unreadable"])
-			expect(copied, "the copy is reported")
-			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url)), bytes)
+			expectEqual(copiedAs, "workspaces.json.bad-" + stamp(2026, 11, 28, 14, 5, 2))
+			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url, at: now)), bytes)
 		}
 	},
 
-	TestCase("load of a file that needs sanitizing keeps a bad copy") {
+	TestCase("load of a file that needs sanitizing keeps a dated copy") {
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
 			var snapshot = richSnapshot()
 			snapshot.monitors[0].workspaces[0].widthRatios = snapshot.monitors[0].workspaces[0].columns.map { _ in 0 }
 			try snapshot.encode().write(to: url)
-			guard case .snapshot(let loaded, let dropped, _) = PersistenceStore.load(from: url) else {
+			guard case .snapshot(let loaded, let dropped, _) = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, 2)) else {
 				fail("expected .snapshot")
 				return
 			}
 			expectEqual(dropped.count, 1)
 			expectEqual(loaded.monitors[0].workspaces[0].widthRatios, nil)
-			expect(exists(PersistenceStore.badURL(for: url)), "a bad copy exists")
+			expectEqual(PersistenceStore.badCopies(of: url).count, 1)
 		}
 	},
 
@@ -297,36 +325,90 @@ let persistenceFileTests: [TestCase] = [
 			let url = dir.appendingPathComponent("workspaces.json")
 			let snapshot = richSnapshot()
 			try snapshot.encode().write(to: url)
-			guard case .snapshot(let loaded, let dropped, let copied) = PersistenceStore.load(from: url) else {
+			guard case .snapshot(let loaded, let dropped, let copiedAs) = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, 2)) else {
 				fail("expected .snapshot")
 				return
 			}
 			expectEqual(loaded, snapshot)
 			expectEqual(dropped, [])
-			expect(!copied, "no copy")
-			expect(!exists(PersistenceStore.badURL(for: url)), "no bad file")
+			expectEqual(copiedAs, nil)
+			expectEqual(PersistenceStore.badCopies(of: url), [])
 		}
 	},
 
 	TestCase("load of a missing file is missing and makes no bad copy") {
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
-			guard case .missing = PersistenceStore.load(from: url) else {
+			guard case .missing = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, 2)) else {
 				fail("expected .missing")
 				return
 			}
-			expect(!exists(PersistenceStore.badURL(for: url)), "no bad file")
+			expectEqual(PersistenceStore.badCopies(of: url), [])
 		}
 	},
 
-	TestCase("an older bad copy is replaced") {
+	TestCase("loads at different times keep one copy each") {
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
-			try Data("old".utf8).write(to: PersistenceStore.badURL(for: url))
-			let bytes = Data("garbage".utf8)
-			try bytes.write(to: url)
-			_ = PersistenceStore.load(from: url)
-			expectEqual(try Data(contentsOf: PersistenceStore.badURL(for: url)), bytes)
+			try Data("first".utf8).write(to: url)
+			_ = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, 2))
+			try Data("second".utf8).write(to: url)
+			_ = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, 3))
+			let copies = PersistenceStore.badCopies(of: url)
+			expectEqual(copies.map(\.lastPathComponent),
+				["workspaces.json.bad-" + stamp(2026, 11, 28, 14, 5, 2), "workspaces.json.bad-" + stamp(2026, 11, 28, 14, 5, 3)])
+			expectEqual(try Data(contentsOf: copies[0]), Data("first".utf8))
+			expectEqual(try Data(contentsOf: copies[1]), Data("second".utf8))
+		}
+	},
+
+	TestCase("only the newest copies stay") {
+		try withTempDirectory { dir in
+			let url = dir.appendingPathComponent("workspaces.json")
+			for second in 1...7 {
+				try Data("garbage \(second)".utf8).write(to: url)
+				_ = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 5, second))
+			}
+			expectEqual(PersistenceStore.keptBadCopies, 5)
+			let copies = PersistenceStore.badCopies(of: url)
+			expectEqual(copies.map(\.lastPathComponent), (3...7).map { "workspaces.json.bad-" + stamp(2026, 11, 28, 14, 5, $0) })
+			expect(!exists(PersistenceStore.badURL(for: url, at: date(2026, 11, 28, 14, 5, 1))), "the oldest is gone")
+			expect(!exists(PersistenceStore.badURL(for: url, at: date(2026, 11, 28, 14, 5, 2))), "the second oldest is gone")
+			expectEqual(try Data(contentsOf: copies[4]), Data("garbage 7".utf8))
+		}
+	},
+
+	TestCase("pruning leaves other files in the directory alone") {
+		try withTempDirectory { dir in
+			let url = dir.appendingPathComponent("workspaces.json")
+			let others = ["hotkeys.json", "workspaces.json.bad", "workspaces.json.bad-notes", "workspaces.json.bad-20261128-1405",
+				"settings.json", "workspaces.json.bad-20261128-140502x", "other.json.bad-20200101-000000"]
+			for name in others {
+				try Data("keep".utf8).write(to: dir.appendingPathComponent(name))
+			}
+			for second in 1...7 {
+				try Data("garbage \(second)".utf8).write(to: url)
+				_ = PersistenceStore.load(from: url, now: date(2026, 11, 28, 14, 6, second))
+			}
+			expectEqual(PersistenceStore.badCopies(of: url).count, 5)
+			expect(exists(url), "the file itself stays")
+			for name in others {
+				expect(exists(dir.appendingPathComponent(name)), "\(name) stays")
+			}
+		}
+	},
+
+	TestCase("a second load in the same second replaces that copy") {
+		try withTempDirectory { dir in
+			let url = dir.appendingPathComponent("workspaces.json")
+			let now = date(2026, 11, 28, 14, 5, 2)
+			try Data("older".utf8).write(to: url)
+			_ = PersistenceStore.load(from: url, now: now)
+			try Data("newer".utf8).write(to: url)
+			_ = PersistenceStore.load(from: url, now: now)
+			let copies = PersistenceStore.badCopies(of: url)
+			expectEqual(copies.count, 1)
+			expectEqual(try Data(contentsOf: copies[0]), Data("newer".utf8))
 		}
 	},
 
@@ -334,18 +416,19 @@ let persistenceFileTests: [TestCase] = [
 		try withTempDirectory { dir in
 			let url = dir.appendingPathComponent("workspaces.json")
 			try Data("garbage".utf8).write(to: url)
+			let now = date(2026, 11, 28, 14, 5, 2)
 			// A directory in the way of the copy makes the replacement fail.
-			let bad = PersistenceStore.badURL(for: url)
+			let bad = PersistenceStore.badURL(for: url, at: now)
 			try FileManager.default.createDirectory(at: bad.appendingPathComponent("inner"), withIntermediateDirectories: true)
 			try Data("x".utf8).write(to: bad.appendingPathComponent("inner/file"))
 			try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
 			defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
-			guard case .ignored(let reason, let copied) = PersistenceStore.load(from: url) else {
+			guard case .ignored(let reason, let copiedAs) = PersistenceStore.load(from: url, now: now) else {
 				fail("expected .ignored")
 				return
 			}
 			expect(reason.hasPrefix("damaged"), reason)
-			expect(!copied, "the copy failed")
+			expectEqual(copiedAs, nil)
 			expect(reason.contains("copy to .bad failed"), reason)
 		}
 	},
