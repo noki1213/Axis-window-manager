@@ -78,39 +78,25 @@ final class SettingsStore: ObservableObject {
 	/// The value of a key as `Bool`, or `fallback` when the key is missing or not a boolean
 	func bool(_ key: String, default fallback: Bool) -> Bool {
 		guard let value = values[key] else { return fallback }
-		guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
-			report("\"\(key)\": expected true or false. Using the default.")
-			return fallback
-		}
-		return number.boolValue
+		let checked = SettingsValue.bool(value, key: key, default: fallback)
+		if let problem = checked.problem { report(problem) }
+		return checked.value
 	}
 
 	/// The value of a key as a number within `range`, or `fallback` when missing, not a number or out of range
 	func number(_ key: String, default fallback: Double, in range: ClosedRange<Double>) -> Double {
 		guard let value = values[key] else { return fallback }
-		guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
-			report("\"\(key)\": expected a number. Using the default.")
-			return fallback
-		}
-		guard range.contains(number.doubleValue) else {
-			report("\"\(key)\": must be between \(Self.format(range.lowerBound)) and \(Self.format(range.upperBound)). Using the default.")
-			return fallback
-		}
-		return number.doubleValue
+		let checked = SettingsValue.number(value, key: key, default: fallback, in: range)
+		if let problem = checked.problem { report(problem) }
+		return checked.value
 	}
 
 	/// The value of a key as a list of strings, or `fallback` when missing or not a list of strings
 	func strings(_ key: String, default fallback: [String]) -> [String] {
 		guard let value = values[key] else { return fallback }
-		guard let list = value as? [String] else {
-			report("\"\(key)\": expected a list of strings. Using the default.")
-			return fallback
-		}
-		return list
-	}
-
-	private static func format(_ value: Double) -> String {
-		value == value.rounded() ? String(Int(value)) : String(value)
+		let checked = SettingsValue.strings(value, key: key, default: fallback)
+		if let problem = checked.problem { report(problem) }
+		return checked.value
 	}
 
 	// MARK: - Writing

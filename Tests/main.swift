@@ -2,9 +2,10 @@
 //  main.swift
 //  Axis core tests
 //
-//  Entry point of the test runner for the window-tracking core (Axis/Tracking/Core) and the
-//  saved-layout file store (Axis/Tracking/System/PersistenceStore.swift, Foundation only).
-//  It is a plain executable instead of an XCTest bundle so the pure core builds and runs in
+//  Entry point of the test runner for the window-tracking core (Axis/Tracking/Core), the
+//  saved-layout file store (Axis/Tracking/System/PersistenceStore.swift, Foundation only) and the
+//  pure settings code (Axis/Core: config files, shortcut keys, setting values).
+//  It is a plain executable instead of an XCTest bundle so the pure code builds and runs in
 //  seconds. The flags match the app target's language mode, isolation and upcoming features;
 //  `-target` pins the deployment version because the host default would hide availability errors.
 //
@@ -16,7 +17,9 @@
 //      -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility \
 //      -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault \
 //      -enable-bare-slash-regex -target arm64-apple-macos14.0 -DDEBUG -Onone -warnings-as-errors \
-//      Axis/Tracking/Core/*.swift Axis/Tracking/System/PersistenceStore.swift Tests/*.swift -o "$OUT/t" && "$OUT/t"
+//      Axis/Tracking/Core/*.swift Axis/Tracking/System/PersistenceStore.swift \
+//      Axis/Core/ConfigFile.swift Axis/Core/HotkeyBinding.swift Axis/Core/HotkeyStore.swift \
+//      Axis/Core/SettingsValue.swift Tests/*.swift -o "$OUT/t" && "$OUT/t"
 //
 //  `t -v` prints each test before it runs; `t <text>` runs only the tests whose "Suite / name"
 //  contains the text. The exit status is 1 when any test fails.
@@ -40,4 +43,7 @@ exit(runTests([
 	TestSuite("Scenario", scenarioTests),
 	TestSuite("Persistence", persistenceTests),
 	TestSuite("PersistenceFile", persistenceFileTests),
+	TestSuite("HotkeyKey", hotkeyKeyTests),
+	TestSuite("ConfigFile", configFileTests),
+	TestSuite("SettingsValue", settingsValueTests),
 ]))
