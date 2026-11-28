@@ -50,7 +50,7 @@ Shortcuts are stored in `~/Library/Application Support/Axis/hotkeys.json`, which
 }
 ```
 
-- A key is written as modifiers and a key name joined by `+`. Modifiers: `cmd`, `shift`, `opt` (or `alt`), `ctrl`. Key names: letters, digits, symbols such as `,` `=` `[`, and `left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`–`f20`
+- A key is written as modifiers and a key name joined by `+`. Modifiers: `cmd`, `shift`, `opt` (or `alt`), `ctrl`. Key names: letters, digits, symbols such as `,` `=` `[`, and `left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`–`f20`, and `plus` (the keypad plus key; `+` also works, as in `ctrl++`)
 - A list gives one action several keys; an empty string leaves it without a key
 - Edits are picked up within a couple of seconds while Axis is running
 - An entry Axis can't read is skipped and that action keeps its default; the rest of the file still applies. If the file as a whole can't be read, Axis keeps the shortcuts already in use (the defaults at launch) and doesn't save over the file until it is fixed
@@ -312,7 +312,7 @@ macOS 向けのキーボード操作タイリングウィンドウマネージ�
 }
 ```
 
-- キーは修飾キーとキー名を `+` でつないで書きます。修飾キー：`cmd`、`shift`、`opt`（または `alt`）、`ctrl`。キー名：英字、数字、`,` `=` `[` などの記号、`left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`〜`f20`
+- キーは修飾キーとキー名を `+` でつないで書きます。修飾キー：`cmd`、`shift`、`opt`（または `alt`）、`ctrl`。キー名：英字、数字、`,` `=` `[` などの記号、`left` `right` `up` `down` `return` `tab` `space` `delete` `escape` `home` `end` `pageup` `pagedown` `f1`〜`f20`、`plus`（テンキーの +。`ctrl++` のように `+` も使えます）
 - リストにすると1つの操作に複数のキー、空の文字列にするとキーなしになります
 - Axis の起動中に書き換えると、数秒のうちに反映されます
 - 読めない項目はその操作だけデフォルトに戻り、ほかはそのまま効きます。ファイル全体が読めないときは、使っていたショートカットのまま（起動時ならデフォルト）にし、直るまでファイルに上書きしません

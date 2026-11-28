@@ -121,9 +121,20 @@ struct HotkeyKey: Hashable {
 
 	/// Reads "ctrl+opt+j", "cmd+shift+left", "opt+f5". Returns nil when a modifier or the key name is unknown.
 	init?(string: String) {
-		let parts = string.lowercased()
-			.split(separator: "+", omittingEmptySubsequences: false)
-			.map { $0.trimmingCharacters(in: .whitespaces) }
+		let lowered = string.lowercased().trimmingCharacters(in: .whitespaces)
+		// The plus key can also be written as a literal "+" ("+" alone or "ctrl++")
+		let modifierText: String
+		let parts: [String]
+		if lowered == "+" {
+			parts = ["+"]
+		} else if lowered.hasSuffix("++") {
+			modifierText = String(lowered.dropLast(2))
+			parts = modifierText.split(separator: "+", omittingEmptySubsequences: false)
+				.map { $0.trimmingCharacters(in: .whitespaces) } + ["+"]
+		} else {
+			parts = lowered.split(separator: "+", omittingEmptySubsequences: false)
+				.map { $0.trimmingCharacters(in: .whitespaces) }
+		}
 		guard let name = parts.last, !name.isEmpty else { return nil }
 		var mods: HotkeyModifiers = []
 		for part in parts.dropLast() {
@@ -137,12 +148,19 @@ struct HotkeyKey: Hashable {
 		}
 		if let code = Self.keyCodes[name] {
 			self.init(keyCode: code, modifiers: mods)
-		} else if name.hasPrefix("keycode"), let code = Int(name.dropFirst("keycode".count)) {
+		} else if name.hasPrefix("keycode"), let code = Self.rawKeyCode(name.dropFirst("keycode".count)) {
 			// Keys without a name (other layouts) round-trip by their raw code
 			self.init(keyCode: code, modifiers: mods)
 		} else {
 			return nil
 		}
+	}
+
+	/// A raw key code written in plain ASCII digits, 0...255
+	private static func rawKeyCode(_ digits: Substring) -> Int? {
+		guard !digits.isEmpty, digits.count <= 3, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }),
+		      let code = Int(digits), code <= 255 else { return nil }
+		return code
 	}
 
 	/// The string form used in hotkeys.json (e.g. ctrl+opt+shift+j)
@@ -198,7 +216,7 @@ struct HotkeyKey: Hashable {
 			kVK_ANSI_Semicolon: ";", kVK_ANSI_Quote: "'",
 			kVK_ANSI_Comma: ",", kVK_ANSI_Period: ".",
 			kVK_ANSI_Slash: "/", kVK_ANSI_Backslash: "\\",
-			kVK_ANSI_Grave: "`",
+			kVK_ANSI_Grave: "`", kVK_ANSI_KeypadPlus: "plus",
 			kVK_Return: "return", kVK_Tab: "tab", kVK_Space: "space",
 			kVK_Delete: "delete", kVK_ForwardDelete: "forwarddelete",
 			kVK_Escape: "escape",
@@ -218,6 +236,7 @@ struct HotkeyKey: Hashable {
 	/// Name -> key code, including the other spellings accepted when reading
 	private static let keyCodes: [String: Int] = {
 		var codes = Dictionary(uniqueKeysWithValues: keyNames.map { ($1, $0) })
+		codes["+"] = kVK_ANSI_KeypadPlus
 		codes["enter"] = kVK_Return
 		codes["backspace"] = kVK_Delete
 		codes["esc"] = kVK_Escape
@@ -350,7 +369,7 @@ struct HotkeyBinding: Identifiable {
 			kVK_ANSI_Semicolon: ";", kVK_ANSI_Quote: "'",
 			kVK_ANSI_Comma: ",", kVK_ANSI_Period: ".",
 			kVK_ANSI_Slash: "/", kVK_ANSI_Backslash: "\\",
-			kVK_ANSI_Grave: "`",
+			kVK_ANSI_Grave: "`", kVK_ANSI_KeypadPlus: "+",
 			kVK_Return: "Return", kVK_Tab: "Tab", kVK_Space: "Space",
 			kVK_Delete: "Delete", kVK_ForwardDelete: "Forward Delete",
 			kVK_Escape: "Escape",
@@ -359,6 +378,8 @@ struct HotkeyBinding: Identifiable {
 			kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
 			kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
 			kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+			kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15", kVK_F16: "F16",
+			kVK_F17: "F17", kVK_F18: "F18", kVK_F19: "F19", kVK_F20: "F20",
 			kVK_Home: "Home", kVK_End: "End",
 			kVK_PageUp: "Page Up", kVK_PageDown: "Page Down",
 		]

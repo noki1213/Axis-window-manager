@@ -148,6 +148,22 @@ private let keyNameTests: [TestCase] = [
 		expectWritten("keycode0", "a")
 		expectWritten("keycode200", "keycode200")
 	},
+	TestCase("keycode forms 0 and 255 are accepted") {
+		expectKey("keycode255", 255, [])
+		expectKey("shift+keycode1", 1, .shift)
+	},
+	TestCase("the plus key reads as plus, + and ctrl++ and is written as plus") {
+		expectKey("plus", kVK_ANSI_KeypadPlus, [])
+		expectKey("ctrl+opt+plus", kVK_ANSI_KeypadPlus, [.control, .option])
+		expectKey("+", kVK_ANSI_KeypadPlus, [])
+		expectKey("ctrl++", kVK_ANSI_KeypadPlus, .control)
+		expectKey("ctrl+opt++", kVK_ANSI_KeypadPlus, [.control, .option])
+		expectKey("keycode\(kVK_ANSI_KeypadPlus)", kVK_ANSI_KeypadPlus, [])
+		expectWritten("+", "plus")
+		expectWritten("ctrl++", "ctrl+plus")
+		expectEqual(HotkeyKey(keyCode: kVK_ANSI_KeypadPlus, modifiers: .control).displayString, "Ctrl++")
+		expectEqual(HotkeyKey(keyCode: kVK_ANSI_KeypadPlus, modifiers: []).keyName, "+")
+	},
 	TestCase("a key code without a name is written as keycodeNN") {
 		expectEqual(HotkeyKey(keyCode: 200, modifiers: [.command]).string, "cmd+keycode200")
 	},
@@ -182,13 +198,15 @@ private let rejectedStringTests: [TestCase] = [
 	TestCase("empty parts between plus signs do not parse") {
 		expectRejected("+j")
 		expectRejected("ctrl++j")
-		expectRejected("ctrl++")
 		expectRejected("++")
+		expectRejected("ctrl+++")
+		expectRejected("+ctrl++")
 	},
-	TestCase("keycode without a number does not parse") {
-		expectRejected("keycode")
-		expectRejected("keycodex")
-		expectRejected("keycode1.5")
+	TestCase("keycode without a number or with a number outside 0...255 does not parse") {
+		for bad in ["keycode", "keycodex", "keycode1.5", "keycode-5", "keycode+5", "keycode256", "keycode 5",
+		            "keycode0005", "keycode\u{0663}", "ctrl+keycode-5", "ctrl+keycode999"] {
+			expectRejected(bad)
+		}
 	},
 ]
 
@@ -228,10 +246,12 @@ private let roundTripTests: [TestCase] = [
 			expectEqual(parse(key.string), key, "\"\(string)\" round trip")
 		}
 	},
-	TestCase("every named key code round trips through its name") {
+	TestCase("every key code and modifier set round trips through its string") {
 		for code in 0..<256 {
-			let key = HotkeyKey(keyCode: code, modifiers: [.control, .shift])
-			expectEqual(parse(key.string), key, "key code \(code) as \"\(key.string)\"")
+			for raw in 0..<16 as Range<UInt> {
+				let key = HotkeyKey(keyCode: code, modifiers: HotkeyModifiers(rawValue: raw))
+				expectEqual(parse(key.string), key, "key code \(code) as \"\(key.string)\"")
+			}
 		}
 	},
 ]
@@ -276,10 +296,13 @@ private let displayTests: [TestCase] = [
 	TestCase("a key code without a display name shows its number") {
 		expectEqual(HotkeyKey(keyCode: 200, modifiers: .option).displayString, "Option+Key(200)")
 	},
-	TestCase("F13 to F20 have a string name but no display name") {
-		// Current behavior: the display falls back to the key code
-		expectEqual(HotkeyKey(keyCode: kVK_F13, modifiers: []).keyName, "Key(105)")
-		expectEqual(HotkeyKey(keyCode: kVK_F20, modifiers: []).keyName, "Key(90)")
+	TestCase("F13 to F20 have display names like F1 to F12") {
+		let codes = [kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
+		for (index, code) in codes.enumerated() {
+			expectEqual(HotkeyKey(keyCode: code, modifiers: []).keyName, "F\(index + 13)")
+			expectEqual(HotkeyKey(keyCode: code, modifiers: .control).displayString, "Ctrl+F\(index + 13)")
+			expectEqual(HotkeyKey(keyCode: code, modifiers: []).string, "f\(index + 13)")
+		}
 	},
 	TestCase("a list of keys is joined with commas and an empty list shows None") {
 		let keys = [HotkeyKey(keyCode: kVK_ANSI_J, modifiers: .control), HotkeyKey(keyCode: kVK_Return, modifiers: .command)]
