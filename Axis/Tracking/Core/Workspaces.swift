@@ -342,55 +342,63 @@ nonisolated extension TrackingState {
 		return ColumnView.drawable(columns, keeping: drawableIDs(in: columns))
 	}
 
-	/// The drawable columns with the stored ratios, as the layout math takes them.
+	/// The drawable columns with the row ratios of their windows' shares, as the layout math takes them.
 	func layoutInput(_ workspace: WorkspaceID) -> LayoutInput? {
 		guard let stored = workspaces[workspace] else { return nil }
-		return LayoutInput(columns: layoutColumns(workspace), widthRatios: stored.widthRatios, rowRatios: stored.rowRatios)
+		let columns = layoutColumns(workspace)
+		var rowRatios: [Int: [CGFloat]] = [:]
+		for (index, column) in columns.enumerated() {
+			if let ratios = self.rowRatios(ofColumn: column) {
+				rowRatios[index] = ratios
+			}
+		}
+		return LayoutInput(columns: columns, widthRatios: stored.widthRatios, rowRatios: rowRatios)
+	}
+
+	/// The row height fractions of a column from its windows' shares, scaled to add up to 1. Nil
+	/// unless the column has several windows and every one has a usable share (a column with a
+	/// missing share starts from an even split).
+	func rowRatios(ofColumn column: [WindowID]) -> [CGFloat]? {
+		guard column.count > 1 else { return nil }
+		var shares: [CGFloat] = []
+		for id in column {
+			guard let share = records[id]?.rowShare, share.isFinite, share > 0 else { return nil }
+			shares.append(share)
+		}
+		let total = shares.reduce(0, +)
+		guard total.isFinite, total > 0 else { return nil }
+		return shares.map { $0 / total }
 	}
 
 	/// Runs `body` on the drawable view of `workspace` and writes the edited view back with the
 	/// non-drawable entries re-inserted next to their neighbours. `body` may also change the
 	/// workspace's ratios (indexed like the drawable view); its `columns` are overwritten.
+	/// A window that gained a neighbour in its column (one that was not in its column in the view
+	/// before) gives up its row share: a grown column starts from an even split, while a shrunk one
+	/// keeps its proportions.
 	@discardableResult
 	mutating func editLayoutColumns<R>(of workspace: WorkspaceID, _ body: (inout [[WindowID]], inout Workspace) -> R) -> R? {
 		guard var stored = workspaces[workspace] else { return nil }
 		let original = stored.columns
 		let drawable = drawableIDs(in: original)
 		var view = ColumnView.drawable(original, keeping: drawable)
-		let before = view
+		var columnBefore: [WindowID: Set<WindowID>] = [:]
+		for column in view {
+			let members = Set(column)
+			for id in column {
+				columnBefore[id] = members
+			}
+		}
 		let result = body(&view, &stored)
 		stored.columns = ColumnView.merge(original: original, edited: view, drawable: drawable)
 		workspaces[workspace] = stored
-		rekeyRowRatios(of: workspace, from: before)
-		return result
-	}
-
-	/// Moves the stored row ratios with their columns after the drawable view changed from
-	/// `before` to the current one. Row ratios are keyed by column index, so a column inserted or
-	/// removed further left would otherwise leave them on a neighbour. A column takes the ratios of
-	/// the `before` column that held its first window known there; a split-off column therefore
-	/// leaves them with the first of the resulting columns. Keys past the old end stay, as the
-	/// layout keeps them on purpose, unless a column now uses the key. Whether the counts still
-	/// match is left to the layout.
-	mutating func rekeyRowRatios(of workspace: WorkspaceID, from before: [[WindowID]]) {
-		guard let old = workspaces[workspace]?.rowRatios, !old.isEmpty else { return }
-		let after = layoutColumns(workspace)
-		guard after != before else { return }
-		var columnOf: [WindowID: Int] = [:]
-		for (index, column) in before.enumerated() {
-			for id in column {
-				columnOf[id] = index
+		for column in view {
+			let members = Set(column)
+			for id in column where !members.subtracting([id]).isSubset(of: columnBefore[id] ?? []) {
+				records[id]?.rowShare = nil
 			}
 		}
-		var rekeyed = old.filter { $0.key >= before.count }
-		var taken = Set<Int>()
-		for (index, column) in after.enumerated() {
-			guard let source = column.lazy.compactMap({ columnOf[$0] }).first, taken.insert(source).inserted,
-				let ratios = old[source]
-			else { continue }
-			rekeyed[index] = ratios
-		}
-		workspaces[workspace]?.rowRatios = rekeyed
+		return result
 	}
 }
 
@@ -398,7 +406,7 @@ nonisolated extension TrackingState {
 
 nonisolated extension TrackingState {
 	/// Takes `id` out of the columns it is in and returns its neighbours there. Nil when it was in
-	/// no columns. Ratios are left to the layout, which resets them when the counts change.
+	/// no columns. The window keeps its row share, so it comes back to it through its slot memory.
 	@discardableResult
 	mutating func removeFromColumns(_ id: WindowID) -> SlotMemory? {
 		var candidates: [WorkspaceID] = []
@@ -410,10 +418,8 @@ nonisolated extension TrackingState {
 			guard var stored = workspaces[workspaceID],
 				let memory = ColumnView.slotMemory(of: id, in: stored.columns, workspace: workspaceID)
 			else { continue }
-			let before = layoutColumns(workspaceID)
 			stored.columns = ColumnView.removing(id, from: stored.columns)
 			workspaces[workspaceID] = stored
-			rekeyRowRatios(of: workspaceID, from: before)
 			return memory
 		}
 		return nil
@@ -429,9 +435,7 @@ nonisolated extension TrackingState {
 		else { return false }
 		removeFromColumns(id)
 		guard let current = workspaces[workspace]?.columns else { return false }
-		let before = layoutColumns(workspace)
 		workspaces[workspace]?.columns = ColumnView.inserting(id, insertion, into: current)
-		rekeyRowRatios(of: workspace, from: before)
 		return true
 	}
 
@@ -483,7 +487,7 @@ nonisolated extension TrackingState {
 
 nonisolated extension TrackingState {
 	/// Moves a tiled window one step: left/right swap whole columns (and their ratios), up/down swap
-	/// it with its neighbour in the column (and their row ratios). At the edge of the row or column
+	/// it with its neighbour in the column (shares travel with the windows). At the edge of the row or column
 	/// it moves to the adjacent monitor's active workspace: to the right end when moving left, to
 	/// the left end otherwise.
 	@discardableResult
@@ -505,10 +509,6 @@ nonisolated extension TrackingState {
 				let other = direction == .up ? row - 1 : row + 1
 				guard columns[column].indices.contains(other) else { return .atEdge }
 				columns[column].swapAt(row, other)
-				if var ratios = stored.rowRatios[column], ratios.count == columns[column].count {
-					ratios.swapAt(row, other)
-					stored.rowRatios[column] = ratios
-				}
 			}
 			return .moved
 		} ?? .absent
@@ -552,10 +552,8 @@ nonisolated extension TrackingState {
 		if zen != nil {
 			zenExit(reason: .layoutReset)
 		}
-		editLayoutColumns(of: workspace) { columns, stored in
+		editLayoutColumns(of: workspace) { columns, _ in
 			columns = columns.joined().map { [$0] }
-			// Every column ends with one window, so no saved row split applies.
-			stored.rowRatios = [:]
 		}
 	}
 
@@ -767,24 +765,23 @@ nonisolated extension TrackingState {
 	mutating func resizeRowGap(in workspace: WorkspaceID, column columnIndex: Int, row rowIndex: Int, delta: CGFloat) -> Bool {
 		guard let host = workspaces[workspace]?.host, let visibleFrame = monitors[host]?.visibleFrame else { return false }
 		let config = self.config
-		return editLayoutColumns(of: workspace) { columns, stored -> Bool in
-			guard columns.indices.contains(columnIndex) else { return false }
-			let count = columns[columnIndex].count
-			guard count > 1, rowIndex >= 0, rowIndex < count - 1 else { return false }
-			var ratios = stored.rowRatios[columnIndex] ?? ColumnView.evenRatios(count)
-			if ratios.count != count {
-				ratios = ColumnView.evenRatios(count)
-			}
-			let available = visibleFrame.height - config.padding * 2 - config.gap * CGFloat(count - 1)
-			let deltaRatio = delta / available
-			let upper = ratios[rowIndex] + deltaRatio
-			let lower = ratios[rowIndex + 1] - deltaRatio
-			guard upper >= Self.minimumRatio && lower >= Self.minimumRatio else { return false }
-			ratios[rowIndex] = upper
-			ratios[rowIndex + 1] = lower
-			stored.rowRatios[columnIndex] = ratios
-			return true
-		} ?? false
+		let columns = layoutColumns(workspace)
+		guard columns.indices.contains(columnIndex) else { return false }
+		let column = columns[columnIndex]
+		let count = column.count
+		guard count > 1, rowIndex >= 0, rowIndex < count - 1 else { return false }
+		var ratios = rowRatios(ofColumn: column) ?? ColumnView.evenRatios(count)
+		let available = visibleFrame.height - config.padding * 2 - config.gap * CGFloat(count - 1)
+		let deltaRatio = delta / available
+		let upper = ratios[rowIndex] + deltaRatio
+		let lower = ratios[rowIndex + 1] - deltaRatio
+		guard upper >= Self.minimumRatio && lower >= Self.minimumRatio else { return false }
+		ratios[rowIndex] = upper
+		ratios[rowIndex + 1] = lower
+		for (id, ratio) in zip(column, ratios) {
+			records[id]?.rowShare = ratio
+		}
+		return true
 	}
 
 	/// Grows or shrinks the window's column by one step, taking the change evenly from both

@@ -16,7 +16,7 @@ private func richSnapshot() -> PersistenceSnapshot {
 	state.testSetColumns(row[0], [[10, 11], [12]])
 	state.testSetColumns(row[1], [[13]])
 	state.workspaces[row[0]]?.widthRatios = [0.3, 0.7]
-	state.workspaces[row[0]]?.rowRatios = [0: [0.4, 0.6], 1: [1.0]]
+	state.testSetRowRatios(row[0], [0: [0.4, 0.6]])
 	state.testAddWindow(14, placement: .floating, workspace: row[0])
 	state.records[14]?.floatingFrame = RelativeFrame(
 		monitor: testKey("Main"), offset: CGPoint(x: 10, y: 20), size: CGSize(width: 300, height: 200))
@@ -87,7 +87,6 @@ let persistenceFileTests: [TestCase] = [
 			object["windows"] = [["id": 10, "pid": 100]]
 			editWorkspace(&object) {
 				$0["widthRatios"] = nil
-				$0["rowRatios"] = nil
 			}
 		}
 		let decoded = try PersistenceSnapshot.decodeReporting(from: data)
@@ -96,7 +95,6 @@ let persistenceFileTests: [TestCase] = [
 		expectEqual(decoded.snapshot.memory, [])
 		expectEqual(decoded.snapshot.windows, [PersistedWindow(id: 10, pid: 100)])
 		expectEqual(decoded.snapshot.monitors[0].workspaces[0].widthRatios, nil)
-		expectEqual(decoded.snapshot.monitors[0].workspaces[0].rowRatios, [:])
 	},
 
 	TestCase("wrong typed optional fields take defaults and are noted") {
@@ -130,15 +128,13 @@ let persistenceFileTests: [TestCase] = [
 		let data = try editedJSON(snapshot) { object in
 			editWorkspace(&object) {
 				$0["widthRatios"] = "bad"
-				$0["rowRatios"] = ["a": 1]
 			}
 		}
 		let decoded = try PersistenceSnapshot.decodeReporting(from: data)
 		let workspace = decoded.snapshot.monitors[0].workspaces[0]
 		expectEqual(workspace.widthRatios, nil)
-		expectEqual(workspace.rowRatios, [:])
 		expectEqual(workspace.columns, snapshot.monitors[0].workspaces[0].columns)
-		expectEqual(decoded.dropped.count, 2)
+		expectEqual(decoded.dropped.count, 1)
 	},
 
 	TestCase("a monitor that cannot be read rejects the file") {
@@ -170,19 +166,30 @@ let persistenceFileTests: [TestCase] = [
 			snapshot.monitors[0].workspaces[0].widthRatios = bad
 			expectEqual(snapshot.sanitize().count, 1, "\(bad)")
 			expectEqual(snapshot.monitors[0].workspaces[0].widthRatios, nil)
-			expectEqual(snapshot.monitors[0].workspaces[0].rowRatios.count, 2)
 		}
 	},
 
-	TestCase("sanitize drops row ratios that are not positive numbers") {
-		var snapshot = richSnapshot()
-		let stale: [Int: [CGFloat]] = [0: [0.4, 0.6], 1: [0.5, 0.5], 2: [1.0], -1: [1.0]]
-		snapshot.monitors[0].workspaces[0].rowRatios = stale
-		expectEqual(snapshot.sanitize(), [], "keys and counts that do not fit the columns are left to the restore")
-		expectEqual(snapshot.monitors[0].workspaces[0].rowRatios, stale)
-		snapshot.monitors[0].workspaces[0].rowRatios = [0: [0.4, 0], 1: [.nan]]
-		expectEqual(snapshot.sanitize().count, 2)
-		expectEqual(snapshot.monitors[0].workspaces[0].rowRatios, [:])
+	TestCase("sanitize drops row shares that are not positive numbers") {
+		for bad in [0, -1, .nan, .infinity] as [CGFloat] {
+			var snapshot = richSnapshot()
+			let index = snapshot.windows.firstIndex { $0.id == 10 }!
+			snapshot.windows[index].rowShare = bad
+			expectEqual(snapshot.sanitize(), ["row share of window #10 is not a positive number"], "\(bad)")
+			expectEqual(snapshot.windows[index].rowShare, nil)
+			expectEqual(snapshot.windows.first { $0.id == 11 }?.rowShare, 0.6)
+		}
+	},
+
+	TestCase("an unreadable row share is dropped and noted") {
+		let snapshot = richSnapshot()
+		let data = try editedJSON(snapshot) { object in
+			var windows = object["windows"] as! [[String: Any]]
+			windows[0]["rowShare"] = "wide"
+			object["windows"] = windows
+		}
+		let decoded = try PersistenceSnapshot.decodeReporting(from: data)
+		expectEqual(decoded.snapshot.windows.first?.rowShare, nil)
+		expectEqual(decoded.dropped, ["rowShare of window #10 unreadable"])
 	},
 
 	TestCase("sanitize keeps the first of a window saved twice") {
@@ -452,5 +459,68 @@ let persistenceFileTests: [TestCase] = [
 
 		state.workspaces[row[1]]?.columns = []
 		expect(state.persistenceSnapshotForQuit() != nil, "a repaired state is offered for the quit save")
+	},
+
+	TestCase("a file in the old format gives the windows their row shares and stale entries are ignored") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 1, active: 0)
+		state.testSetColumns(row[0], [[10, 11], [12], [13, 14, 15]])
+		let snapshot = state.snapshot()
+		func oldFile(_ rowRatios: Any) throws -> Data {
+			try editedJSON(snapshot) { object in
+				editWorkspace(&object) { $0["rowRatios"] = rowRatios }
+			}
+		}
+
+		let good = try oldFile(["0": [0.4, 0.6], "2": [0.5, 0.3, 0.2]])
+		let decoded = try PersistenceSnapshot.decodeReporting(from: good)
+		expectEqual(decoded.dropped, [])
+		func shares(_ snapshot: PersistenceSnapshot) -> [CGFloat?] {
+			[10, 11, 12, 13, 14, 15].map { id in snapshot.windows.first { $0.id == id }?.rowShare }
+		}
+		expectEqual(shares(decoded.snapshot), [0.4, 0.6, nil, 0.5, 0.3, 0.2])
+		var sanitized = decoded.snapshot
+		expectEqual(sanitized.sanitize(), [])
+
+		// Wrong count, a one-window column, an index past the end, a negative index and bad numbers.
+		let stale = try oldFile(["0": [0.4, 0.3, 0.3], "1": [1.0], "7": [0.5, 0.5], "-1": [0.5, 0.5], "2": [0.5, 0, 0.5]])
+		let ignored = try PersistenceSnapshot.decodeReporting(from: stale)
+		expectEqual(ignored.dropped, [])
+		expectEqual(shares(ignored.snapshot), [nil, nil, nil, nil, nil, nil])
+
+		let unreadable = try PersistenceSnapshot.decodeReporting(from: oldFile(["a": 1]))
+		expectEqual(unreadable.dropped, [])
+		expectEqual(shares(unreadable.snapshot), [nil, nil, nil, nil, nil, nil])
+	},
+
+	TestCase("a row share in the window record wins over the old row ratios") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 1, active: 0)
+		state.testSetColumns(row[0], [[10, 11]])
+		state.testSetRowRatios(row[0], [0: [0.2, 0.8]])
+		let data = try editedJSON(state.snapshot()) { object in
+			editWorkspace(&object) { $0["rowRatios"] = ["0": [0.5, 0.5]] }
+		}
+		let decoded = try PersistenceSnapshot.decode(from: data)
+		expectEqual(decoded.windows.map(\.rowShare), [0.2, 0.8])
+	},
+
+	TestCase("the file has row shares on the windows that have one and no row ratios") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 1, active: 0)
+		state.testSetColumns(row[0], [[10, 11], [12]])
+		state.testSetRowRatios(row[0], [0: [0.4, 0.6]])
+		let snapshot = state.snapshot()
+		let object = try JSONSerialization.jsonObject(with: snapshot.encode()) as! [String: Any]
+		let workspaces = ((object["monitors"] as! [[String: Any]])[0]["workspaces"] as! [[String: Any]])
+		expect(workspaces.allSatisfy { $0["rowRatios"] == nil }, "no rowRatios key")
+		let windows = object["windows"] as! [[String: Any]]
+		for window in windows {
+			let id = window["id"] as! Int
+			expectEqual(window["rowShare"] != nil, id == 10 || id == 11, "rowShare on #\(id)")
+		}
+		let decoded = try PersistenceSnapshot.decodeReporting(from: snapshot.encode())
+		expectEqual(decoded.snapshot, snapshot)
+		expectEqual(decoded.dropped, [])
 	},
 ]

@@ -930,10 +930,11 @@ private let layoutStateTests: [TestCase] = [
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2]])
 		state.workspaces[home]!.widthRatios = [0.5, 0.3, 0.2]
-		state.workspaces[home]!.rowRatios = [0: [0.5, 0.5]]
+		state.records[1]?.rowShare = 0.5
+		state.records[2]?.rowShare = 0.5
 		_ = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 1), options: PlanOptions(), now: 1)
 		expectEqual(state.workspaces[home]?.widthRatios, nil)
-		expectEqual(state.workspaces[home]?.rowRatios, [:])
+		expectEqual(state.testRowRatios(home), [:])
 
 		state.workspaces[home]!.widthRatios = [0.6, 0.4]
 		let plan = state.plan(snapshot: showing([1: leftSlot, 2: rightSlot], at: 2), options: PlanOptions(), now: 2)

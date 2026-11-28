@@ -114,6 +114,24 @@ extension TrackingState {
 		workspaces[workspace]!.columns = columns
 	}
 
+	/// Gives the windows of drawable column `index` the shares in `ratios[index]`, for every entry.
+	/// Each entry needs as many ratios as the column has windows.
+	mutating func testSetRowRatios(_ workspace: WorkspaceID, _ ratios: [Int: [CGFloat]]) {
+		let columns = layoutColumns(workspace)
+		for (index, values) in ratios {
+			precondition(columns.indices.contains(index), "no drawable column \(index)")
+			precondition(columns[index].count == values.count, "column \(index) has \(columns[index].count) windows, not \(values.count)")
+			for (id, value) in zip(columns[index], values) {
+				records[id]?.rowShare = value
+			}
+		}
+	}
+
+	/// The row ratios the layout gets for a workspace, by drawable column index.
+	func testRowRatios(_ workspace: WorkspaceID) -> [Int: [CGFloat]] {
+		layoutInput(workspace)?.rowRatios ?? [:]
+	}
+
 	/// The stored columns of a workspace.
 	func testColumns(_ workspace: WorkspaceID) -> [[WindowID]] {
 		workspaces[workspace]?.columns ?? []

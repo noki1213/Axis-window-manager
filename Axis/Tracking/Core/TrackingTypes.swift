@@ -551,6 +551,8 @@ nonisolated struct RelativeFrame: Equatable, Sendable {
 nonisolated struct RelaunchSlot: Equatable, Sendable {
 	var pid: PID
 	var memory: SlotMemory?
+	/// The share of its column's height it had in the saved layout.
+	var rowShare: CGFloat?
 }
 
 /// Where a tiled window sat when it left the columns (minimized, fullscreen, hidden app, or
@@ -598,6 +600,9 @@ nonisolated struct WindowRecord: Equatable, Sendable {
 	var lastVisibleFrame: CGRect?
 	/// Its place in the columns while it is out of them.
 	var slotMemory: SlotMemory?
+	/// Its share of its column's height, set when the rows of its column are resized. A column uses
+	/// the shares only when every window laid out in it has one, scaled to add up to 1.
+	var rowShare: CGFloat?
 	/// Move a floating or unmanaged window to its floatingFrame once (after it was hidden, or
 	/// after a float toggle centred it).
 	var pendingFloatRestore: Bool
@@ -612,7 +617,7 @@ nonisolated struct WindowRecord: Equatable, Sendable {
 		hasCloseButton: Bool = true,
 		placement: Placement, workspace: WorkspaceID?, visibility: Visibility = .visible,
 		observed: Observed = Observed(), floatingFrame: RelativeFrame? = nil, lastVisibleFrame: CGRect? = nil,
-		slotMemory: SlotMemory? = nil, pendingFloatRestore: Bool = false, liveness: LivenessInfo = LivenessInfo(),
+		slotMemory: SlotMemory? = nil, rowShare: CGFloat? = nil, pendingFloatRestore: Bool = false, liveness: LivenessInfo = LivenessInfo(),
 		source: AdmissionSource = .discovered, admittedAt: Time = 0
 	) {
 		self.id = id
@@ -630,6 +635,7 @@ nonisolated struct WindowRecord: Equatable, Sendable {
 		self.floatingFrame = floatingFrame
 		self.lastVisibleFrame = lastVisibleFrame
 		self.slotMemory = slotMemory
+		self.rowShare = rowShare
 		self.pendingFloatRestore = pendingFloatRestore
 		self.liveness = liveness
 		self.source = source
@@ -663,18 +669,15 @@ nonisolated struct Workspace: Equatable, Sendable {
 	var columns: [[WindowID]]
 	/// Column width fractions, indexed like `layoutColumns` (the drawable view); nil = even.
 	var widthRatios: [CGFloat]?
-	/// Row height fractions per drawable column index.
-	var rowRatios: [Int: [CGFloat]]
 
 	init(id: WorkspaceID, host: MonitorKey, origin: MonitorKey? = nil, side: Side = .nonNegative,
-		columns: [[WindowID]] = [], widthRatios: [CGFloat]? = nil, rowRatios: [Int: [CGFloat]] = [:]) {
+		columns: [[WindowID]] = [], widthRatios: [CGFloat]? = nil) {
 		self.id = id
 		self.host = host
 		self.origin = origin ?? host
 		self.side = side
 		self.columns = columns
 		self.widthRatios = widthRatios
-		self.rowRatios = rowRatios
 	}
 }
 

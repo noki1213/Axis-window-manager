@@ -119,6 +119,7 @@ nonisolated extension TrackingState {
 		} else if windowClass == .tiled, let memory = relaunchTiled[facts.id].flatMap({ $0.pid == facts.pid ? $0.memory : nil }),
 			let host = workspaces[memory.workspace]?.host, monitors[host] != nil {
 			draft.workspace = memory.workspace
+			draft.rowShare = relaunchTiled[facts.id]?.rowShare
 			insertion = .slot(memory, fallbackMidX: frame.midX)
 			relaunchTiled[facts.id]?.memory = nil
 			via = "saved layout"
@@ -383,6 +384,7 @@ nonisolated extension TrackingState {
 		record.pendingFloatRestore = record.placement != .tiled && (old.floatingFrame != nil || old.pendingFloatRestore)
 		record.lastVisibleFrame = old.lastVisibleFrame ?? draft.lastVisibleFrame
 		record.slotMemory = nil
+		record.rowShare = old.rowShare
 		if let entry = retired.hiddenEntry, record.workspace != nil, !hiddenStack.contains(where: { $0.window == record.id }) {
 			let index = min(retired.hiddenIndex ?? hiddenStack.count, hiddenStack.count)
 			hiddenStack.insert(HiddenEntry(window: record.id, minimizeConfirmed: entry.minimizeConfirmed), at: index)
@@ -443,7 +445,7 @@ nonisolated extension TrackingState {
 			role: draft.role, subrole: draft.subrole, hasCloseButton: draft.hasCloseButton,
 			placement: draft.placement, workspace: draft.workspace, visibility: visibility,
 			observed: draft.observed, floatingFrame: draft.floatingFrame, lastVisibleFrame: draft.lastVisibleFrame,
-			slotMemory: draft.slotMemory, pendingFloatRestore: draft.pendingFloatRestore,
+			slotMemory: draft.slotMemory, rowShare: draft.rowShare, pendingFloatRestore: draft.pendingFloatRestore,
 			liveness: draft.liveness, source: draft.source, admittedAt: draft.admittedAt)
 	}
 

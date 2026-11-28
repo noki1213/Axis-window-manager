@@ -210,20 +210,17 @@ nonisolated struct PersistedWorkspace: Codable, Equatable, Sendable {
 	var side: Side
 	var columns: [[WindowID]]
 	var widthRatios: [CGFloat]?
-	var rowRatios: [Int: [CGFloat]]
 
 	init(
 		id: WorkspaceID,
 		side: Side,
 		columns: [[WindowID]],
-		widthRatios: [CGFloat]? = nil,
-		rowRatios: [Int: [CGFloat]] = [:]
+		widthRatios: [CGFloat]? = nil
 	) {
 		self.id = id
 		self.side = side
 		self.columns = columns
 		self.widthRatios = widthRatios
-		self.rowRatios = rowRatios
 	}
 
 	/// The columns decide the layout; sizing ratios that cannot be read fall back to equal sizes.
@@ -234,8 +231,6 @@ nonisolated struct PersistedWorkspace: Codable, Equatable, Sendable {
 		columns = try container.decode([[WindowID]].self, forKey: .columns)
 		widthRatios = container.lenient(
 			[CGFloat].self, forKey: .widthRatios, decoder: decoder, note: "width ratios of workspace \(id) unreadable")
-		rowRatios = container.lenient(
-			[Int: [CGFloat]].self, forKey: .rowRatios, decoder: decoder, note: "row ratios of workspace \(id) unreadable") ?? [:]
 	}
 }
 
@@ -275,6 +270,8 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 	var workspace: WorkspaceID?
 	var floatingFrame: RelativeFrame?
 	var observedFrame: CGRect?
+	/// Its share of its column's height, when its column's rows were resized.
+	var rowShare: CGFloat?
 
 	init(
 		id: WindowID,
@@ -284,7 +281,8 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 		isFloating: Bool = false,
 		workspace: WorkspaceID? = nil,
 		floatingFrame: RelativeFrame? = nil,
-		observedFrame: CGRect? = nil
+		observedFrame: CGRect? = nil,
+		rowShare: CGFloat? = nil
 	) {
 		self.id = id
 		self.pid = pid
@@ -294,6 +292,7 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 		self.workspace = workspace
 		self.floatingFrame = floatingFrame
 		self.observedFrame = observedFrame
+		self.rowShare = rowShare
 	}
 
 	/// Only the identity is required; a field that cannot be read takes its default.
@@ -311,12 +310,13 @@ nonisolated struct PersistedWindow: Codable, Equatable, Sendable {
 		workspace = field(WorkspaceID.self, .workspace)
 		floatingFrame = field(RelativeFrame.self, .floatingFrame)
 		observedFrame = field(CGRect.self, .observedFrame)
+		rowShare = field(CGFloat.self, .rowShare)
 	}
 
 	/// The same window in the same place: everything but the title and the observed frame.
 	func hasSamePlacement(as other: PersistedWindow) -> Bool {
 		id == other.id && pid == other.pid && bundleID == other.bundleID && isFloating == other.isFloating
-			&& workspace == other.workspace && floatingFrame == other.floatingFrame
+			&& workspace == other.workspace && floatingFrame == other.floatingFrame && rowShare == other.rowShare
 	}
 }
 
@@ -375,6 +375,47 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 		windows = KeyedDecodingContainer<CodingKeys>.drain(&list, decoder: decoder, label: "window record")
 		hiddenStack = container.lossyArray(HiddenEntry.self, forKey: .hiddenStack, decoder: decoder, label: "hidden entry")
 		memory = container.lossyArray(PersistedMemory.self, forKey: .memory, decoder: decoder, label: "remembered monitor")
+		applyLegacyRowRatios(from: decoder)
+	}
+
+	/// Files from before row shares were stored per window keep the row ratios of each workspace
+	/// by column index. Each entry that still fits its column (same window count, several windows,
+	/// positive numbers) becomes the shares of that column's windows. The other entries are stale
+	/// leftovers of a running layout and are skipped without a note.
+	private mutating func applyLegacyRowRatios(from decoder: Decoder) {
+		struct LegacyWorkspace: Decodable {
+			var columns: [[WindowID]]
+			var rowRatios: [Int: [CGFloat]]?
+			enum CodingKeys: String, CodingKey { case columns, rowRatios }
+			init(from decoder: Decoder) throws {
+				let container = try decoder.container(keyedBy: CodingKeys.self)
+				columns = try container.decode([[WindowID]].self, forKey: .columns)
+				rowRatios = try? container.decodeIfPresent([Int: [CGFloat]].self, forKey: .rowRatios)
+			}
+		}
+		struct LegacyMonitor: Decodable {
+			var workspaces: [LegacyWorkspace]
+		}
+		struct LegacyFile: Decodable {
+			var monitors: [LegacyMonitor]
+		}
+		guard let legacy = (try? LegacyFile(from: decoder))?.monitors else { return }
+		var indexOf: [WindowID: Int] = [:]
+		for (index, window) in windows.enumerated() where indexOf[window.id] == nil {
+			indexOf[window.id] = index
+		}
+		for workspace in legacy.flatMap({ $0.workspaces }) {
+			for (column, ratios) in workspace.rowRatios ?? [:] {
+				guard workspace.columns.indices.contains(column), ratios.count == workspace.columns[column].count,
+					ratios.count > 1, ratios.allSatisfy({ $0.isFinite && $0 > 0 })
+				else { continue }
+				for (id, ratio) in zip(workspace.columns[column], ratios) {
+					if let index = indexOf[id], windows[index].rowShare == nil {
+						windows[index].rowShare = ratio
+					}
+				}
+			}
+		}
 	}
 
 	/// Serializes the snapshot to JSON data.
@@ -400,8 +441,6 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 
 	/// Removes what a restore cannot use but that does not make the rest unreliable; returns one
 	/// note per removal. Structure (monitors, workspaces, columns) is left to `validationProblem`.
-	/// Ratios whose counts no longer fit the columns are not touched: a running state saves them
-	/// that way between layouts, and both the restore and the layout skip them.
 	mutating func sanitize() -> [String] {
 		var notes: [String] = []
 		func usable(_ ratios: [CGFloat]) -> Bool {
@@ -414,10 +453,12 @@ nonisolated struct PersistenceSnapshot: Codable, Equatable, Sendable {
 					monitors[m].workspaces[w].widthRatios = nil
 					notes.append("width ratios of workspace \(id) are not positive numbers")
 				}
-				for (column, ratios) in monitors[m].workspaces[w].rowRatios.sorted(by: { $0.key < $1.key }) where !usable(ratios) {
-					monitors[m].workspaces[w].rowRatios[column] = nil
-					notes.append("row ratios of column \(column) of workspace \(id) are not positive numbers")
-				}
+			}
+		}
+		for w in windows.indices {
+			if let share = windows[w].rowShare, !(share.isFinite && share > 0) {
+				windows[w].rowShare = nil
+				notes.append("row share of window #\(windows[w].id) is not a positive number")
 			}
 		}
 
@@ -575,8 +616,7 @@ nonisolated extension TrackingState {
 					id: ws.id,
 					side: ws.side,
 					columns: ws.columns,
-					widthRatios: ws.widthRatios,
-					rowRatios: ws.rowRatios
+					widthRatios: ws.widthRatios
 				))
 			}
 			persistedMonitors.append(PersistedMonitor(
@@ -602,7 +642,8 @@ nonisolated extension TrackingState {
 				isFloating: record.placement == .floating,
 				workspace: record.workspace,
 				floatingFrame: record.floatingFrame,
-				observedFrame: record.observed.frame
+				observedFrame: record.observed.frame,
+				rowShare: record.rowShare
 			))
 		}
 
@@ -818,9 +859,8 @@ nonisolated extension TrackingState {
 		for m in snapshot.monitors where connected.contains(m.key) {
 			for persistedWS in m.workspaces {
 				var restoredColumns: [[WindowID]] = []
-				var survivingColumnIndices: [Int] = []
 
-				for (colIdx, col) in persistedWS.columns.enumerated() {
+				for col in persistedWS.columns {
 					var newCol: [WindowID] = []
 					for oldID in col {
 						guard matchedPersistedIDs.contains(oldID), let saved = persistedByID[oldID],
@@ -833,14 +873,6 @@ nonisolated extension TrackingState {
 					}
 					if !newCol.isEmpty {
 						restoredColumns.append(newCol)
-						survivingColumnIndices.append(colIdx)
-					}
-				}
-
-				var restoredRowRatios = [Int: [CGFloat]]()
-				for (newIdx, oldIdx) in survivingColumnIndices.enumerated() {
-					if let ratios = persistedWS.rowRatios[oldIdx], ratios.count == restoredColumns[newIdx].count {
-						restoredRowRatios[newIdx] = ratios
 					}
 				}
 
@@ -854,8 +886,7 @@ nonisolated extension TrackingState {
 					origin: m.key,
 					side: persistedWS.side,
 					columns: restoredColumns,
-					widthRatios: restoredWidthRatios,
-					rowRatios: restoredRowRatios
+					widthRatios: restoredWidthRatios
 				)
 			}
 
@@ -891,6 +922,7 @@ nonisolated extension TrackingState {
 					minSize: facts.minSize
 				),
 				floatingFrame: persisted.floatingFrame,
+				rowShare: persisted.rowShare,
 				pendingFloatRestore: persisted.isFloating,
 				source: .restored,
 				admittedAt: now
@@ -958,7 +990,7 @@ nonisolated extension TrackingState {
 				let memory = savedColumns[savedWorkspace].flatMap {
 					ColumnView.slotMemory(of: saved.id, in: $0, workspace: savedWorkspace)
 				}
-				relaunchTiled[saved.id] = RelaunchSlot(pid: saved.pid, memory: memory)
+				relaunchTiled[saved.id] = RelaunchSlot(pid: saved.pid, memory: memory, rowShare: saved.rowShare)
 			}
 		}
 
@@ -1009,7 +1041,7 @@ nonisolated extension TrackingState {
 				workspaces[id] = nil
 				workspaces[fresh] = Workspace(
 					id: fresh, host: old.host, origin: old.origin, side: old.side,
-					columns: old.columns, widthRatios: old.widthRatios, rowRatios: old.rowRatios
+					columns: old.columns, widthRatios: old.widthRatios
 				)
 				renamed[id] = fresh
 			}

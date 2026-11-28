@@ -22,7 +22,7 @@ let persistenceTests: [TestCase] = [
 		let negWs = mainRow[0]
 		state.testSetColumns(activeWs, [[10, 11], [12]])
 		state.workspaces[activeWs]?.widthRatios = [0.3, 0.7]
-		state.workspaces[activeWs]?.rowRatios = [0: [0.4, 0.6], 1: [1.0]]
+		state.testSetRowRatios(activeWs, [0: [0.4, 0.6]])
 
 		let floatingFrame = RelativeFrame(
 			monitor: mainKey,
@@ -68,7 +68,7 @@ let persistenceTests: [TestCase] = [
 		state.testAddWindow(12, workspace: activeWs, pid: 102, title: "W12")
 		state.testSetColumns(activeWs, [[10, 11], [12]])
 		state.workspaces[activeWs]?.widthRatios = [0.4, 0.6]
-		state.workspaces[activeWs]?.rowRatios = [0: [0.3, 0.7], 1: [1.0]]
+		state.testSetRowRatios(activeWs, [0: [0.3, 0.7]])
 
 		let relFrame = RelativeFrame(
 			monitor: mainKey,
@@ -111,7 +111,7 @@ let persistenceTests: [TestCase] = [
 		let restoredActiveWs = newState.testActive("Main")
 		expectEqual(newState.testColumns(restoredActiveWs), [[10, 11], [12]])
 		expectRatios(newState.workspaces[restoredActiveWs]?.widthRatios, [0.4, 0.6])
-		expectRatios(newState.workspaces[restoredActiveWs]?.rowRatios[0], [0.3, 0.7])
+		expectRatios(newState.testRowRatios(restoredActiveWs)[0], [0.3, 0.7])
 
 		let restoredNegWs = newState.workspace(number: -1, on: mainKey)!
 		expectEqual(newState.testColumns(restoredNegWs), [[14]])
@@ -1082,5 +1082,72 @@ let persistenceTests: [TestCase] = [
 		expectEqual(relaunched.hiddenStack, [])
 		expectEqual(relaunched.testColumns(home), [[30], [20]])
 		expectInvariants(relaunched)
+	},
+
+	TestCase("row shares are restored for a same-id match and for a bundle and title match") {
+		var state = testState()
+		let home = state.testActive()
+		state.testAddWindow(10, workspace: home, pid: 100, title: "Notes.txt")
+		state.testAddWindow(11, workspace: home, pid: 100, title: "Todo.txt")
+		state.records[10]?.bundleID = "com.a"
+		state.records[11]?.bundleID = "com.a"
+		state.testSetColumns(home, [[10, 11]])
+		state.testSetRowRatios(home, [0: [0.25, 0.75]])
+		let snapshot = state.snapshot()
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A")]
+
+		var same = testState()
+		same.applyPersistence(snapshot, windows: [
+			WindowFacts(id: 10, pid: 100, title: "Notes.txt"), WindowFacts(id: 11, pid: 100, title: "Todo.txt"),
+		], apps: apps, now: 10)
+		expectEqual(same.records[10]?.rowShare, 0.25)
+		expectEqual(same.records[11]?.rowShare, 0.75)
+		expectRatios(same.testRowRatios(same.testActive())[0], [0.25, 0.75])
+
+		var changed = testState()
+		changed.applyPersistence(snapshot, windows: [
+			WindowFacts(id: 910, pid: 250, title: "Notes.txt"), WindowFacts(id: 911, pid: 250, title: "Todo.txt"),
+		], apps: [AppFacts(pid: 250, bundleID: "com.a", name: "A")], now: 10)
+		expectEqual(changed.testColumns(changed.testActive()), [[910, 911]])
+		expectEqual(changed.records[910]?.rowShare, 0.25)
+		expectEqual(changed.records[911]?.rowShare, 0.75)
+		expectInvariants(changed)
+	},
+
+	TestCase("a late window gets its saved row share") {
+		var state = testState()
+		let row = state.testSetRow(nonNegatives: 2, active: 0)
+		state.testAddWindow(1, workspace: row[0], pid: 100)
+		state.testSetColumns(row[0], [[1]])
+		for id in [10, 20] as [WindowID] {
+			state.testAddWindow(id, workspace: row[1], pid: id == 20 ? 200 : 100)
+		}
+		state.testSetColumns(row[1], [[10, 20]])
+		state.testSetRowRatios(row[1], [0: [0.4, 0.6]])
+		let snapshot = state.snapshot()
+
+		var relaunched = testState()
+		let scans: [PID: ScanResult] = [
+			100: .complete([1, 10].map { WindowFacts(id: $0, pid: 100, title: "W\($0)") }),
+			200: .timedOut,
+		]
+		let apps = [AppFacts(pid: 100, bundleID: "com.a", name: "A"), AppFacts(pid: 200, bundleID: "com.b", name: "B")]
+		relaunched.applyPersistence(snapshot, scans: scans, apps: apps, now: 10)
+		expectEqual(relaunched.records[10]?.rowShare, 0.4)
+		let late = WindowFacts(id: 20, pid: 200, title: "W20", frame: CGRect(x: 1500, y: 0, width: 800, height: 600))
+		relaunched.admit(late, app: apps[1], source: .discovered, now: 20)
+		expectEqual(relaunched.testColumns(row[1]), [[10, 20]])
+		expectEqual(relaunched.records[20]?.rowShare, 0.6)
+		expectRatios(relaunched.testRowRatios(row[1])[0], [0.4, 0.6])
+		expectInvariants(relaunched)
+	},
+
+	TestCase("a row resize is offered as a layout change") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[10, 11]])
+		_ = state.persistenceTakeSnapshot()
+		expect(state.resizeRowGap(in: home, column: 0, row: 0, delta: 50))
+		expect(state.persistenceTakeSnapshot() != nil, "a row resize is offered")
 	}
 ]

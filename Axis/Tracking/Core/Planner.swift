@@ -315,7 +315,6 @@ nonisolated extension TrackingState {
 				reservation: reservation)
 			if unreachable.isEmpty {
 				workspaces[monitor.active]?.widthRatios = result.widthRatios
-				workspaces[monitor.active]?.rowRatios = result.rowRatios
 			}
 			slots.merge(result.frames) { current, _ in current }
 			if reservation != nil {

@@ -275,11 +275,11 @@ private let columnOperationTests: [TestCase] = [
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3], [4]])
 		state.workspaces[home]!.widthRatios = [0.2, 0.5, 0.3]
-		state.workspaces[home]!.rowRatios = [1: [0.4, 0.6]]
+		state.testSetRowRatios(home, [1: [0.4, 0.6]])
 		expectEqual(state.moveWindow(3, .left), .moved)
 		expectEqual(state.testColumns(home), [[2, 3], [1], [4]])
 		expectEqual(state.workspaces[home]?.widthRatios, [0.5, 0.2, 0.3])
-		expectEqual(state.workspaces[home]?.rowRatios, [0: [0.4, 0.6]])
+		expectEqual(state.testRowRatios(home), [0: [0.4, 0.6]])
 		expectEqual(state.moveWindow(1, .right), .moved)
 		expectEqual(state.testColumns(home), [[2, 3], [4], [1]])
 		expectEqual(state.workspaces[home]?.widthRatios, [0.5, 0.3, 0.2])
@@ -291,20 +291,20 @@ private let columnOperationTests: [TestCase] = [
 		expectInvariants(state)
 	},
 
-	TestCase("moving a window up or down swaps it in its column with its row ratio") {
+	TestCase("moving a window up or down swaps it in its column and the row ratios follow the windows") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1, 2, 3], [4]])
-		state.workspaces[home]!.rowRatios = [0: [0.2, 0.3, 0.5]]
+		state.testSetRowRatios(home, [0: [0.2, 0.3, 0.5]])
 		expectEqual(state.moveWindow(3, .up), .moved)
 		expectEqual(state.testColumns(home), [[1, 3, 2], [4]])
-		expectEqual(state.workspaces[home]?.rowRatios[0], [0.2, 0.5, 0.3])
+		expectRatios(state.testRowRatios(home)[0], [0.2, 0.5, 0.3])
 		expectEqual(state.moveWindow(1, .down), .moved)
 		expectEqual(state.testColumns(home), [[3, 1, 2], [4]])
-		state.workspaces[home]!.rowRatios = [0: [0.5, 0.5]]
+		expectRatios(state.testRowRatios(home)[0], [0.5, 0.2, 0.3])
 		state.moveWindow(1, .down)
 		expectEqual(state.testColumns(home), [[3, 2, 1], [4]])
-		expectEqual(state.workspaces[home]?.rowRatios[0], [0.5, 0.5], "stale row ratios are left alone")
+		expectRatios(state.testRowRatios(home)[0], [0.5, 0.3, 0.2])
 		expectEqual(state.moveWindow(1, .down), .none, "bottom edge without a monitor below")
 		expectEqual(state.moveWindow(99, .left), .none)
 		expectInvariants(state)
@@ -407,15 +407,15 @@ private let columnOperationTests: [TestCase] = [
 			let home = state.testActive()
 			state.testSetColumns(home, layout.columns)
 			state.workspaces[home]!.widthRatios = layout.widthRatios
-			state.workspaces[home]!.rowRatios = layout.rowRatios
-			var reference = ReferenceTiling(columns: layout.columns, widthRatios: layout.widthRatios, rowRatios: layout.rowRatios)
+			state.setShares(layout.shares)
+			var reference = ReferenceTiling(columns: layout.columns, widthRatios: layout.widthRatios, shares: layout.shares)
 			let op = randomOperation(&random, columns: layout.columns)
 			apply(op, to: &state, workspace: home)
 			reference.apply(op, visibleFrame: state.monitors[main]!.visibleFrame, config: state.config)
 			let context = "round \(round): \(op) on \(layout.columns)"
 			expectEqual(state.testColumns(home), reference.columns, context)
 			expectEqual(state.workspaces[home]?.widthRatios, reference.widthRatios, context)
-			expectEqual(state.workspaces[home]?.rowRatios, reference.rowRatios, context)
+			expectShares(state, reference.shares, context)
 			expectInvariants(state, context)
 		}
 	},
@@ -513,16 +513,16 @@ private let drawableViewTests: [TestCase] = [
 			let home = state.testActive()
 			state.testSetColumns(home, columns, visibility: visibility, ghosts: ghosts)
 			state.workspaces[home]!.widthRatios = layout.widthRatios
-			state.workspaces[home]!.rowRatios = layout.rowRatios
+			state.setShares(layout.shares)
 			expectEqual(state.layoutColumns(home), layout.columns)
-			var reference = ReferenceTiling(columns: layout.columns, widthRatios: layout.widthRatios, rowRatios: layout.rowRatios)
+			var reference = ReferenceTiling(columns: layout.columns, widthRatios: layout.widthRatios, shares: layout.shares)
 			let op = randomOperation(&random, columns: layout.columns)
 			apply(op, to: &state, workspace: home)
 			reference.apply(op, visibleFrame: state.monitors[main]!.visibleFrame, config: state.config)
 			let context = "round \(round): \(op) on \(columns)"
 			expectEqual(state.layoutColumns(home), reference.columns, context)
 			expectEqual(state.workspaces[home]?.widthRatios, reference.widthRatios, context)
-			expectEqual(state.workspaces[home]?.rowRatios, reference.rowRatios, context)
+			expectShares(state, reference.shares, context)
 			let after = state.testColumns(home).joined()
 			for id in hidden {
 				expectEqual(after.filter { $0 == id }.count, 1, "\(context): #\(id) kept once")
@@ -864,7 +864,7 @@ private let ratioTests: [TestCase] = [
 		state.testSetColumns(home, [[1], [2, 3]])
 		// 875 high: 875 - 2 * 12 padding - 12 gap = 839 pt to share.
 		expect(state.resizeRowGap(in: home, column: 1, row: 0, delta: 83.9))
-		expectRatios(state.workspaces[home]?.rowRatios[1], [0.6, 0.4])
+		expectRatios(state.testRowRatios(home)[1], [0.6, 0.4])
 		expect(!state.resizeRowGap(in: home, column: 0, row: 0, delta: 10), "a single row has no boundary")
 		expect(!state.resizeRowGap(in: home, column: 1, row: 0, delta: 420))
 	},
@@ -1219,7 +1219,8 @@ private func apply(_ operation: ColumnOperation, to state: inout TrackingState, 
 private struct ReferenceTiling {
 	var columns: [[WindowID]]
 	var widthRatios: [CGFloat]?
-	var rowRatios: [Int: [CGFloat]]
+	/// Row share of each window that has one.
+	var shares: [WindowID: CGFloat]
 
 	private func position(_ id: WindowID) -> (column: Int, row: Int)? {
 		for (column, ids) in columns.enumerated() {
@@ -1238,14 +1239,13 @@ private struct ReferenceTiling {
 		case .step(let id, let direction):
 			let before = columns
 			stepMoveWindow(id, direction)
-			rekey(before: before)
+			dropSharesOfGrownColumns(before: before)
 		case .reserve(let kind, let index):
 			let before = columns
 			insertReservedWindow(ColumnOperation.reservedID, columnIndex: index, kind: kind)
-			rekey(before: before)
+			dropSharesOfGrownColumns(before: before)
 		case .reset:
 			columns = columns.flatMap { $0 }.map { [$0] }
-			rowRatios = [:]
 		case .columnGap(let index, let delta): resizeColumnGap(at: index, delta: delta, visibleFrame: visibleFrame, config: config)
 		case .rowGap(let column, let row, let delta):
 			resizeRowGap(columnIndex: column, rowIndex: row, delta: delta, visibleFrame: visibleFrame, config: config)
@@ -1253,22 +1253,17 @@ private struct ReferenceTiling {
 		}
 	}
 
-	/// Row ratios follow their column after columns were inserted or removed: a column takes the
-	/// ratios of the old column holding its first window that was already there (first claimant
-	/// wins); keys past the old end stay unless a column reuses them; other old keys are dropped.
-	private mutating func rekey(before: [[WindowID]]) {
-		guard before != columns else { return }
-		var kept = rowRatios.filter { $0.key >= before.count }
-		var claimed = Set<Int>()
-		for (newIndex, column) in columns.enumerated() {
-			let known = column.first { id in before.contains { $0.contains(id) } }
-			guard let known, let old = before.firstIndex(where: { $0.contains(known) }), !claimed.contains(old) else { continue }
-			claimed.insert(old)
-			if let ratios = rowRatios[old] {
-				kept[newIndex] = ratios
+	/// A window keeps its share only while every other window now in its column was in its column
+	/// before; one that gained a neighbour starts from an even split.
+	private mutating func dropSharesOfGrownColumns(before: [[WindowID]]) {
+		for column in columns {
+			for id in column {
+				let formerMates = before.first { $0.contains(id) } ?? []
+				if column.contains(where: { $0 != id && !formerMates.contains($0) }) {
+					shares[id] = nil
+				}
 			}
 		}
-		rowRatios = kept
 	}
 
 	private mutating func moveWindow(_ id: WindowID, _ direction: MoveDirection) {
@@ -1281,9 +1276,6 @@ private struct ReferenceTiling {
 					ratios.swapAt(columnIndex, columnIndex - 1)
 					widthRatios = ratios
 				}
-				let temp = rowRatios[columnIndex]
-				rowRatios[columnIndex] = rowRatios[columnIndex - 1]
-				rowRatios[columnIndex - 1] = temp
 			}
 		case .right:
 			if columnIndex < columns.count - 1 {
@@ -1292,25 +1284,14 @@ private struct ReferenceTiling {
 					ratios.swapAt(columnIndex, columnIndex + 1)
 					widthRatios = ratios
 				}
-				let temp = rowRatios[columnIndex]
-				rowRatios[columnIndex] = rowRatios[columnIndex + 1]
-				rowRatios[columnIndex + 1] = temp
 			}
 		case .up:
 			if rowIndex > 0 {
 				columns[columnIndex].swapAt(rowIndex, rowIndex - 1)
-				if var ratios = rowRatios[columnIndex], ratios.count == columns[columnIndex].count {
-					ratios.swapAt(rowIndex, rowIndex - 1)
-					rowRatios[columnIndex] = ratios
-				}
 			}
 		case .down:
 			if rowIndex < columns[columnIndex].count - 1 {
 				columns[columnIndex].swapAt(rowIndex, rowIndex + 1)
-				if var ratios = rowRatios[columnIndex], ratios.count == columns[columnIndex].count {
-					ratios.swapAt(rowIndex, rowIndex + 1)
-					rowRatios[columnIndex] = ratios
-				}
 			}
 		}
 	}
@@ -1381,9 +1362,10 @@ private struct ReferenceTiling {
 		let column = columns[columnIndex]
 		guard column.count > 1 else { return }
 		guard rowIndex >= 0 && rowIndex < column.count - 1 else { return }
-		var ratios = rowRatios[columnIndex] ?? even(column.count)
-		if ratios.count != column.count {
-			ratios = even(column.count)
+		var ratios = even(column.count)
+		if column.allSatisfy({ shares[$0] != nil }) {
+			let total = column.reduce(0) { $0 + shares[$1]! }
+			ratios = column.map { shares[$0]! / total }
 		}
 		let totalRowGaps = config.gap * CGFloat(column.count - 1)
 		let availableHeight = visibleFrame.height - (config.padding * 2) - totalRowGaps
@@ -1394,7 +1376,9 @@ private struct ReferenceTiling {
 		guard newUpperRatio >= minRatio && newLowerRatio >= minRatio else { return }
 		ratios[rowIndex] = newUpperRatio
 		ratios[rowIndex + 1] = newLowerRatio
-		rowRatios[columnIndex] = ratios
+		for (id, ratio) in zip(column, ratios) {
+			shares[id] = ratio
+		}
 	}
 
 	private mutating func resizeCurrentWindow(_ id: WindowID, increase: Bool) {
@@ -1437,8 +1421,31 @@ private struct ReferenceTiling {
 
 // MARK: - Random layouts
 
-/// 1-5 columns of 1-3 windows (ids from 1) with valid, stale or missing ratios.
-private func randomLayout(_ random: inout SeededGenerator) -> (columns: [[WindowID]], widthRatios: [CGFloat]?, rowRatios: [Int: [CGFloat]]) {
+private extension TrackingState {
+	/// Sets the row share of each listed window.
+	mutating func setShares(_ shares: [WindowID: CGFloat]) {
+		for (id, share) in shares {
+			records[id]?.rowShare = share
+		}
+	}
+}
+
+/// Fails when a window's share differs from the model's by more than 0.0001 (or one has none).
+private func expectShares(_ state: TrackingState, _ shares: [WindowID: CGFloat], _ context: String,
+	file: StaticString = #filePath, line: UInt = #line) {
+	for (id, record) in state.records {
+		switch (record.rowShare, shares[id]) {
+		case (nil, nil): break
+		case (let actual?, let expected?) where abs(actual - expected) <= 0.0001: break
+		default: fail("share of #\(id) is \(String(describing: record.rowShare)), expected \(String(describing: shares[id])): \(context)", file: file, line: line)
+		}
+	}
+}
+
+
+/// 1-5 columns of 1-3 windows (ids from 1) with valid, stale or missing width ratios, and row
+/// shares on all, some or none of the windows of each column.
+private func randomLayout(_ random: inout SeededGenerator) -> (columns: [[WindowID]], widthRatios: [CGFloat]?, shares: [WindowID: CGFloat]) {
 	var next: WindowID = 1
 	var columns: [[WindowID]] = []
 	for _ in 0..<Int.random(in: 1...5, using: &random) {
@@ -1460,11 +1467,22 @@ private func randomLayout(_ random: inout SeededGenerator) -> (columns: [[Window
 	case 3..<8: widthRatios = ratios(columns.count)
 	default: widthRatios = ratios(columns.count + Int.random(in: 1...2, using: &random))
 	}
-	var rowRatios: [Int: [CGFloat]] = [:]
-	for (index, column) in columns.enumerated() where Bool.random(using: &random) {
-		rowRatios[index] = ratios(Bool.random(using: &random) ? column.count : column.count + 1)
+	var shares: [WindowID: CGFloat] = [:]
+	for column in columns {
+		switch Int.random(in: 0..<3, using: &random) {
+		case 0:
+			break
+		case 1:
+			for id in column {
+				shares[id] = CGFloat.random(in: 0.5...3, using: &random)
+			}
+		default:
+			for id in column where Bool.random(using: &random) {
+				shares[id] = CGFloat.random(in: 0.5...3, using: &random)
+			}
+		}
 	}
-	return (columns, widthRatios, rowRatios)
+	return (columns, widthRatios, shares)
 }
 
 private func randomOperation(_ random: inout SeededGenerator, columns: [[WindowID]]) -> ColumnOperation {
@@ -1499,75 +1517,80 @@ private let rowRatioFollowTests: [TestCase] = [
 		let first = byCentre.testActive()
 		byCentre.testSetColumns(first, [[1], [2, 3]])
 		byCentre.testAddWindow(9, workspace: first)
-		byCentre.workspaces[first]!.rowRatios = [1: [0.7, 0.3]]
+		byCentre.testSetRowRatios(first, [1: [0.7, 0.3]])
 		byCentre.insertByMidX(9, midX: 1, into: first)
 		expectEqual(byCentre.layoutColumns(first), [[9], [1], [2, 3]])
-		expectEqual(byCentre.workspaces[first]?.rowRatios, [2: [0.7, 0.3]])
+		expectRatios(byCentre.testRowRatios(first)[2], [0.7, 0.3])
+		expectEqual(byCentre.testRowRatios(first).count, 1)
 
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
 		state.testAddWindow(9, workspace: home)
 		state.testAddWindow(8, workspace: home)
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		state.insertReserved(9, kind: .newColumnLeft, columnIndex: 0, into: home)
 		expectEqual(state.layoutColumns(home), [[9], [1], [2, 3]])
-		expectEqual(state.workspaces[home]?.rowRatios, [2: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[2], [0.7, 0.3])
 		state.insertReserved(8, kind: .newColumnRight, columnIndex: 2, into: home)
-		expectEqual(state.workspaces[home]?.rowRatios, [2: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[2], [0.7, 0.3])
+		expectEqual(state.testRowRatios(home).count, 1)
 	},
 
 	TestCase("a column removed left of a two-row column leaves its row ratios on it") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		state.removeFromColumns(1)
 		expectEqual(state.layoutColumns(home), [[2, 3]])
-		expectEqual(state.workspaces[home]?.rowRatios, [0: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[0], [0.7, 0.3])
 
 		var retiring = testState()
 		let other = retiring.testActive()
 		retiring.testSetColumns(other, [[1], [2, 3]])
-		retiring.workspaces[other]!.rowRatios = [1: [0.7, 0.3]]
+		retiring.testSetRowRatios(other, [1: [0.7, 0.3]])
 		retiring.retire(1, reason: .destroyed, now: 1)
-		expectEqual(retiring.workspaces[other]?.rowRatios, [0: [0.7, 0.3]])
+		expectRatios(retiring.testRowRatios(other)[0], [0.7, 0.3])
 	},
 
 	TestCase("expel and consume left of a column carry its row ratios") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1, 2], [3, 4]])
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		expect(state.stepMove(2, .right))
 		expectEqual(state.layoutColumns(home), [[1], [2], [3, 4]])
-		expectEqual(state.workspaces[home]?.rowRatios, [2: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[2], [0.7, 0.3])
 		expect(state.stepMove(1, .right))
 		expectEqual(state.layoutColumns(home), [[2, 1], [3, 4]])
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[1], [0.7, 0.3])
 	},
 
 	TestCase("moving a window left or right carries its column's row ratios") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		state.moveWindow(2, .left)
 		expectEqual(state.layoutColumns(home), [[2, 3], [1]])
-		expectEqual(state.workspaces[home]?.rowRatios, [0: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[0], [0.7, 0.3])
 		state.moveWindow(2, .right)
 		expectEqual(state.layoutColumns(home), [[1], [2, 3]])
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.7, 0.3]])
+		expectRatios(state.testRowRatios(home)[1], [0.7, 0.3])
 	},
 
-	TestCase("moving a window up or down swaps its rows and ratios in place") {
+	TestCase("moving a window up or down swaps its rows and the ratios follow the windows") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		state.moveWindow(2, .down)
 		expectEqual(state.layoutColumns(home), [[1], [3, 2]])
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.3, 0.7]])
+		expectRatios(state.testRowRatios(home)[1], [0.3, 0.7])
+		state.moveWindow(2, .up)
+		expectEqual(state.layoutColumns(home), [[1], [2, 3]])
+		expectRatios(state.testRowRatios(home)[1], [0.7, 0.3])
 	},
 
 	TestCase("columns with equal row counts never exchange row ratios through an insert") {
@@ -1576,35 +1599,160 @@ private let rowRatioFollowTests: [TestCase] = [
 		state.testSetColumns(home, [[1, 2], [3, 4]])
 		state.testAddWindow(9, workspace: home)
 		state.testAddWindow(8, workspace: home)
-		state.workspaces[home]!.rowRatios = [0: [0.6, 0.4], 1: [0.8, 0.2]]
+		state.testSetRowRatios(home, [0: [0.6, 0.4], 1: [0.8, 0.2]])
 		state.insertReserved(9, kind: .newColumnLeft, columnIndex: 0, into: home)
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.6, 0.4], 2: [0.8, 0.2]])
+		expectRatios(state.testRowRatios(home)[1], [0.6, 0.4])
+		expectRatios(state.testRowRatios(home)[2], [0.8, 0.2])
 		state.insertReserved(8, kind: .newColumnLeft, columnIndex: 2, into: home)
 		expectEqual(state.layoutColumns(home), [[9], [1, 2], [8], [3, 4]])
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.6, 0.4], 3: [0.8, 0.2]])
+		expectRatios(state.testRowRatios(home)[1], [0.6, 0.4])
+		expectRatios(state.testRowRatios(home)[3], [0.8, 0.2])
+		expectEqual(state.testRowRatios(home).count, 2)
 	},
 
-	TestCase("row ratios of a column whose windows all left are dropped") {
+	TestCase("the row ratios of the column that stays are kept when another column's windows all left") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1, 2], [3, 4]])
-		state.workspaces[home]!.rowRatios = [0: [0.6, 0.4], 1: [0.8, 0.2]]
+		state.testSetRowRatios(home, [0: [0.6, 0.4], 1: [0.8, 0.2]])
 		state.removeFromColumns(1)
 		state.removeFromColumns(2)
 		expectEqual(state.layoutColumns(home), [[3, 4]])
-		expectEqual(state.workspaces[home]?.rowRatios, [0: [0.8, 0.2]])
+		expectRatios(state.testRowRatios(home)[0], [0.8, 0.2])
+		expectEqual(state.testRowRatios(home).count, 1)
 	},
 
-	TestCase("an entry past the end stays when a column is inserted or removed") {
+	TestCase("row ratios stay with a column when the window of another column leaves the view") {
 		var state = testState()
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
-		state.testAddWindow(9, workspace: home)
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3], 5: [0.5, 0.5]]
-		state.insertReserved(9, kind: .newColumnLeft, columnIndex: 0, into: home)
-		expectEqual(state.workspaces[home]?.rowRatios, [2: [0.7, 0.3], 5: [0.5, 0.5]])
-		state.removeFromColumns(9)
-		expectEqual(state.workspaces[home]?.rowRatios, [1: [0.7, 0.3], 5: [0.5, 0.5]])
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
+		state.records[1]?.visibility = .appHidden
+		expectEqual(state.layoutColumns(home), [[2, 3]])
+		expectRatios(state.testRowRatios(home)[0], [0.7, 0.3])
+	},
+
+	TestCase("a single-window column left of a split column leaves and returns by slot memory with the split unchanged") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1], [2, 3]])
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
+		let memory = state.removeFromColumns(1)
+		expectEqual(state.layoutColumns(home), [[2, 3]])
+		expectRatios(state.testRowRatios(home)[0], [0.7, 0.3])
+		expect(memory != nil, "slot memory is kept")
+		if let memory {
+			expect(state.insertBySlotMemory(1, memory: memory, into: home))
+		}
+		expectEqual(state.layoutColumns(home), [[1], [2, 3]])
+		expectRatios(state.testRowRatios(home)[1], [0.7, 0.3])
+		expectEqual(state.testRowRatios(home).count, 1)
+	},
+
+	TestCase("a window of a three-row column leaves and returns by slot memory to its share") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1, 2, 3]])
+		state.testSetRowRatios(home, [0: [0.5, 0.3, 0.2]])
+		let memory = state.removeFromColumns(2)
+		expectEqual(state.layoutColumns(home), [[1, 3]])
+		expectRatios(state.testRowRatios(home)[0], [5.0 / 7.0, 2.0 / 7.0])
+		expect(memory != nil, "slot memory is kept")
+		if let memory {
+			expect(state.insertBySlotMemory(2, memory: memory, into: home))
+		}
+		expectEqual(state.layoutColumns(home), [[1, 2, 3]])
+		expectRatios(state.testRowRatios(home)[0], [0.5, 0.3, 0.2])
+	},
+
+	TestCase("a window joining a split column resets that column to an even split") {
+		var consumed = testState()
+		let home = consumed.testActive()
+		consumed.testSetColumns(home, [[1], [2, 3]])
+		consumed.testSetRowRatios(home, [1: [0.7, 0.3]])
+		expect(consumed.stepMove(1, .right))
+		expectEqual(consumed.layoutColumns(home), [[2, 3, 1]])
+		expectEqual(consumed.testRowRatios(home), [:])
+		for id in [1, 2, 3] as [WindowID] {
+			expectEqual(consumed.records[id]?.rowShare, nil, "share of #\(id) cleared")
+		}
+
+		for kind in [ReservationKind.aboveInColumn, .belowInColumn] {
+			var state = testState()
+			let ws = state.testActive()
+			state.testSetColumns(ws, [[1], [2, 3]])
+			state.testAddWindow(9, workspace: ws)
+			state.testSetRowRatios(ws, [1: [0.7, 0.3]])
+			state.insertReserved(9, kind: kind, columnIndex: 1, into: ws)
+			expectEqual(state.layoutColumns(ws).count, 2)
+			expectEqual(state.testRowRatios(ws), [:], "\(kind)")
+			for id in [2, 3, 9] as [WindowID] {
+				expectEqual(state.records[id]?.rowShare, nil, "\(kind): share of #\(id) cleared")
+			}
+		}
+	},
+
+	TestCase("a window expelled from a three-row column leaves the other two in proportion") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1, 2, 3], [4]])
+		state.testSetRowRatios(home, [0: [0.5, 0.3, 0.2]])
+		expect(state.stepMove(2, .right))
+		expectEqual(state.layoutColumns(home), [[1, 3], [2], [4]])
+		expectRatios(state.testRowRatios(home)[0], [5.0 / 7.0, 2.0 / 7.0])
+		expectEqual(state.testRowRatios(home).count, 1)
+	},
+
+	TestCase("resizing a row gap on a column without shares starts from an even split and gives every window a share") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1, 2, 3], [4]])
+		expect(state.resizeRowGap(in: home, column: 0, row: 0, delta: 50))
+		let ratios = state.testRowRatios(home)[0]
+		expectEqual(ratios?.count, 3)
+		if let ratios {
+			expect(ratios[0] > 1.0 / 3.0 && ratios[1] < 1.0 / 3.0, "boundary moved down")
+			expectEqual(ratios[2], 1.0 / 3.0, accuracy: 0.0001)
+		}
+		for id in [1, 2, 3] as [WindowID] {
+			expect(state.records[id]?.rowShare != nil, "share of #\(id) written")
+		}
+		expectEqual(state.records[4]?.rowShare, nil)
+
+		var refused = testState()
+		let ws = refused.testActive()
+		refused.testSetColumns(ws, [[1, 2]])
+		expect(!refused.resizeRowGap(in: ws, column: 0, row: 0, delta: 5000))
+		expect(!refused.resizeRowGap(in: ws, column: 0, row: 1, delta: 10))
+		expect(!refused.resizeRowGap(in: ws, column: 3, row: 0, delta: 10))
+		expectEqual(refused.records[1]?.rowShare, nil)
+		expectEqual(refused.records[2]?.rowShare, nil)
+	},
+
+	TestCase("retiring a window of a three-row column leaves the other two in proportion") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1, 2, 3]])
+		state.testSetRowRatios(home, [0: [0.5, 0.3, 0.2]])
+		state.retire(2, reason: .destroyed, now: 1)
+		expectEqual(state.layoutColumns(home), [[1, 3]])
+		expectRatios(state.testRowRatios(home)[0], [5.0 / 7.0, 2.0 / 7.0])
+	},
+
+	TestCase("a replacement window takes the row share of the window it replaces") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[10, 20, 40]])
+		state.testSetRowRatios(home, [0: [0.5, 0.3, 0.2]])
+		state.retire(10, reason: .destroyed, now: 10.0)
+		let app = AppFacts(pid: 100, bundleID: "com.test.app", name: "App")
+		let facts = WindowFacts(
+			id: 30, pid: 100, role: AXNames.windowRole, subrole: AXNames.standardWindowSubrole,
+			title: "W10", frame: CGRect(x: 100, y: 100, width: 700, height: 500))
+		state.admit(facts, app: app, source: .created, now: 11.0)
+		expectEqual(state.testColumns(home), [[30, 20, 40]])
+		expectEqual(state.records[30]?.rowShare, 0.5)
+		expectRatios(state.testRowRatios(home)[0], [0.5, 0.3, 0.2])
 	},
 
 	TestCase("frames follow the row ratios kept with their column") {
@@ -1612,7 +1760,7 @@ private let rowRatioFollowTests: [TestCase] = [
 		let home = state.testActive()
 		state.testSetColumns(home, [[1], [2, 3]])
 		state.testAddWindow(9, workspace: home)
-		state.workspaces[home]!.rowRatios = [1: [0.7, 0.3]]
+		state.testSetRowRatios(home, [1: [0.7, 0.3]])
 		state.insertReserved(9, kind: .newColumnLeft, columnIndex: 0, into: home)
 		let input = state.layoutInput(home)!
 		let result = ColumnLayout.frames(for: input, visibleFrame: CGRect(x: 0, y: 25, width: 1440, height: 875),
@@ -1621,6 +1769,17 @@ private let rowRatioFollowTests: [TestCase] = [
 		// 875 - 2 * 12 padding - 12 gap = 839 pt shared by the two rows.
 		expectEqual(upper.height, 839 * 0.7, accuracy: 0.001)
 		expectEqual(lower.height, 839 * 0.3, accuracy: 0.001)
-		expectEqual(result.rowRatios[2], [0.7, 0.3])
+		expectRatios(result.rowRatios[2], [0.7, 0.3])
+	},
+
+	TestCase("a window entering as a column of its own keeps its share") {
+		var state = testState()
+		let home = state.testActive()
+		state.testSetColumns(home, [[1], [2, 3]])
+		state.testAddWindow(9, workspace: home)
+		state.records[9]?.rowShare = 0.4
+		state.insertByMidX(9, midX: 1, into: home)
+		expectEqual(state.layoutColumns(home), [[9], [1], [2, 3]])
+		expectEqual(state.records[9]?.rowShare, 0.4, "it gained no neighbour")
 	},
 ]
